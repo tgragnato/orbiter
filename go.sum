@@ -36,8 +36,6 @@ github.com/shopspring/decimal v0.0.0-20180709203117-cd690d0c9e24/go.mod h1:M+9Nz
 github.com/shopspring/decimal v1.4.0 h1:bxl37RwXBklmTi0C79JfXCEBD1cqqHt0bbgBAGFp81k=
 github.com/shopspring/decimal v1.4.0/go.mod h1:gawqmDU56v4yIKSwfBSFip1HdCCXN8/+DMd9qYNcwME=
 github.com/sirupsen/logrus v1.8.1/go.mod h1:yWOB1SBYBC5VeMP7gHvWumXLIWorT60ONWic61uBYv0=
-github.com/sklinkert/circularbuffer v0.0.0-20210106170632-b66327ee381c h1:N4U18L3a5ToHdLUCUGqF45Hv7+qAvycxKDtItWpboek=
-github.com/sklinkert/circularbuffer v0.0.0-20210106170632-b66327ee381c/go.mod h1:ViwyI0G7sVfpkiTND6Fq5M7wi2hANNtm4n3XtdlSZlQ=
 github.com/sklinkert/igmarkets v0.0.0-20211012140330-96568d0347d0 h1:13QaFgLizDJfWJMtL4PbHNtYRhpJhpPZsE8P0KoAnZk=
 github.com/sklinkert/igmarkets v0.0.0-20211012140330-96568d0347d0/go.mod h1:AS/o0HoHb+qXqQfcGvsxPTB+mA2gPx5bDyOszepVnyM=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

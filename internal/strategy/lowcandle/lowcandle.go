@@ -3,15 +3,15 @@ package lowcandle
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/sklinkert/at/internal/broker"
 	"github.com/sklinkert/at/internal/strategy"
+	"github.com/sklinkert/at/pkg/circularbuffer"
 	"github.com/sklinkert/at/pkg/helper"
 	"github.com/sklinkert/at/pkg/indicator/sma"
 	"github.com/sklinkert/at/pkg/ohlc"
 	"github.com/sklinkert/at/pkg/tick"
-	"github.com/sklinkert/circularbuffer"
-	"time"
 )
 
 // Long: Buy if candle closes below the last 7 candles and is above SMA 200

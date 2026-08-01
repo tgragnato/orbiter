@@ -1,8 +1,8 @@
 package sma
 
 import (
+	"github.com/sklinkert/at/pkg/circularbuffer"
 	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/circularbuffer"
 )
 
 const Value = "SMA_VALUE"

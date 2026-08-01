@@ -3,15 +3,15 @@ package harami
 import (
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/sklinkert/at/internal/broker"
 	"github.com/sklinkert/at/internal/strategy"
+	"github.com/sklinkert/at/pkg/circularbuffer"
 	"github.com/sklinkert/at/pkg/helper"
 	"github.com/sklinkert/at/pkg/indicator/sma"
 	"github.com/sklinkert/at/pkg/ohlc"
 	"github.com/sklinkert/at/pkg/tick"
-	"github.com/sklinkert/circularbuffer"
-	"time"
 )
 
 // Buy if current closed candle is a bullish harami candle and market is still above SMA 200

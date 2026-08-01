@@ -14,7 +14,6 @@ require (
 	github.com/piquette/finance-go v1.1.0
 	github.com/preichenberger/go-coinbasepro/v2 v2.1.0
 	github.com/shopspring/decimal v1.4.0
-	github.com/sklinkert/circularbuffer v0.0.0-20210106170632-b66327ee381c
 	github.com/sklinkert/igmarkets v0.0.0-20211012140330-96568d0347d0
 )
 

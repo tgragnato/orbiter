@@ -1,8 +1,8 @@
 package volatility
 
 import (
+	"github.com/sklinkert/at/pkg/circularbuffer"
 	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/circularbuffer"
 )
 
 type Volatility struct {
