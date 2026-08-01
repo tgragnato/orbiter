@@ -1,6 +1,8 @@
 package trader
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,11 +11,12 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/sklinkert/at/internal/broker"
 	"github.com/sklinkert/at/pkg/helper"
-	"gorm.io/gorm"
 )
 
 type PerformanceRecord struct {
-	gorm.Model
+	ID                         uint
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
 	BacktestingID              string
 	StrategyName               string
 	Strategy                   string
@@ -47,7 +50,7 @@ type PerformanceRecord struct {
 	TotalExposureInPercent     float64
 	ChartHTML                  string
 	BacktestingConfigJSON      string
-	ClosedPositions            []broker.Position `gorm:"-"`
+	ClosedPositions            []broker.Position
 	TotalTimeInMarket          time.Duration
 	AVGTimeInMarket            time.Duration
 }
@@ -55,18 +58,70 @@ type PerformanceRecord struct {
 const pipsFactor = 10000.0
 
 func (tr *Trader) GetPerformanceRecords() ([]PerformanceRecord, error) {
+	if tr.db == nil {
+		return nil, errors.New("db is not configured")
+	}
+
 	var records []PerformanceRecord
-	if err := tr.gormDB.Model(&PerformanceRecord{}).Where("backtesting_id IS NOT NULL").Order("created_at DESC").Find(&records).Error; err != nil {
+	rows, err := tr.db.QueryContext(tr.ctx, `
+		SELECT id, created_at, updated_at, backtesting_id, strategy_name, strategy,
+		       instrument, candle_duration_ns, target_in_pips, stop_loss_in_pips,
+		       performance_trigger, total_performance_in_pips, avg_performance_in_pips,
+		       max_aggregate_drawdown_in_pips, max_loss_in_pips, max_loss_in_percent,
+		       max_win_in_percent, max_win_in_pips, trades_win_ration_in_percent,
+		       trades, trades_win, trades_loss, trades_loss_long, trades_loss_short,
+		       trades_long, trades_short, max_consecutive_trades_loss,
+		       max_concurrent_positions, git_rev, duration, first_trade, last_trade,
+		       avg_trade_duration_in_seconds, total_exposure_in_percent, chart_html,
+		       backtesting_config_json, total_time_in_market_ns, avg_time_in_market_ns
+		FROM performance_records
+		WHERE backtesting_id IS NOT NULL
+		ORDER BY created_at DESC`)
+	if err != nil {
 		return records, err
 	}
+	defer rows.Close()
+
+	for rows.Next() {
+		rec, err := scanPerformanceRecord(rows)
+		if err != nil {
+			return records, err
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return records, err
+	}
+
 	return records, nil
 }
 
 func (tr *Trader) GetPerformanceRecordByID(backtestingID string) (PerformanceRecord, error) {
+	if tr.db == nil {
+		return PerformanceRecord{}, errors.New("db is not configured")
+	}
+
 	var record PerformanceRecord
-	if err := tr.gormDB.Model(&PerformanceRecord{}).Where("backtesting_id = ?", backtestingID).First(&record).Error; err != nil {
+	row := tr.db.QueryRowContext(tr.ctx, `
+		SELECT id, created_at, updated_at, backtesting_id, strategy_name, strategy,
+		       instrument, candle_duration_ns, target_in_pips, stop_loss_in_pips,
+		       performance_trigger, total_performance_in_pips, avg_performance_in_pips,
+		       max_aggregate_drawdown_in_pips, max_loss_in_pips, max_loss_in_percent,
+		       max_win_in_percent, max_win_in_pips, trades_win_ration_in_percent,
+		       trades, trades_win, trades_loss, trades_loss_long, trades_loss_short,
+		       trades_long, trades_short, max_consecutive_trades_loss,
+		       max_concurrent_positions, git_rev, duration, first_trade, last_trade,
+		       avg_trade_duration_in_seconds, total_exposure_in_percent, chart_html,
+		       backtesting_config_json, total_time_in_market_ns, avg_time_in_market_ns
+		FROM performance_records
+		WHERE backtesting_id = $1
+		LIMIT 1`, backtestingID)
+
+	rec, err := scanPerformanceRecord(row)
+	if err != nil {
 		return record, err
 	}
+	record = rec
 	return record, nil
 }
 
@@ -293,20 +348,194 @@ func (tr *Trader) Summary() {
 }
 
 func (tr *Trader) SavePerformanceRecord(chartHTML string) error {
+	if tr.db == nil {
+		return errors.New("db is not configured")
+	}
+
 	performanceRecord, err := tr.GetPerformanceRecord(chartHTML)
 	if err != nil {
 		return err
 	}
 
-	if err := tr.gormDB.Create(&performanceRecord).Error; err != nil {
+	id, err := tr.insertPerformanceRecord(tr.ctx, performanceRecord)
+	if err != nil {
 		return fmt.Errorf("cannot save PerformanceRecord to DB: %w", err)
 	}
+	performanceRecord.ID = uint(id)
 
 	for _, pos := range performanceRecord.ClosedPositions {
 		pos.PerformanceRecordID = performanceRecord.ID
-		if err := tr.gormDB.Create(&pos).Error; err != nil {
+		if err := tr.insertPosition(tr.ctx, pos); err != nil {
 			slog.Error("Cannot save closed position to DB", "error", err)
 		}
 	}
 	return nil
 }
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanPerformanceRecord(row rowScanner) (PerformanceRecord, error) {
+	var rec PerformanceRecord
+	var candleDurationNS int64
+	var totalTimeInMarketNS int64
+	var avgTimeInMarketNS int64
+
+	err := row.Scan(
+		&rec.ID,
+		&rec.CreatedAt,
+		&rec.UpdatedAt,
+		&rec.BacktestingID,
+		&rec.StrategyName,
+		&rec.Strategy,
+		&rec.Instrument,
+		&candleDurationNS,
+		&rec.TargetInPips,
+		&rec.StopLossInPips,
+		&rec.PerformanceTrigger,
+		&rec.TotalPerformanceInPips,
+		&rec.AVGPerformanceInPips,
+		&rec.MaxAggregateDrawdownInPips,
+		&rec.MaxLossInPips,
+		&rec.MaxLossInPercent,
+		&rec.MaxWinInPercent,
+		&rec.MaxWinInPips,
+		&rec.TradesWinRationInPercent,
+		&rec.Trades,
+		&rec.TradesWin,
+		&rec.TradesLoss,
+		&rec.TradesLossLong,
+		&rec.TradesLossShort,
+		&rec.TradesLong,
+		&rec.TradesShort,
+		&rec.MaxConsecutiveTradesLoss,
+		&rec.MaxConcurrentPositions,
+		&rec.GitRev,
+		&rec.Duration,
+		&rec.FirstTrade,
+		&rec.LastTrade,
+		&rec.AVGTradeDurationInSeconds,
+		&rec.TotalExposureInPercent,
+		&rec.ChartHTML,
+		&rec.BacktestingConfigJSON,
+		&totalTimeInMarketNS,
+		&avgTimeInMarketNS,
+	)
+	if err != nil {
+		return PerformanceRecord{}, err
+	}
+
+	rec.CandleDuration = time.Duration(candleDurationNS)
+	rec.TotalTimeInMarket = time.Duration(totalTimeInMarketNS)
+	rec.AVGTimeInMarket = time.Duration(avgTimeInMarketNS)
+
+	return rec, nil
+}
+
+func (tr *Trader) insertPerformanceRecord(ctx context.Context, rec *PerformanceRecord) (uint64, error) {
+	var id int64
+	err := tr.db.QueryRowContext(ctx, `
+		INSERT INTO performance_records (
+			backtesting_id, strategy_name, strategy, instrument, candle_duration_ns,
+			target_in_pips, stop_loss_in_pips, performance_trigger, total_performance_in_pips,
+			avg_performance_in_pips, max_aggregate_drawdown_in_pips, max_loss_in_pips,
+			max_loss_in_percent, max_win_in_percent, max_win_in_pips,
+			trades_win_ration_in_percent, trades, trades_win, trades_loss, trades_loss_long,
+			trades_loss_short, trades_long, trades_short, max_consecutive_trades_loss,
+			max_concurrent_positions, git_rev, duration, first_trade, last_trade,
+			avg_trade_duration_in_seconds, total_exposure_in_percent, chart_html,
+			backtesting_config_json, total_time_in_market_ns, avg_time_in_market_ns
+		) VALUES (
+			$1,$2,$3,$4,$5,
+			$6,$7,$8,$9,
+			$10,$11,$12,
+			$13,$14,$15,
+			$16,$17,$18,$19,$20,
+			$21,$22,$23,$24,
+			$25,$26,$27,$28,$29,
+			$30,$31,$32,
+			$33,$34,$35
+		)
+		RETURNING id`,
+		rec.BacktestingID,
+		rec.StrategyName,
+		rec.Strategy,
+		rec.Instrument,
+		int64(rec.CandleDuration),
+		rec.TargetInPips,
+		rec.StopLossInPips,
+		rec.PerformanceTrigger,
+		rec.TotalPerformanceInPips,
+		rec.AVGPerformanceInPips,
+		rec.MaxAggregateDrawdownInPips,
+		rec.MaxLossInPips,
+		rec.MaxLossInPercent,
+		rec.MaxWinInPercent,
+		rec.MaxWinInPips,
+		rec.TradesWinRationInPercent,
+		rec.Trades,
+		rec.TradesWin,
+		rec.TradesLoss,
+		rec.TradesLossLong,
+		rec.TradesLossShort,
+		rec.TradesLong,
+		rec.TradesShort,
+		rec.MaxConsecutiveTradesLoss,
+		rec.MaxConcurrentPositions,
+		rec.GitRev,
+		rec.Duration,
+		rec.FirstTrade,
+		rec.LastTrade,
+		rec.AVGTradeDurationInSeconds,
+		rec.TotalExposureInPercent,
+		rec.ChartHTML,
+		rec.BacktestingConfigJSON,
+		int64(rec.TotalTimeInMarket),
+		int64(rec.AVGTimeInMarket),
+	).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(id), nil
+}
+
+func (tr *Trader) insertPosition(ctx context.Context, pos broker.Position) error {
+	_, err := tr.db.ExecContext(ctx, `
+		INSERT INTO positions (
+			performance_record_id, reference, instrument, buy_price, buy_time, buy_direction,
+			sell_price, sell_time, target_price, stop_loss_price, size, ohlc_age_on_buy_ns,
+			candle_buy_time, candle_sell_time, max_surge, max_drawdown,
+			today_performance_in_percent, gap_to_sma
+		) VALUES (
+			$1,$2,$3,$4,$5,$6,
+			$7,$8,$9,$10,$11,$12,
+			$13,$14,$15,$16,
+			$17,$18
+		)`,
+		pos.PerformanceRecordID,
+		pos.Reference,
+		pos.Instrument,
+		pos.BuyPrice.String(),
+		pos.BuyTime,
+		int(pos.BuyDirection),
+		pos.SellPrice.String(),
+		pos.SellTime,
+		pos.TargetPrice.String(),
+		pos.StopLossPrice.String(),
+		pos.Size,
+		int64(pos.OHLCAgeOnBuy),
+		pos.CandleBuyTime,
+		pos.CandleSellTime,
+		pos.MaxSurge,
+		pos.MaxDrawdown,
+		pos.TodayPerformanceInPercent.String(),
+		pos.GapToSMA.String(),
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+var _ rowScanner = (*sql.Row)(nil)

@@ -2,27 +2,28 @@ package backtest
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"time"
 
+	_ "github.com/jackc/pgx/v5"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/piquette/finance-go/chart"
 	"github.com/piquette/finance-go/datetime"
 	"github.com/shopspring/decimal"
 	"github.com/sklinkert/at/pkg/ohlc"
 	"github.com/sklinkert/at/pkg/tick"
 	"github.com/sklinkert/igmarkets"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 type QuotesSource int
 
 const (
-	QuotesSourceSqlite = iota + 1
-	QuotesSourceYahooFinance
-	QuotesSourceIGMarkets
-	QuotesSourceCoinbase
+	QuotesSourcePostgres     QuotesSource = 1
+	QuotesSourceYahooFinance QuotesSource = 2
+	QuotesSourceIGMarkets    QuotesSource = 3
+	QuotesSourceCoinbase     QuotesSource = 4
 )
 
 func (b *Backtest) retrieveCandlesFromIGMarkets(receiver chan ohlc.OHLC) {
@@ -102,30 +103,51 @@ func (b *Backtest) retrieveCandlesFromYahooFinance(receiver chan ohlc.OHLC) {
 	}
 }
 
-func (b *Backtest) retrieveCandlesFromSQLite(receiver chan ohlc.OHLC) {
+func (b *Backtest) retrieveCandlesFromPostgres(receiver chan ohlc.OHLC) {
 	defer close(receiver)
 
-	db, err := gorm.Open(sqlite.Open(b.priceDBFile), &gorm.Config{})
+	ctx := context.Background()
+	db, err := sql.Open("pgx", b.priceDBDSN)
 	if err != nil {
-		panic(fmt.Sprintf("failed to connect database %q: %v", b.priceDBFile, err))
+		panic(fmt.Sprintf("failed to connect postgres %q: %v", b.priceDBDSN, err))
 	}
+	defer db.Close()
 
-	// Speed up read performance
-	db.Exec("PRAGMA locking_mode = EXCLUSIVE;")
+	if err := db.PingContext(ctx); err != nil {
+		panic(fmt.Sprintf("failed to ping postgres %q: %v", b.priceDBDSN, err))
+	}
 
 	const pageSize = 80000
 	var offset int
 	for {
-		var candles []ohlc.OHLC
-		if err := db.
-			Offset(offset).
-			Limit(pageSize).
-			Order("start").
-			Where("duration = ? AND start BETWEEN ? AND ?", b.priceDBCandleDuration, b.periodFrom, b.periodTo).
-			Find(&candles).Error; err != nil {
-			slog.Error("db.Find(&candles) failed", "error", err)
+		rows, err := db.QueryContext(ctx, `
+			SELECT instrument, open, high, high_time, low, low_time, close, start, end_time, duration_ns, gaps
+			FROM ohlcs
+			WHERE duration_ns = $1 AND start BETWEEN $2 AND $3
+			ORDER BY start
+			LIMIT $4 OFFSET $5`,
+			int64(b.priceDBCandleDuration), b.periodFrom, b.periodTo, pageSize, offset)
+		if err != nil {
+			slog.Error("fetching candles failed", "error", err)
 			return
 		}
+
+		var candles []ohlc.OHLC
+		for rows.Next() {
+			candle, err := scanOHLCRow(rows)
+			if err != nil {
+				rows.Close()
+				slog.Error("scanning candle failed", "error", err)
+				return
+			}
+			candles = append(candles, candle)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			slog.Error("iterating candles failed", "error", err)
+			return
+		}
+
 		if len(candles) == 0 {
 			slog.Info("No more candles fetched")
 			return
@@ -141,8 +163,8 @@ func (b *Backtest) ListenToPriceFeed(traderChan chan tick.Tick) {
 	var c = make(chan ohlc.OHLC)
 
 	switch b.quotesSource {
-	case QuotesSourceSqlite:
-		go b.retrieveCandlesFromSQLite(c)
+	case QuotesSourcePostgres:
+		go b.retrieveCandlesFromPostgres(c)
 	case QuotesSourceYahooFinance:
 		go b.retrieveCandlesFromYahooFinance(c)
 	case QuotesSourceIGMarkets:
@@ -162,4 +184,43 @@ func (b *Backtest) ListenToPriceFeed(traderChan chan tick.Tick) {
 	b.paperwallet.CloseAllOpenPositions()
 	b.writeCSV()
 	b.paperwallet.PrintSummary()
+}
+
+func scanOHLCRow(row interface{ Scan(dest ...any) error }) (ohlc.OHLC, error) {
+	var candle ohlc.OHLC
+	var openStr, highStr, lowStr, closeStr string
+	var durationNS int64
+
+	err := row.Scan(
+		&candle.Instrument,
+		&openStr,
+		&highStr,
+		&candle.HighTime,
+		&lowStr,
+		&candle.LowTime,
+		&closeStr,
+		&candle.Start,
+		&candle.End,
+		&durationNS,
+		&candle.Gaps,
+	)
+	if err != nil {
+		return ohlc.OHLC{}, err
+	}
+
+	if candle.Open, err = decimal.NewFromString(openStr); err != nil {
+		return ohlc.OHLC{}, err
+	}
+	if candle.High, err = decimal.NewFromString(highStr); err != nil {
+		return ohlc.OHLC{}, err
+	}
+	if candle.Low, err = decimal.NewFromString(lowStr); err != nil {
+		return ohlc.OHLC{}, err
+	}
+	if candle.Close, err = decimal.NewFromString(closeStr); err != nil {
+		return ohlc.OHLC{}, err
+	}
+	candle.Duration = time.Duration(durationNS)
+
+	return candle, nil
 }

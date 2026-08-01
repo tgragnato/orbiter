@@ -2,18 +2,18 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
+	_ "github.com/jackc/pgx/v5"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/sklinkert/at/internal/broker/coinbase"
 	"github.com/sklinkert/at/internal/paperwallet"
 	"github.com/sklinkert/at/internal/strategy/rsiadx"
 	"github.com/sklinkert/at/internal/trader"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 // Example setup for Coinbase broker
@@ -23,13 +23,17 @@ func fatal(msg string, err error) {
 	os.Exit(1)
 }
 
-func mustConnectDB() *gorm.DB {
-	db, err := gorm.Open(sqlite.Open("at-demo.db"), &gorm.Config{})
+func mustConnectDB(ctx context.Context) *sql.DB {
+	dsn := os.Getenv("DB_DSN")
+	if dsn == "" {
+		dsn = "postgres://postgres:postgres@localhost:5432/at?sslmode=disable"
+	}
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		fatal("failed to connect database", err)
 	}
-	if err := db.AutoMigrate(&tick.Tick{}, &ohlc.OHLC{}, &trader.PerformanceRecord{}); err != nil {
-		fatal("db.AutoMigrate() failed", err)
+	if err := db.PingContext(ctx); err != nil {
+		fatal(fmt.Sprintf("failed to ping database with DSN %q", dsn), err)
 	}
 	return db
 }
@@ -43,7 +47,8 @@ func main() {
 	wallet := paperwallet.New()
 	brokerBackend := coinbase.New(instrument, wallet)
 
-	db := mustConnectDB()
+	db := mustConnectDB(ctx)
+	defer db.Close()
 
 	tr := trader.New(ctx, instrument, "", db,
 		trader.WithBroker(brokerBackend),

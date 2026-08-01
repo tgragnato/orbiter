@@ -27,14 +27,15 @@ A Go framework for building, backtesting, and running automated trading strategi
 Runs a full backtest with **no external data source or account** — a small sample EUR/USD dataset ships in `examples/sample-data/`.
 
 ```sh
-# 1. Import the sample tick data into a local SQLite DB (creates ./data/EURUSD.db)
+# 1. Import the sample tick data into PostgreSQL
 IMPORT_HISTDATA_CSV_FILES="examples/sample-data/EURUSD-2021-01.csv" \
 INSTRUMENT="EURUSD" \
+DB_DSN="postgres://postgres:postgres@localhost:5432/at?sslmode=disable" \
   go run ./cmd/import-histdata
 
 # 2. Backtest the RSI strategy against it
 PRICE_SOURCE="LOCAL_DB" \
-PRICE_DB_FILE="./data/EURUSD.db" \
+PRICE_DB_DSN="postgres://postgres:postgres@localhost:5432/at?sslmode=disable" \
 INSTRUMENT="EURUSD" \
 STRATEGY="rsi" \
 CANDLE_DURATION="1m" \
@@ -84,7 +85,7 @@ It can also render an equity curve:
 
 ![Equity curve](docs/backtest-equity-curve.png)
 
-Price data comes from a local SQLite database. Import your own [histdata.com](https://www.histdata.com/) CSV files with [`cmd/import-histdata`](cmd/import-histdata) — the same tool used in the quick start.
+Price data comes from PostgreSQL. Import your own [histdata.com](https://www.histdata.com/) CSV files with [`cmd/import-histdata`](cmd/import-histdata) — the same tool used in the quick start.
 
 ## Contributing
 

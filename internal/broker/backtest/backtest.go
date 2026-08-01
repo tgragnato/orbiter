@@ -1,11 +1,12 @@
 package backtest
 
 import (
+	"sync"
+	"time"
+
 	"github.com/sklinkert/at/internal/broker"
 	"github.com/sklinkert/at/internal/paperwallet"
 	"github.com/sklinkert/igmarkets"
-	"sync"
-	"time"
 )
 
 // Backtest contains all required data for running a backtesting.
@@ -18,8 +19,8 @@ type Backtest struct {
 	candlePeriod    time.Duration
 	paperwallet     *paperwallet.Paperwallet
 
-	// Price data sqlite file
-	priceDBFile           string
+	// Price data PostgreSQL DSN
+	priceDBDSN            string
 	priceDBCandleDuration time.Duration
 
 	// Read raw data from CSV files
@@ -29,9 +30,9 @@ type Backtest struct {
 
 type Option func(backtest *Backtest)
 
-func WithPriceDBFile(dbFile string, candleDuration time.Duration) Option {
+func WithPriceDBDSN(dsn string, candleDuration time.Duration) Option {
 	return func(backtest *Backtest) {
-		backtest.priceDBFile = dbFile
+		backtest.priceDBDSN = dsn
 		backtest.priceDBCandleDuration = candleDuration
 	}
 }

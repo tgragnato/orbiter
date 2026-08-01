@@ -3,19 +3,20 @@ package tick
 import (
 	"errors"
 	"fmt"
-	"github.com/shopspring/decimal"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 type Tick struct {
 	// ID is for keeping the order from reading CSV file in DB because the timestamp is not precise enough.
 	// We have to deal with multiple ticks at the same time.
-	ID         uint            `gorm:"primaryKey"`
-	Datetime   time.Time       `gorm:"index"`
-	Instrument string          `gorm:"index"`
-	Bid        decimal.Decimal `gorm:"type:decimal(13,6);"`
-	Ask        decimal.Decimal `gorm:"type:decimal(13,6);"`
-	price      decimal.Decimal `gorm:"-"`
+	ID         uint
+	Datetime   time.Time
+	Instrument string
+	Bid        decimal.Decimal
+	Ask        decimal.Decimal
+	price      decimal.Decimal
 }
 
 // var maxSpread = decimal.NewFromFloat(0.00025) // 2.5 pips

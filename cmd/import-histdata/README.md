@@ -34,13 +34,13 @@ find ./data/ -name 'HISTDATA*zip' -exec unzip {} \;
 ```
 
 ### Import 
-Now run the importer which generates 1min candles and stores them to local sqlite DB:
+Now run the importer which generates 1min candles and stores them to PostgreSQL:
 
 ```shell
-INSTRUMENT="SPXUSD" IMPORT_HISTDATA_CSV_FILES=`ls *.csv | tr "\n" ","` go run cmd/import-histdata/main.go
+DB_DSN="postgres://postgres:postgres@localhost:5432/at?sslmode=disable" INSTRUMENT="SPXUSD" IMPORT_HISTDATA_CSV_FILES=`ls *.csv | tr "\n" ","` go run cmd/import-histdata/main.go
 ```
 
-Then you can run the backtesting tool to use the data with the `.db` file in `./data`.
+Then you can run the backtesting tool using the same PostgreSQL DSN.
 
 ## TODOs
 

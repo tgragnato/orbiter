@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
+	_ "github.com/jackc/pgx/v5"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/lfritz/env"
 	"github.com/shopspring/decimal"
 	"github.com/sklinkert/at/internal/broker/backtest"
@@ -24,8 +28,6 @@ import (
 	"github.com/sklinkert/at/internal/trader"
 	chart "github.com/sklinkert/at/pkg/chart"
 	"github.com/sklinkert/at/pkg/chart/amcharts"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 func fatal(msg string, err error) {
@@ -46,7 +48,7 @@ var conf struct {
 	dbName                 string
 	dbPort                 int
 	strategyName           string
-	priceDBFile            string
+	priceDBDSN             string
 	priceSource            string
 	yearFrom               int
 	yearTo                 int
@@ -74,7 +76,7 @@ func main() {
 	e.Flag("PERFORMANCE_DATA", &conf.gatherPerformanceData, "Gather performance data and print as CSV")
 	e.OptionalList("IMPORT_HISTDATA_CSV_FILES", &conf.importHistDataCSVFiles, ",", []string{}, "Import CSV files from histdata.com")
 	e.OptionalString("PRICE_SOURCE", &conf.priceSource, "LOCAL_DB", "Price source for backtesting. E.g. 'PATTERN_TRADING'")
-	e.OptionalString("PRICE_DB_FILE", &conf.priceDBFile, "/data/EURUSD/db", "SQLite DB file for price data (OHLCs)")
+	e.OptionalString("PRICE_DB_DSN", &conf.priceDBDSN, "postgres://postgres:postgres@localhost:5432/at?sslmode=disable", "PostgreSQL DSN for historical OHLC price data")
 	e.OptionalString("INSTRUMENT", &conf.instrument, "CS.D.EURUSD.MINI.IP", "instrument to trade")
 	e.OptionalString("BROKER", &conf.broker, BrokerBacktest, "Broker backend")
 	e.OptionalString("STRATEGY", &conf.strategyName, strategy.NameRSI, "strategy to be executed")
@@ -91,10 +93,18 @@ func main() {
 		lvl.Set(slog.LevelDebug)
 	}
 
-	db, err := gorm.Open(sqlite.Open("backtesting.db"), &gorm.Config{})
-	if err != nil {
-		fatal("failed to open database file", err)
+	dsn := os.Getenv("DB_DSN")
+	if dsn == "" {
+		dsn = conf.priceDBDSN
 	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		fatal("failed to open database", err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		fatal(fmt.Sprintf("failed to ping database with DSN %q", dsn), err)
+	}
+	defer db.Close()
 	candleDuration, err := time.ParseDuration(conf.candleDuration)
 	if err != nil {
 		fatal("cannot parse candle duration", err)
@@ -130,7 +140,7 @@ func main() {
 	slog.Info("Starting broker " + conf.broker)
 	var dataFeed backtest.Option
 	if len(conf.importHistDataCSVFiles) == 0 {
-		dataFeed = backtest.WithPriceDBFile(conf.priceDBFile, time.Minute)
+		dataFeed = backtest.WithPriceDBDSN(conf.priceDBDSN, time.Minute)
 	} else {
 		dataFeed = backtest.WithTickDataFiles(conf.importHistDataCSVFiles)
 	}
@@ -143,7 +153,7 @@ func main() {
 	case "COINBASE":
 		priceDBOption = backtest.WithQuotesSource(backtest.QuotesSourceCoinbase)
 	default:
-		priceDBOption = backtest.WithQuotesSource(backtest.QuotesSourceSqlite)
+		priceDBOption = backtest.WithQuotesSource(backtest.QuotesSourcePostgres)
 	}
 
 	initialBalance := decimal.NewFromFloat(1000)

@@ -1,6 +1,8 @@
 package ohlc
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -8,7 +10,6 @@ import (
 	"github.com/jinzhu/copier"
 	"github.com/shopspring/decimal"
 	"github.com/sklinkert/at/pkg/tick"
-	"gorm.io/gorm"
 )
 
 const maxGapBetweenTicksInSeconds = 60
@@ -16,15 +17,15 @@ const maxGapBetweenTicksInSeconds = 60
 // OHLC represents a full candle
 type OHLC struct {
 	Instrument        string
-	Open              decimal.Decimal `gorm:"type:decimal(13,6);"`
-	High              decimal.Decimal `gorm:"type:decimal(13,6);"`
+	Open              decimal.Decimal
+	High              decimal.Decimal
 	HighTime          time.Time
-	Low               decimal.Decimal `gorm:"type:decimal(13,6);"`
+	Low               decimal.Decimal
 	LowTime           time.Time
-	Close             decimal.Decimal `gorm:"type:decimal(13,6);"`
-	Start             time.Time       `gorm:"index"`
+	Close             decimal.Decimal
+	Start             time.Time
 	End               time.Time
-	Duration          time.Duration `gorm:"index"`
+	Duration          time.Duration
 	Gaps              bool
 	priceDataSeen     bool
 	closed            bool
@@ -177,11 +178,28 @@ func (o *OHLC) Age(now time.Time) time.Duration {
 	return now.Sub(o.Start)
 }
 
-func (o *OHLC) Store(gormDB *gorm.DB) error {
+func (o *OHLC) Store(ctx context.Context, db *sql.DB) error {
 	var oc = *o
 	oc.Start = oc.Start.In(time.UTC)
 	oc.End = oc.End.In(time.UTC)
-	if err := gormDB.Create(oc).Error; err != nil {
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO ohlcs (
+			instrument, open, high, high_time, low, low_time, close, start, end_time, duration_ns, gaps
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+	`,
+		oc.Instrument,
+		oc.Open.String(),
+		oc.High.String(),
+		oc.HighTime,
+		oc.Low.String(),
+		oc.LowTime,
+		oc.Close.String(),
+		oc.Start,
+		oc.End,
+		int64(oc.Duration),
+		oc.Gaps,
+	)
+	if err != nil {
 		return err
 	}
 	return nil

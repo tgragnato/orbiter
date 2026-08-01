@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
+	_ "github.com/jackc/pgx/v5"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/lfritz/env"
 	"github.com/sklinkert/at/internal/broker/ig"
 	"github.com/sklinkert/at/internal/strategy"
@@ -18,12 +21,7 @@ import (
 	"github.com/sklinkert/at/internal/strategy/scalper"
 	"github.com/sklinkert/at/internal/strategy/stochrsi"
 	"github.com/sklinkert/at/internal/trader"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
 	"github.com/sklinkert/igmarkets"
-	"gorm.io/driver/postgres"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
 func fatal(msg string, err error) {
@@ -48,7 +46,6 @@ var conf struct {
 	dbName                 string
 	dbPort                 int
 	strategyName           string
-	priceDBFile            string
 	yearFrom               int
 	yearTo                 int
 	candleDuration         string
@@ -60,21 +57,15 @@ var conf struct {
 	currencyCode           string
 }
 
-func mustConnectDB() *gorm.DB {
-	var err error
-	var db *gorm.DB
-	if conf.dbHost == "sqlite" {
-		db, err = gorm.Open(sqlite.Open("at-demo.db"), &gorm.Config{})
-	} else {
-		dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=require",
-			conf.dbHost, conf.dbUser, conf.dbPassword, conf.dbName, conf.dbPort)
-		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	}
+func mustConnectDB(ctx context.Context) *sql.DB {
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%d sslmode=require",
+		conf.dbHost, conf.dbUser, conf.dbPassword, conf.dbName, conf.dbPort)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		fatal("failed to connect database", err)
 	}
-	if err := db.AutoMigrate(&tick.Tick{}, &ohlc.OHLC{}, &trader.PerformanceRecord{}); err != nil {
-		fatal("db.AutoMigrate() failed", err)
+	if err := db.PingContext(ctx); err != nil {
+		fatal("failed to ping database", err)
 	}
 	return db
 }
@@ -90,7 +81,6 @@ func main() {
 	e.Flag("DEBUG", &conf.debug, "Enable debug logging")
 	e.Flag("PERFORMANCE_DATA", &conf.gatherPerformanceData, "Gather performance data and print as CSV")
 	e.OptionalList("IMPORT_HISTDATA_CSV_FILES", &conf.importHistDataCSVFiles, ",", []string{}, "Import CSV files from histdata.com")
-	e.OptionalString("PRICE_DB_FILE", &conf.priceDBFile, "/data/EURUSD/db", "SQLite DB file for price data (OHLCs)")
 	e.OptionalString("INSTRUMENT", &conf.instrument, "CS.D.EURUSD.MINI.IP", "instrument to trade")
 	e.OptionalString("CURRENCY_CODE", &conf.currencyCode, "EUR", "Currency code")
 	e.OptionalString("BROKER", &conf.broker, "none", "Broker backend")
@@ -153,7 +143,8 @@ func main() {
 		fatal("ig.New() failed", err)
 	}
 
-	db := mustConnectDB()
+	db := mustConnectDB(ctx)
+	defer db.Close()
 
 	tr := trader.New(ctx, conf.instrument, GitRev, db,
 		trader.WithBroker(brokerBackend),

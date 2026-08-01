@@ -2,6 +2,7 @@ package trader
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,7 +15,6 @@ import (
 	"github.com/sklinkert/at/internal/strategy"
 	"github.com/sklinkert/at/pkg/ohlc"
 	"github.com/sklinkert/at/pkg/tick"
-	"gorm.io/gorm"
 )
 
 type Trader struct {
@@ -32,7 +32,7 @@ type Trader struct {
 	maxConcurrentPositions      int
 	MaxAggregatedDrawdownInPips decimal.Decimal
 	reversedPerformanceInPips   map[ohlc.OHLC]float64
-	gormDB                      *gorm.DB
+	db                          *sql.DB
 	positionBuyTime             map[string]time.Time
 	openCandles                 []*ohlc.OHLC // strategy's candle + today's candle
 	closedCandles               []*ohlc.OHLC
@@ -121,11 +121,11 @@ func WithFeedStoredCandles(strategy strategy.Strategy) Option {
 
 		slog.Info(fmt.Sprintf("Searching for warmup candles with period %s", candlePeriod))
 
-		var candles ohlc.OHLCList
-		if err := trader.gormDB.Limit(limit).Order("\"end\" DESC").Where("instrument = ? AND duration = ?", trader.Instrument, candlePeriod).Find(&candles).Error; err != nil {
+		candles, err := trader.loadWarmUpCandles(trader.ctx, trader.Instrument, candlePeriod, limit)
+		if err != nil {
 			panic(fmt.Sprintf("fetching stored candles failed: %v", err))
 		}
-		sort.Sort(candles)
+		sort.Sort(ohlc.OHLCList(candles))
 
 		slog.Info(fmt.Sprintf("WithFeedStoredCandles: Sending %d candles to strategy for warming up", len(candles)))
 		for _, candle := range candles {
@@ -135,7 +135,7 @@ func WithFeedStoredCandles(strategy strategy.Strategy) Option {
 	}
 }
 
-func New(ctx context.Context, instrument, gitRev string, db *gorm.DB, options ...Option) *Trader {
+func New(ctx context.Context, instrument, gitRev string, db *sql.DB, options ...Option) *Trader {
 	var clog = slog.With(
 		"INSTRUMENT", instrument,
 		"GIT_REV", gitRev,
@@ -150,7 +150,7 @@ func New(ctx context.Context, instrument, gitRev string, db *gorm.DB, options ..
 		positionBuyTime:           make(map[string]time.Time),
 		closedPositionReferences:  make(map[string]bool),
 		gitRev:                    gitRev,
-		gormDB:                    db,
+		db:                        db,
 		currencyCode:              "USD", // default
 	}
 
@@ -158,13 +158,13 @@ func New(ctx context.Context, instrument, gitRev string, db *gorm.DB, options ..
 		option(tr)
 	}
 
-	if tr.gormDB == nil {
+	if tr.db == nil {
 		if tr.persistTickData || tr.persistCandleData {
 			panic("Persistence of ticks or/and candles requested but no DB given!")
 		}
 	} else {
-		if err := tr.gormDB.AutoMigrate(&ohlc.OHLC{}, &PerformanceRecord{}, &tick.Tick{}, &broker.Position{}); err != nil {
-			panic(fmt.Sprintf("db.AutoMigrate() failed: %v", err))
+		if err := tr.ensureSchema(ctx); err != nil {
+			panic(fmt.Sprintf("db schema initialization failed: %v", err))
 		}
 	}
 
@@ -239,7 +239,7 @@ func (tr *Trader) getOpenPositions() ([]broker.Position, error) {
 }
 
 func (tr *Trader) persistTick(t tick.Tick) {
-	if err := tr.gormDB.Create(&t).Error; err != nil {
+	if err := tr.insertTick(tr.ctx, t); err != nil {
 		slog.Error(fmt.Sprintf("Cannot persist tick: %+v", t), "error", err)
 	}
 }
@@ -421,9 +421,9 @@ func (tr *Trader) closeCandle(tick tick.Tick, candle *ohlc.OHLC) (newCandle *ohl
 		tr.closedCandles = tr.closedCandles[len(tr.closedCandles)-candlesToKeep:]
 	}
 
-	if tr.gormDB != nil && tr.persistCandleData {
+	if tr.db != nil && tr.persistCandleData {
 		go func() {
-			if err := candle.Store(tr.gormDB); err != nil {
+			if err := candle.Store(tr.ctx, tr.db); err != nil {
 				tr.clog.Error(fmt.Sprintf("Failed to store OHLC: %+v", candle), "error", err)
 			}
 		}()
