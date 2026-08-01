@@ -23,7 +23,6 @@ github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo
 github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
 github.com/jinzhu/copier v0.4.0 h1:w3ciUoD19shMCRargcpm0cm91ytaBhDvuRpz1ODO/U8=
 github.com/jinzhu/copier v0.4.0/go.mod h1:DfbEm0FYsaqBcKcFuvmOZb218JkPGtvSHsKg8S8hyyg=
-github.com/lfritz/env v1.0.0 h1:pC9f+uWck4B/Qy58VR/A8Uky/Ao0+r04S2bJ2PXgmpM=
 github.com/lfritz/env v1.0.0/go.mod h1:/JdxpfISd4xqXGkZjPjRBuF8s2YVFjd2zko6xt9iF2w=
 github.com/markcheno/go-talib v0.0.0-20260617004048-4ff5e103edd9 h1:TAdcW2EF2OaAl6/MXh1xi1NFyvUv/kdvXS1utdcE7Sc=
 github.com/markcheno/go-talib v0.0.0-20260617004048-4ff5e103edd9/go.mod h1:3YUtoVrKWu2ql+iAeRyepSz3fy6a+19hJzGS88+u4u0=

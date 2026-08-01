@@ -28,24 +28,24 @@ Runs a full backtest with **no external data source or account** — a small sam
 
 ```sh
 # 1. Import the sample tick data into PostgreSQL
-IMPORT_HISTDATA_CSV_FILES="examples/sample-data/EURUSD-2021-01.csv" \
-INSTRUMENT="EURUSD" \
-DB_DSN="postgres://postgres:postgres@localhost:5432/at?sslmode=disable" \
-  go run ./cmd/import-histdata
+go run . import-histdata \
+  --import-histdata-csv-files examples/sample-data/EURUSD-2021-01.csv \
+  --instrument EURUSD \
+  --db-dsn postgres://postgres:postgres@localhost:5432/at?sslmode=disable
 
 # 2. Backtest the RSI strategy against it
-PRICE_SOURCE="LOCAL_DB" \
-PRICE_DB_DSN="postgres://postgres:postgres@localhost:5432/at?sslmode=disable" \
-INSTRUMENT="EURUSD" \
-STRATEGY="rsi" \
-CANDLE_DURATION="1m" \
-YEAR_FROM=2021 MONTH_FROM=1 YEAR_TO=2021 MONTH_TO=1 \
-  go run ./cmd/backtesting
+go run . backtesting \
+  --price-source LOCAL_DB \
+  --price-db-dsn postgres://postgres:postgres@localhost:5432/at?sslmode=disable \
+  --instrument EURUSD \
+  --strategy rsi \
+  --candle-duration 1m \
+  --year-from 2021 --month-from 1 --year-to 2021 --month-to 1
 ```
 
 The backtest prints a trade-by-trade log and a summary (positions, win rate, performance in pips), writes `results/backtesting_result.csv`, and serves an interactive chart at `http://localhost:8080/chart`.
 
-See [`.env.example`](.env.example) for every configuration variable and its default.
+Run `go run . <command> --help` to inspect the available flags for each subcommand.
 
 ## Supported brokers
 
@@ -85,24 +85,24 @@ It can also render an equity curve:
 
 ![Equity curve](docs/backtest-equity-curve.png)
 
-Price data comes from PostgreSQL. Import your own [histdata.com](https://www.histdata.com/) CSV files with [`cmd/import-histdata`](cmd/import-histdata) — the same tool used in the quick start.
+Price data comes from PostgreSQL. Import your own [histdata.com](https://www.histdata.com/) CSV files with `go run . import-histdata` — the same tool used in the quick start.
 
 ### Importing HistData CSV Files
 
-Use [`cmd/import-histdata`](cmd/import-histdata) to convert tick CSV files into 1-minute OHLC candles and store them in PostgreSQL.
+Use `go run . import-histdata` to convert tick CSV files into 1-minute OHLC candles and store them in PostgreSQL.
 
 1. Download CSV files from histdata.com (forex, gold, SP500 are available).
 2. Unzip the downloaded archives.
 3. Import CSV files with the tool:
 
 ```sh
-DB_DSN="postgres://postgres:postgres@localhost:5432/at?sslmode=disable" \
-INSTRUMENT="SPXUSD" \
-IMPORT_HISTDATA_CSV_FILES="./data/file1.csv,./data/file2.csv" \
-  go run ./cmd/import-histdata
+go run . import-histdata \
+  --db-dsn postgres://postgres:postgres@localhost:5432/at?sslmode=disable \
+  --instrument SPXUSD \
+  --import-histdata-csv-files ./data/file1.csv,./data/file2.csv
 ```
 
-The backtesting command can then reuse the same `DB_DSN` / `PRICE_DB_DSN`.
+The backtesting command can then reuse the same PostgreSQL DSN with `--db-dsn` and `--price-db-dsn`.
 
 ### Paperwallet
 
@@ -137,7 +137,7 @@ Before opening a pull request, make sure `go build ./...`, `go test -race -cover
 
 ### Project Layout
 
-- `cmd/` — entry points (backtesting, histdata import, IG and Coinbase runners)
+- `main.go` — single entry point that dispatches subcommands
 - `internal/broker` — the `Broker` interface and implementations; `internal/paperwallet` simulates fills
 - `internal/strategy` — the `Strategy` interface and example strategies
 - `internal/trader` — the orchestrator connecting brokers and strategies
@@ -148,7 +148,7 @@ Before opening a pull request, make sure `go build ./...`, `go test -race -cover
 
 1. Create a package under `internal/strategy/<name>` with a type that implements the [`Strategy`](internal/strategy/strategy.go) interface. [`internal/strategy/rsi`](internal/strategy/rsi) is a good template.
 2. Add a name constant to [`internal/strategy/strategy.go`](internal/strategy/strategy.go).
-3. Wire the new name into the `switch` in [`cmd/backtesting/main.go`](cmd/backtesting/main.go) so it can be selected via `STRATEGY`.
+3. Wire the new name into the `buildStrategy` switch in [`internal/app/support.go`](internal/app/support.go) so it can be selected via `--strategy`.
 4. Add a `_test.go` file covering the decision logic.
 
 ### Adding An Indicator
