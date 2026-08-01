@@ -87,9 +87,79 @@ It can also render an equity curve:
 
 Price data comes from PostgreSQL. Import your own [histdata.com](https://www.histdata.com/) CSV files with [`cmd/import-histdata`](cmd/import-histdata) — the same tool used in the quick start.
 
+### Importing HistData CSV Files
+
+Use [`cmd/import-histdata`](cmd/import-histdata) to convert tick CSV files into 1-minute OHLC candles and store them in PostgreSQL.
+
+1. Download CSV files from histdata.com (forex, gold, SP500 are available).
+2. Unzip the downloaded archives.
+3. Import CSV files with the tool:
+
+```sh
+DB_DSN="postgres://postgres:postgres@localhost:5432/at?sslmode=disable" \
+INSTRUMENT="SPXUSD" \
+IMPORT_HISTDATA_CSV_FILES="./data/file1.csv,./data/file2.csv" \
+  go run ./cmd/import-histdata
+```
+
+The backtesting command can then reuse the same `DB_DSN` / `PRICE_DB_DSN`.
+
+### Paperwallet
+
+`internal/paperwallet` simulates broker behavior for environments without a demo account.
+
+- Tracks balance, trading fees, and closed/open positions.
+- Powers the backtest broker by replaying historical ticks through the trader.
+
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test, lint, and add a new strategy or indicator.
+Thanks for your interest in improving `at`.
+
+### Prerequisites
+
+- Go 1.26 or newer
+- (Optional) [golangci-lint](https://golangci-lint.run/) v2 for linting
+
+### Common Tasks
+
+Run the commands directly:
+
+```sh
+go build ./...                    # compile all packages
+go test -race -cover ./...        # run tests with race detector and coverage
+go vet ./...                      # run vet checks
+gofmt -w $(find . -name '*.go')   # format all Go sources
+golangci-lint run                 # run linter (if installed)
+go mod tidy                       # clean go.mod/go.sum
+```
+
+Before opening a pull request, make sure `go build ./...`, `go test -race -cover ./...`, and `golangci-lint run` all pass. CI runs the same checks.
+
+### Project Layout
+
+- `cmd/` — entry points (backtesting, histdata import, IG and Coinbase runners)
+- `internal/broker` — the `Broker` interface and implementations; `internal/paperwallet` simulates fills
+- `internal/strategy` — the `Strategy` interface and example strategies
+- `internal/trader` — the orchestrator connecting brokers and strategies
+- `pkg/indicator` — the `Indicator` interface and implementations
+- `pkg/{ohlc,tick,eo,chart,...}` — supporting libraries
+
+### Adding A Strategy
+
+1. Create a package under `internal/strategy/<name>` with a type that implements the [`Strategy`](internal/strategy/strategy.go) interface. [`internal/strategy/rsi`](internal/strategy/rsi) is a good template.
+2. Add a name constant to [`internal/strategy/strategy.go`](internal/strategy/strategy.go).
+3. Wire the new name into the `switch` in [`cmd/backtesting/main.go`](cmd/backtesting/main.go) so it can be selected via `STRATEGY`.
+4. Add a `_test.go` file covering the decision logic.
+
+### Adding An Indicator
+
+Implement the [`Indicator`](pkg/indicator/indicator.go) interface in a new package under `pkg/indicator/<name>`, and add tests. Existing indicators wrap [go-talib](https://github.com/markcheno/go-talib) and are good references.
+
+### Style
+
+- Log with the standard library `log/slog`, not third-party loggers.
+- Keep library code free of `log.Fatal`/`os.Exit`; return errors instead, and reserve `panic` for unreachable invariants.
+- Run `gofmt` before committing.
 
 ## Disclaimer
 
