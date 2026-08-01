@@ -21,6 +21,8 @@ type CircularBuffer struct {
 	maxSize       int
 	index         int
 	enoughData    bool
+	isDirty       bool    // Track whether data has changed since the last sort
+	sum           float64 // Keeps the total sum to calculate the average in O(1)
 }
 
 // New creates a CircularBuffer.
@@ -34,7 +36,7 @@ func New(minSize, maxSize int) *CircularBuffer {
 		minSize:       minSize,
 		maxSize:       maxSize,
 		records:       make([]float64, minSize),
-		sortedRecords: []float64{},
+		sortedRecords: make([]float64, 0, maxSize),
 	}
 }
 
@@ -48,31 +50,43 @@ func (cb *CircularBuffer) GetAll() ([]float64, error) {
 	return cb.records, nil
 }
 
-// Insert adds a value to the buffer.
-//
-// While len(records) is below maxSize the value is appended, then insertion
-// rotates and overwrites the oldest value.
+// Insert adds a value to the buffer in O(1) time complexity.
 func (cb *CircularBuffer) Insert(value float64) {
 	if cb.enoughData && len(cb.records) < cb.maxSize {
-		// between minSize and maxSize
+		// between minSize and maxSize: append the value
+		cb.sum += value
 		cb.records = append(cb.records, value)
 	} else {
+		// overwrite the existing element
+		cb.sum += value - cb.records[cb.index]
 		cb.records[cb.index] = value
 	}
+
 	if cb.index+1 == cb.minSize {
 		cb.enoughData = true
 	}
+
 	if cb.index+1 == cb.maxSize {
 		cb.index = 0
 	} else {
 		cb.index++
 	}
 
-	// sort records
-	toBeSortedRecords := make([]float64, len(cb.records))
-	copy(toBeSortedRecords, cb.records)
-	sort.Float64s(toBeSortedRecords)
-	cb.sortedRecords = toBeSortedRecords
+	// Mark the sorted buffer as dirty, without sorting now
+	cb.isDirty = true
+}
+
+// ensureSorted makes sure that sortedRecords is aligned with records.
+// It is executed only on demand (Lazy) and reuses existing memory.
+func (cb *CircularBuffer) ensureSorted() {
+	if !cb.isDirty {
+		return
+	}
+
+	// Truncate to 0 while keeping the underlying capacity (0 memory allocations)
+	cb.sortedRecords = append(cb.sortedRecords[:0], cb.records...)
+	sort.Float64s(cb.sortedRecords)
+	cb.isDirty = false
 }
 
 // Min returns the smallest stored value in the buffer.
@@ -90,17 +104,13 @@ func (cb *CircularBuffer) Median() (float64, error) {
 	return cb.Quantile(0.5)
 }
 
-// Average returns the arithmetic mean of stored values in the buffer.
+// Average returns the arithmetic mean of stored values in the buffer in O(1).
 func (cb *CircularBuffer) Average() (float64, error) {
 	if !cb.enoughData {
 		return 0, fmt.Errorf("not enough data, have %d, need %d", cb.index, cb.minSize)
 	}
 
-	var total float64
-	for _, record := range cb.sortedRecords {
-		total += record
-	}
-	return total / float64(len(cb.sortedRecords)), nil
+	return cb.sum / float64(len(cb.records)), nil
 }
 
 // Quantile returns the value at the provided quantile in [0, 1].
@@ -114,6 +124,9 @@ func (cb *CircularBuffer) Quantile(quantile float64) (float64, error) {
 	if quantile > 1 || quantile < 0 {
 		return 0, fmt.Errorf("quantile needs to be between 0 and 1, but is %f", quantile)
 	}
+
+	// Sort only if necessary
+	cb.ensureSorted()
 
 	i := float64(len(cb.sortedRecords)) * quantile
 	if i > 0 {
