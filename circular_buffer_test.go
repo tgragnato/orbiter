@@ -1,11 +1,10 @@
 package circularbuffer
 
 import (
-	"github.com/AMekss/assert"
 	"testing"
 )
 
-func getFilledBuffer(t *testing.T) *CircularBuffer {
+func getFilledBuffer() *CircularBuffer {
 	v := New(5, 10)
 	for i := 1; i < 12; i++ {
 		v.Insert(float64(i))
@@ -14,7 +13,9 @@ func getFilledBuffer(t *testing.T) *CircularBuffer {
 }
 
 func TestInsert(t *testing.T) {
-	v := getFilledBuffer(t)
+	t.Parallel()
+
+	v := getFilledBuffer()
 
 	wantArray := []float64{11, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	for i := range wantArray {
@@ -26,45 +27,79 @@ func TestInsert(t *testing.T) {
 }
 
 func TestMedian(t *testing.T) {
-	v := getFilledBuffer(t)
+	t.Parallel()
+
+	v := getFilledBuffer()
 
 	perf, err := v.Median()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, 6, perf)
+	if err != nil {
+		t.Fatalf("TestMedian: unexpected error: %v", err)
+	}
+	if perf != 6 {
+		t.Fatalf("TestMedian: want=%.1f got=%.1f", 6.0, perf)
+	}
 }
 
 func TestAverage(t *testing.T) {
-	v := getFilledBuffer(t)
+	t.Parallel()
+
+	v := getFilledBuffer()
 
 	perf, err := v.Average()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, 6.5, perf)
+	if err != nil {
+		t.Fatalf("TestAverage: unexpected error: %v", err)
+	}
+	if perf != 6.5 {
+		t.Fatalf("TestAverage: want=%.1f got=%.1f", 6.5, perf)
+	}
 }
 
 func TestQuantile(t *testing.T) {
-	v := getFilledBuffer(t)
+	t.Parallel()
+
+	v := getFilledBuffer()
 
 	perf, err := v.Quantile(0)
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, v.sortedRecords[0], perf)
+	if err != nil {
+		t.Fatalf("TestQuantile: unexpected error for q=0: %v", err)
+	}
+	if perf != v.sortedRecords[0] {
+		t.Fatalf("TestQuantile: q=0 want=%.1f got=%.1f", v.sortedRecords[0], perf)
+	}
 
 	perf, err = v.Quantile(1)
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, v.sortedRecords[len(v.sortedRecords)-1], perf)
+	if err != nil {
+		t.Fatalf("TestQuantile: unexpected error for q=1: %v", err)
+	}
+	if perf != v.sortedRecords[len(v.sortedRecords)-1] {
+		t.Fatalf("TestQuantile: q=1 want=%.1f got=%.1f", v.sortedRecords[len(v.sortedRecords)-1], perf)
+	}
 }
 
 func TestMin(t *testing.T) {
-	v := getFilledBuffer(t)
+	t.Parallel()
+
+	v := getFilledBuffer()
 
 	perf, err := v.Min()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, 2, perf)
+	if err != nil {
+		t.Fatalf("TestMin: unexpected error: %v", err)
+	}
+	if perf != 2 {
+		t.Fatalf("TestMin: want=%.1f got=%.1f", 2.0, perf)
+	}
 }
 
 func TestMax(t *testing.T) {
-	v := getFilledBuffer(t)
+	t.Parallel()
+
+	v := getFilledBuffer()
 
 	perf, err := v.Max()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, 11, perf)
+	if err != nil {
+		t.Fatalf("TestMax: unexpected error: %v", err)
+	}
+	if perf != 11 {
+		t.Fatalf("TestMax: want=%.1f got=%.1f", 11.0, perf)
+	}
 }
