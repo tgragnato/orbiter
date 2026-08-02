@@ -1,10 +1,10 @@
 package trader
 
 import (
-	"github.com/AMekss/assert"
+	"testing"
+
 	"github.com/shopspring/decimal"
 	"github.com/sklinkert/at/internal/broker"
-	"testing"
 )
 
 var lossPosition = broker.Position{
@@ -20,6 +20,8 @@ var winPosition = broker.Position{
 }
 
 func TestTrader_getMaxConsecutiveLossTrades(t *testing.T) {
+	t.Parallel()
+
 	var tr = Trader{}
 	var closedPositions = []broker.Position{
 		winPosition,
@@ -29,5 +31,7 @@ func TestTrader_getMaxConsecutiveLossTrades(t *testing.T) {
 		winPosition,
 		lossPosition,
 	}
-	assert.EqualInt(t, 2, int(tr.getMaxConsecutiveLossTrades(closedPositions)))
+	if 2 != int(tr.getMaxConsecutiveLossTrades(closedPositions)) {
+		t.Fatalf("expected %d, got %d", 2, int(tr.getMaxConsecutiveLossTrades(closedPositions)))
+	}
 }

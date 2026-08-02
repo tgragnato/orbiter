@@ -1,33 +1,47 @@
 package trader
 
 import (
-	"github.com/AMekss/assert"
-	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/tick"
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
+	"github.com/sklinkert/at/pkg/tick"
 )
 
 func TestTrader_flashCrashCheck(t *testing.T) {
+	t.Parallel()
+
 	tick1 := tick.New("", time.Now(), decimal.NewFromFloat(100.0), decimal.NewFromFloat(100.0))
 	tick2 := tick.New("", time.Now(), decimal.NewFromFloat(100.1), decimal.NewFromFloat(100.1))
-	assert.NoError(t, flashCrashCheck(tick1, tick2))
+	if flashCrashCheck(tick1, tick2) != nil {
+		t.Fatalf("unexpected error: %v", flashCrashCheck(tick1, tick2))
+	}
 
 	tick1 = tick.New("", time.Now(), decimal.NewFromFloat(1.0), decimal.NewFromFloat(1.00))
 	tick2 = tick.New("", time.Now(), decimal.NewFromFloat(2.0), decimal.NewFromFloat(2.00))
-	assert.True(t, flashCrashCheck(tick1, tick2) != nil)
+	if !(flashCrashCheck(tick1, tick2) != nil) {
+		t.Fatalf("expected true")
+	}
 }
 
 func Test__distanceInPercentage(t *testing.T) {
+	t.Parallel()
+
 	price1 := decimal.NewFromFloat(10)
 	price2 := decimal.NewFromFloat(12)
-	assert.EqualStrings(t, "20", distanceInPercentage(price1, price2).String())
+	if "20" != distanceInPercentage(price1, price2).String() {
+		t.Fatalf("expected %q, got %q", "20", distanceInPercentage(price1, price2).String())
+	}
 
 	price1 = decimal.NewFromFloat(10)
 	price2 = decimal.NewFromFloat(8)
-	assert.EqualStrings(t, "-20", distanceInPercentage(price1, price2).String())
+	if "-20" != distanceInPercentage(price1, price2).String() {
+		t.Fatalf("expected %q, got %q", "-20", distanceInPercentage(price1, price2).String())
+	}
 
 	price1 = decimal.NewFromFloat(1)
 	price2 = decimal.NewFromFloat(2)
-	assert.EqualStrings(t, "100", distanceInPercentage(price1, price2).String())
+	if "100" != distanceInPercentage(price1, price2).String() {
+		t.Fatalf("expected %q, got %q", "100", distanceInPercentage(price1, price2).String())
+	}
 }

@@ -2,13 +2,14 @@ package amcharts
 
 import (
 	"bytes"
-	"github.com/AMekss/assert"
+
+	"testing"
+	"time"
+
 	"github.com/shopspring/decimal"
 	"github.com/sklinkert/at/internal/broker"
 	"github.com/sklinkert/at/pkg/chart"
 	"github.com/sklinkert/at/pkg/ohlc"
-	"testing"
-	"time"
 )
 
 func getCandlesLong(amount int) (candles []*ohlc.OHLC) {
@@ -25,6 +26,8 @@ func getCandlesLong(amount int) (candles []*ohlc.OHLC) {
 }
 
 func TestChart_RenderChart(t *testing.T) {
+	t.Parallel()
+
 	var c chart.Chart
 	var candles = getCandlesLong(5)
 
@@ -43,9 +46,15 @@ func TestChart_RenderChart(t *testing.T) {
 
 	buf := new(bytes.Buffer)
 	err := c.RenderChart(buf)
-	assert.NoError(t, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	html, err := c.RenderChartToHTML()
-	assert.NoError(t, err)
-	assert.True(t, html != "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if html == "" {
+		t.Fatalf("expected non-empty HTML")
+	}
 }

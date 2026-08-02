@@ -1,14 +1,16 @@
 package round
 
 import (
-	"github.com/AMekss/assert"
-	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/ohlc"
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
+	"github.com/sklinkert/at/pkg/ohlc"
 )
 
 func TestRoundnum_Value(t *testing.T) {
+	t.Parallel()
+
 	var now = time.Now()
 	var rn = New()
 
@@ -63,12 +65,23 @@ func TestRoundnum_Value(t *testing.T) {
 		rn.Insert(o)
 
 		rnValue, err := rn.Value()
-		assert.NoError(t.Fatalf, err)
-		assert.EqualInt(t.Fatalf, 4, len(rnValue))
-		assert.EqualFloat64(t, tc.lowerRoundNumberWeak, rnValue[LowerRoundNumberWeak])
-		assert.EqualFloat64(t, tc.lowerRoundNumberStrong, rnValue[LowerRoundNumberStrong])
-		assert.EqualFloat64(t, tc.upperRoundNumberWeak, rnValue[UpperRoundNumberWeak])
-		assert.EqualFloat64(t, tc.upperRoundNumberStrong, rnValue[UpperRoundNumberStrong])
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if 4 != len(rnValue) {
+			t.Fatalf("expected %d, got %d", 4, len(rnValue))
+		}
+		if tc.lowerRoundNumberWeak != rnValue[LowerRoundNumberWeak] {
+			t.Fatalf("expected %v, got %v", tc.lowerRoundNumberWeak, rnValue[LowerRoundNumberWeak])
+		}
+		if tc.lowerRoundNumberStrong != rnValue[LowerRoundNumberStrong] {
+			t.Fatalf("expected %v, got %v", tc.lowerRoundNumberStrong, rnValue[LowerRoundNumberStrong])
+		}
+		if tc.upperRoundNumberWeak != rnValue[UpperRoundNumberWeak] {
+			t.Fatalf("expected %v, got %v", tc.upperRoundNumberWeak, rnValue[UpperRoundNumberWeak])
+		}
+		if tc.upperRoundNumberStrong != rnValue[UpperRoundNumberStrong] {
+			t.Fatalf("expected %v, got %v", tc.upperRoundNumberStrong, rnValue[UpperRoundNumberStrong])
+		}
 	}
-
 }

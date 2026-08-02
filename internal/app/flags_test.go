@@ -6,6 +6,8 @@ import (
 )
 
 func TestSplitCSV(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		in   string
@@ -27,6 +29,8 @@ func TestSplitCSV(t *testing.T) {
 }
 
 func TestParseBacktestingFlagsDefaults(t *testing.T) {
+	t.Parallel()
+
 	conf, err := parseBacktestingFlags(nil)
 	if err != nil {
 		t.Fatalf("parseBacktestingFlags() error = %v", err)
@@ -59,6 +63,8 @@ func TestParseBacktestingFlagsDefaults(t *testing.T) {
 }
 
 func TestParseHistdataFlags(t *testing.T) {
+	t.Parallel()
+
 	conf, csvFiles, instrument, err := parseHistdataFlags([]string{"--import-histdata-csv-files", "a.csv,b.csv", "--instrument", "EURUSD", "--db-dsn", "postgres://example", "--debug"})
 	if err != nil {
 		t.Fatalf("parseHistdataFlags() error = %v", err)

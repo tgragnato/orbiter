@@ -1,14 +1,16 @@
 package eo
 
 import (
-	"github.com/AMekss/assert"
-	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/ohlc"
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
+	"github.com/sklinkert/at/pkg/ohlc"
 )
 
 func Test_riskLevelHigh(t *testing.T) {
+	t.Parallel()
+
 	overlay := New()
 
 	for i := 0; i < 100; i++ {
@@ -16,10 +18,14 @@ func Test_riskLevelHigh(t *testing.T) {
 		overlay.AddCandle(candle)
 	}
 	level := overlay.riskLevel()
-	assert.EqualInt(t, int(RExtreme), int(level))
+	if int(RExtreme) != int(level) {
+		t.Fatalf("expected %d, got %d", int(RExtreme), int(level))
+	}
 }
 
 func Test_riskLevelLow(t *testing.T) {
+	t.Parallel()
+
 	overlay := New()
 
 	for i := 100; i > 0; i-- {
@@ -27,7 +33,9 @@ func Test_riskLevelLow(t *testing.T) {
 		overlay.AddCandle(candle)
 	}
 	level := overlay.riskLevel()
-	assert.EqualInt(t, int(RLow), int(level))
+	if int(RLow) != int(level) {
+		t.Fatalf("expected %d, got %d", int(RLow), int(level))
+	}
 }
 
 func generateCandle(diff float64) *ohlc.OHLC {

@@ -1,14 +1,16 @@
 package stochrsi
 
 import (
-	"github.com/AMekss/assert"
-	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/ohlc"
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
+	"github.com/sklinkert/at/pkg/ohlc"
 )
 
 func TestStochRSI_Value(t *testing.T) {
+	t.Parallel()
+
 	var rsi20 = New(5, 2, 14)
 
 	total := 0
@@ -24,13 +26,20 @@ func TestStochRSI_Value(t *testing.T) {
 	}
 
 	rsi20Value, err := rsi20.Value()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, 100, rsi20Value[ValueK])
-
-	assert.EqualFloat64(t, 100, rsi20Value[ValueD])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 100 != rsi20Value[ValueK] {
+		t.Fatalf("expected %v, got %v", 100, rsi20Value[ValueK])
+	}
+	if 100 != rsi20Value[ValueD] {
+		t.Fatalf("expected %v, got %v", 100, rsi20Value[ValueD])
+	}
 }
 
 func TestStochRSI_Value_Down(t *testing.T) {
+	t.Parallel()
+
 	var rsi20 = New(5, 2, 14)
 
 	total := 0
@@ -46,6 +55,10 @@ func TestStochRSI_Value_Down(t *testing.T) {
 	}
 
 	rsi20Value, err := rsi20.Value()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, 0, rsi20Value[ValueK])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 0 != rsi20Value[ValueK] {
+		t.Fatalf("expected %v, got %v", 0, rsi20Value[ValueK])
+	}
 }

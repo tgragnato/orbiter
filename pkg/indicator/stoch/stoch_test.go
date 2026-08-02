@@ -1,14 +1,16 @@
 package stoch
 
 import (
-	"github.com/AMekss/assert"
-	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/ohlc"
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
+	"github.com/sklinkert/at/pkg/ohlc"
 )
 
 func TestStoch_Value(t *testing.T) {
+	t.Parallel()
+
 	var stoch20 = New(14, 3)
 
 	total := 0
@@ -24,13 +26,20 @@ func TestStoch_Value(t *testing.T) {
 	}
 
 	stoch20Value, err := stoch20.Value()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, 100, stoch20Value[ValueK])
-
-	assert.EqualFloat64(t, 100, stoch20Value[ValueD])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 100 != stoch20Value[ValueK] {
+		t.Fatalf("expected %v, got %v", 100, stoch20Value[ValueK])
+	}
+	if 100 != stoch20Value[ValueD] {
+		t.Fatalf("expected %v, got %v", 100, stoch20Value[ValueD])
+	}
 }
 
 func TestStoch_Value_Down(t *testing.T) {
+	t.Parallel()
+
 	var stoch20 = New(14, 3)
 
 	total := 0
@@ -46,6 +55,10 @@ func TestStoch_Value_Down(t *testing.T) {
 	}
 
 	stoch20Value, err := stoch20.Value()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, 0, stoch20Value[ValueK])
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 0 != stoch20Value[ValueK] {
+		t.Fatalf("expected %v, got %v", 0, stoch20Value[ValueK])
+	}
 }

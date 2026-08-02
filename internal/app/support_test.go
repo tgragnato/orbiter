@@ -8,6 +8,8 @@ import (
 )
 
 func TestBuildStrategy(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name     string
 		strategy string
@@ -41,6 +43,8 @@ func TestBuildStrategy(t *testing.T) {
 }
 
 func TestBuildStrategyRejectsUnknown(t *testing.T) {
+	t.Parallel()
+
 	if _, err := buildStrategy("unknown", "EURUSD", time.Minute); err == nil {
 		t.Fatalf("buildStrategy() error = nil, want non-nil")
 	}

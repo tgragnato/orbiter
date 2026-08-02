@@ -1,14 +1,16 @@
 package ohlc
 
 import (
-	"github.com/AMekss/assert"
-	"github.com/shopspring/decimal"
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 func TestOHLC_PerformanceInPercentage(t *testing.T) {
+	t.Parallel()
+
 	var o = OHLC{
 		Open:   decimal.NewFromFloat(100),
 		Close:  decimal.NewFromFloat(90),
@@ -16,7 +18,9 @@ func TestOHLC_PerformanceInPercentage(t *testing.T) {
 	}
 
 	perfFloat, _ := o.PerformanceInPercentage().Float64()
-	assert.EqualFloat64(t, -10, perfFloat)
+	if -10 != perfFloat {
+		t.Fatalf("expected %v, got %v", -10, perfFloat)
+	}
 
 	o = OHLC{
 		Open:   decimal.NewFromFloat(100),
@@ -24,7 +28,9 @@ func TestOHLC_PerformanceInPercentage(t *testing.T) {
 		closed: true,
 	}
 	perfFloat, _ = o.PerformanceInPercentage().Float64()
-	assert.EqualFloat64(t, 20, perfFloat)
+	if 20 != perfFloat {
+		t.Fatalf("expected %v, got %v", 20, perfFloat)
+	}
 
 	o = OHLC{
 		Open:   decimal.NewFromFloat(50),
@@ -32,10 +38,14 @@ func TestOHLC_PerformanceInPercentage(t *testing.T) {
 		closed: true,
 	}
 	perfFloat, _ = o.PerformanceInPercentage().Float64()
-	assert.EqualFloat64(t, 100, perfFloat)
+	if 100 != perfFloat {
+		t.Fatalf("expected %v, got %v", 100, perfFloat)
+	}
 }
 
 func TestOHLC_PerformanceFromOpenToHighAbsolute(t *testing.T) {
+	t.Parallel()
+
 	var o = OHLC{
 		Open:   decimal.NewFromFloat(100),
 		High:   decimal.NewFromFloat(150),
@@ -43,10 +53,14 @@ func TestOHLC_PerformanceFromOpenToHighAbsolute(t *testing.T) {
 	}
 
 	perfFloat, _ := o.PerformanceFromOpenToHighAbsolute().Float64()
-	assert.EqualFloat64(t, 50, perfFloat)
+	if 50 != perfFloat {
+		t.Fatalf("expected %v, got %v", 50, perfFloat)
+	}
 }
 
 func TestOHLC_PerformanceFromOpenToLowAbsolute(t *testing.T) {
+	t.Parallel()
+
 	var o = OHLC{
 		Open:   decimal.NewFromFloat(100),
 		High:   decimal.NewFromFloat(50),
@@ -54,10 +68,14 @@ func TestOHLC_PerformanceFromOpenToLowAbsolute(t *testing.T) {
 	}
 
 	perfFloat, _ := o.PerformanceFromOpenToHighAbsolute().Float64()
-	assert.EqualFloat64(t, -50, perfFloat)
+	if -50 != perfFloat {
+		t.Fatalf("expected %v, got %v", -50, perfFloat)
+	}
 }
 
 func TestOHLC_ReversionPerformanceFromHighAbsolute(t *testing.T) {
+	t.Parallel()
+
 	var o = OHLC{
 		High:   decimal.NewFromFloat(100),
 		Close:  decimal.NewFromFloat(50),
@@ -65,96 +83,153 @@ func TestOHLC_ReversionPerformanceFromHighAbsolute(t *testing.T) {
 	}
 
 	perfFloat, _ := o.ReversionPerformanceFromHighAbsolute().Float64()
-	assert.EqualFloat64(t, -50, perfFloat)
+	if -50 != perfFloat {
+		t.Fatalf("expected %v, got %v", -50, perfFloat)
+	}
 }
 
 func TestOHLC_ForceClose(t *testing.T) {
+	t.Parallel()
+
 	var o = OHLC{}
-	assert.False(t, o.closed)
+	if o.closed {
+		t.Fatalf("expected false")
+	}
+
 	o.ForceClose()
-	assert.True(t, o.closed)
+	if !o.closed {
+		t.Fatalf("expected true")
+	}
 }
 
 func TestOHLC_HasGaps(t *testing.T) {
+	t.Parallel()
+
 	var o = OHLC{}
-	assert.False(t, o.HasGaps())
+	if o.HasGaps() {
+		t.Fatalf("expected false")
+	}
+
 	o.Gaps = true
-	assert.True(t, o.HasGaps())
+	if !o.HasGaps() {
+		t.Fatalf("expected true")
+	}
 }
 
 func TestOHLC_Closed(t *testing.T) {
+	t.Parallel()
+
 	var o = OHLC{}
-	assert.False(t, o.HasGaps())
+	if o.HasGaps() {
+		t.Fatalf("expected false")
+	}
+
 	o.closed = true
-	assert.True(t, o.Closed())
+	if !o.Closed() {
+		t.Fatalf("expected true")
+	}
 }
 
 func TestOHLC_String(t *testing.T) {
+	t.Parallel()
+
 	var o = &OHLC{}
-	assert.True(t, o.Validate() != nil)
+	if o.Validate() == nil {
+		t.Fatalf("expected true")
+	}
 
 	o = New("abc", time.Now(), time.Second, false)
 	o.NewPrice(decimal.NewFromFloat(1), time.Now())
-	assert.True(t, o.String() != "")
+	if o.String() == "" {
+		t.Fatalf("expected true")
+	}
 }
 
 func TestOHLC_Age(t *testing.T) {
+	t.Parallel()
+
 	var now = time.Now()
 	var o = OHLC{Start: now}
-	assert.EqualFloat64(t, 1, o.Age(now.Add(time.Second)).Seconds())
+	if 1 != o.Age(now.Add(time.Second)).Seconds() {
+		t.Fatalf("expected %v, got %v", 1, o.Age(now.Add(time.Second)).Seconds())
+	}
 }
 
 func TestOHLC_Validate(t *testing.T) {
+	t.Parallel()
+
 	var o = &OHLC{}
-	assert.True(t, o.Validate() != nil)
+	if !(o.Validate() != nil) {
+		t.Fatalf("expected true")
+	}
 
 	o = New("abc", time.Now(), time.Second, false)
 	price := decimal.NewFromFloat(1)
 	o.NewPrice(price, time.Now())
-	assert.NoError(t, o.Validate())
+	if o.Validate() != nil {
+		t.Fatalf("unexpected error: %v", o.Validate())
+	}
 
 	// open = 0
 	obroken := o
 	obroken.Open = decimal.Decimal{}
-	assert.True(t, obroken.Validate() != nil)
+	if !(obroken.Validate() != nil) {
+		t.Fatalf("expected true")
+	}
 
 	// low > high
 	obroken = o
 	obroken.Low = obroken.High.Add(price)
-	assert.True(t, obroken.Validate() != nil)
+	if !(obroken.Validate() != nil) {
+		t.Fatalf("expected true")
+	}
 
 	// close < low
 	obroken = o
 	obroken.Close = obroken.Low.Sub(price)
-	assert.True(t, obroken.Validate() != nil)
+	if !(obroken.Validate() != nil) {
+		t.Fatalf("expected true")
+	}
 
 	// close > high
 	obroken = o
 	obroken.Close = obroken.High.Add(price)
-	assert.True(t, obroken.Validate() != nil)
+	if !(obroken.Validate() != nil) {
+		t.Fatalf("expected true")
+	}
 
 	// end < start
 	obroken = o
 	obroken.End = obroken.Start.Add(-time.Minute)
-	assert.True(t, obroken.Validate() != nil)
+	if !(obroken.Validate() != nil) {
+		t.Fatalf("expected true")
+	}
 
 	// instrument == ""
 	obroken = o
 	obroken.Instrument = ""
-	assert.True(t, obroken.Validate() != nil)
+	if !(obroken.Validate() != nil) {
+		t.Fatalf("expected true")
+	}
 }
 
 func TestOHLC_VolatilityInPercentage(t *testing.T) {
+	t.Parallel()
+
 	var o = New("abc", time.Now(), time.Second, false)
 	o.NewPrice(decimal.NewFromFloat(1), time.Now())
 	o.NewPrice(decimal.NewFromFloat(2), time.Now())
 
 	vola := o.VolatilityInPercentage()
 	volaFloat, _ := vola.Float64()
-	assert.EqualFloat64(t, 100, volaFloat)
+	if 100 != volaFloat {
+		t.Fatalf("expected %v, got %v", 100, volaFloat)
+	}
 }
 
 func TestOHLC_NewPrice(t *testing.T) {
+	t.Parallel()
+
 	var o = New("abc", time.Now(), time.Second, false)
 	now := time.Now()
 
@@ -162,7 +237,9 @@ func TestOHLC_NewPrice(t *testing.T) {
 	price := decimal.NewFromFloat(1)
 	o.NewPrice(price, now)
 	assertDecimal(t, price, o.Open)
-	assert.True(t, o.priceDataSeen)
+	if !(o.priceDataSeen) {
+		t.Fatalf("expected true")
+	}
 
 	// high
 	price = decimal.NewFromFloat(2)
@@ -180,60 +257,91 @@ func TestOHLC_NewPrice(t *testing.T) {
 	now = o.End
 	price = decimal.NewFromFloat(1.2)
 	considered := o.NewPrice(price, now)
-	assert.False(t, considered)
+	if considered {
+		t.Fatalf("expected false")
+	}
+
 	assertDecimal(t, closePrice, o.Close)
-	assert.True(t, o.closed)
-	assert.True(t, o.Closed())
-	assert.EqualTime(t, now, o.End)
+	if !o.closed {
+		t.Fatalf("expected true")
+	}
+	if !o.Closed() {
+		t.Fatalf("expected true")
+	}
+	if !now.Equal(o.End) {
+		t.Fatalf("expected %s, got %s", now, o.End)
+	}
 
 	// after end
 	now = o.End.Add(time.Second)
 	price = decimal.NewFromFloat(1.3)
 	considered = o.NewPrice(price, now)
-	assert.False(t, considered)
+	if considered {
+		t.Fatalf("expected false")
+	}
 }
 
 func TestOHLC_NewPrice_with_Gaps(t *testing.T) {
+	t.Parallel()
+
 	var o = New("abc", time.Now(), time.Hour, false)
 	now := time.Now()
 
 	price := decimal.NewFromFloat(1)
 	o.NewPrice(price, now)
-	assert.False(t, o.HasGaps())
+	if o.HasGaps() {
+		t.Fatalf("expected false")
+	}
 
 	o.NewPrice(price, now.Add(maxGapBetweenTicksInSeconds).Add(time.Minute))
-	assert.True(t, o.HasGaps())
+	if !o.HasGaps() {
+		t.Fatalf("expected true")
+	}
 }
 
 func assertDecimal(t *testing.T, want, got decimal.Decimal) {
 	wantFloat, _ := want.Float64()
 	gotFloat, _ := got.Float64()
-	assert.EqualFloat64(t, wantFloat, gotFloat)
+	if wantFloat != gotFloat {
+		t.Fatalf("expected %v, got %v", wantFloat, gotFloat)
+	}
 }
 
 func Test__smoothCandleStart(t *testing.T) {
+	t.Parallel()
+
 	period := time.Minute * 15
 	want := time.Date(2020, 12, 17, 21, 15, 0, 0, time.UTC)
 	is := time.Date(2020, 12, 17, 21, 24, 7, 8, time.UTC)
-	assert.EqualTime(t, want, smoothCandleStart(is, period))
+	if !want.Equal(smoothCandleStart(is, period)) {
+		t.Fatalf("expected %s, got %s", want, smoothCandleStart(is, period))
+	}
 
 	period = time.Minute * 15
 	want = time.Date(2020, 12, 17, 21, 30, 0, 0, time.UTC)
 	is = time.Date(2020, 12, 17, 21, 33, 7, 8, time.UTC)
-	assert.EqualTime(t, want, smoothCandleStart(is, period))
+	if !want.Equal(smoothCandleStart(is, period)) {
+		t.Fatalf("expected %s, got %s", want, smoothCandleStart(is, period))
+	}
 
 	period = time.Minute * 45
 	want = time.Date(2020, 12, 17, 21, 0, 0, 0, time.UTC)
 	is = time.Date(2020, 12, 17, 21, 15, 7, 8, time.UTC)
-	assert.EqualTime(t, want, smoothCandleStart(is, period))
+	if !want.Equal(smoothCandleStart(is, period)) {
+		t.Fatalf("expected %s, got %s", want, smoothCandleStart(is, period))
+	}
 
 	period = time.Minute * 60
 	want = time.Date(2020, 12, 17, 21, 0, 0, 0, time.UTC)
 	is = time.Date(2020, 12, 17, 21, 15, 7, 8, time.UTC)
-	assert.EqualTime(t, want, smoothCandleStart(is, period))
+	if !want.Equal(smoothCandleStart(is, period)) {
+		t.Fatalf("expected %s, got %s", want, smoothCandleStart(is, period))
+	}
 }
 
 func Test__hightime(t *testing.T) {
+	t.Parallel()
+
 	var one = decimal.NewFromFloat(1)
 	var o = New("abc", time.Now(), time.Hour, false)
 	now := time.Now()
@@ -252,11 +360,14 @@ func Test__hightime(t *testing.T) {
 	price = price.Sub(one)
 	now = now.Add(time.Minute)
 	o.NewPrice(price, now)
-
-	assert.EqualTime(t, highTime, o.HighTime)
+	if !highTime.Equal(o.HighTime) {
+		t.Fatalf("expected %s, got %s", highTime, o.HighTime)
+	}
 }
 
 func Test__lowtime(t *testing.T) {
+	t.Parallel()
+
 	var one = decimal.NewFromFloat(1)
 	var o = New("abc", time.Now(), time.Hour, false)
 	now := time.Now()
@@ -275,11 +386,14 @@ func Test__lowtime(t *testing.T) {
 	price = one
 	now = now.Add(time.Minute)
 	o.NewPrice(price, now)
-
-	assert.EqualTime(t, lowTime, o.LowTime)
+	if !lowTime.Equal(o.LowTime) {
+		t.Fatalf("expected %s, got %s", lowTime, o.LowTime)
+	}
 }
 
 func Test__ToTicks(t *testing.T) {
+	t.Parallel()
+
 	var one = decimal.NewFromFloat(1)
 	now := time.Now()
 	var o = New("abc", now, time.Hour, false)
@@ -306,29 +420,51 @@ func Test__ToTicks(t *testing.T) {
 	closeTime := now
 	o.NewPrice(price, now)
 	o.ForceClose()
-
-	assert.EqualTime(t, lowTime, o.LowTime)
-	assert.EqualTime(t, highTime, o.HighTime)
-	assert.EqualTime(t, openTime, o.Start)
-	assert.EqualTime(t, closeTime, o.End)
+	if !lowTime.Equal(o.LowTime) {
+		t.Fatalf("expected %s, got %s", lowTime, o.LowTime)
+	}
+	if !highTime.Equal(o.HighTime) {
+		t.Fatalf("expected %s, got %s", highTime, o.HighTime)
+	}
+	if !openTime.Equal(o.Start) {
+		t.Fatalf("expected %s, got %s", openTime, o.Start)
+	}
+	if !closeTime.Equal(o.End) {
+		t.Fatalf("expected %s, got %s", closeTime, o.End)
+	}
 
 	ticks := o.ToTicks()
-	assert.EqualInt(t.Fatalf, 4, len(ticks))
-	assert.EqualTime(t, ticks[0].Datetime, openTime)
-	assert.EqualTime(t, ticks[1].Datetime, lowTime)
-	assert.EqualTime(t, ticks[2].Datetime, highTime)
-	assert.EqualTime(t, ticks[3].Datetime, closeTime)
+	if 4 != len(ticks) {
+		t.Fatalf("expected %d, got %d", 4, len(ticks))
+	}
+	if !ticks[0].Datetime.Equal(openTime) {
+		t.Fatalf("expected %s, got %s", ticks[0].Datetime, openTime)
+	}
+	if !ticks[1].Datetime.Equal(lowTime) {
+		t.Fatalf("expected %s, got %s", ticks[1].Datetime, lowTime)
+	}
+	if !ticks[2].Datetime.Equal(highTime) {
+		t.Fatalf("expected %s, got %s", ticks[2].Datetime, highTime)
+	}
+	if !ticks[3].Datetime.Equal(closeTime) {
+		t.Fatalf("expected %s, got %s", ticks[3].Datetime, closeTime)
+	}
 }
 
 func TestOHLC__Sort(t *testing.T) {
+	t.Parallel()
+
 	var now = time.Now()
 	var o1 = generateOHLC(now, 1)
 	var o2 = generateOHLC(now.Add(time.Minute), 2)
 	var ohlcList = []OHLC{*o2, *o1}
 	sort.Sort(OHLCList(ohlcList))
-
-	assert.EqualTime(t, ohlcList[0].End, o1.End)
-	assert.EqualTime(t, ohlcList[1].End, o2.End)
+	if !ohlcList[0].End.Equal(o1.End) {
+		t.Fatalf("expected %s, got %s", ohlcList[0].End, o1.End)
+	}
+	if !ohlcList[1].End.Equal(o2.End) {
+		t.Fatalf("expected %s, got %s", ohlcList[1].End, o2.End)
+	}
 }
 
 func generateOHLC(when time.Time, price float64) *OHLC {

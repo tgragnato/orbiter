@@ -1,12 +1,14 @@
 package broker
 
 import (
-	"github.com/AMekss/assert"
-	"github.com/shopspring/decimal"
 	"testing"
+
+	"github.com/shopspring/decimal"
 )
 
 func TestPerformanceInPercentage(t *testing.T) {
+	t.Parallel()
+
 	currentPrice := decimal.NewFromFloat(2.0)
 
 	// Long
@@ -15,7 +17,9 @@ func TestPerformanceInPercentage(t *testing.T) {
 		BuyDirection: BuyDirectionLong,
 	}
 	perf := position.PerformanceInPercentage(currentPrice, currentPrice)
-	assert.EqualFloat64(t, 100, perf)
+	if 100 != perf {
+		t.Fatalf("expected %v, got %v", 100, perf)
+	}
 
 	// Short
 	currentPrice = decimal.NewFromFloat(1.0)
@@ -24,10 +28,15 @@ func TestPerformanceInPercentage(t *testing.T) {
 		BuyDirection: BuyDirectionShort,
 	}
 	perf = position.PerformanceInPercentage(currentPrice, currentPrice)
-	assert.EqualFloat64(t, -100, perf)
+	if -100 != perf {
+		t.Fatalf("expected %v, got %v", -100, perf)
+	}
+
 }
 
 func TestPerformanceAbsolute(t *testing.T) {
+	t.Parallel()
+
 	currentPrice := decimal.NewFromFloat(2.0)
 
 	// Long
@@ -37,7 +46,9 @@ func TestPerformanceAbsolute(t *testing.T) {
 		Size:         1.00,
 	}
 	perf := position.PerformanceAbsolute(currentPrice, currentPrice)
-	assert.EqualFloat64(t, 1.0, perf)
+	if 1.0 != perf {
+		t.Fatalf("expected %v, got %v", 1.0, perf)
+	}
 
 	// Short
 	position = Position{
@@ -46,5 +57,7 @@ func TestPerformanceAbsolute(t *testing.T) {
 		Size:         1.00,
 	}
 	perf = position.PerformanceAbsolute(currentPrice, currentPrice)
-	assert.EqualFloat64(t, -1.0, perf)
+	if -1.0 != perf {
+		t.Fatalf("expected %v, got %v", -1.0, perf)
+	}
 }

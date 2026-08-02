@@ -1,16 +1,18 @@
 package paperwallet
 
 import (
-	"github.com/AMekss/assert"
-	"github.com/go-test/deep"
+	"reflect"
+	"testing"
+	"time"
+
 	"github.com/shopspring/decimal"
 	"github.com/sklinkert/at/internal/broker"
 	"github.com/sklinkert/at/pkg/tick"
-	"testing"
-	"time"
 )
 
 func TestBuyAndSellLong(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	bid := decimal.NewFromFloat(0.9)
 	ask := decimal.NewFromFloat(1.0)
@@ -18,23 +20,40 @@ func TestBuyAndSellLong(t *testing.T) {
 	b.currentTick = tick.New("", now, bid, ask)
 
 	openPositions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t, 0, len(openPositions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 0 != len(openPositions) {
+		t.Fatalf("expected %d, got %d", 0, len(openPositions))
+	}
+
 	targetPrice := decimal.NewFromFloat(2.0)
 	stopLossPrice := decimal.NewFromFloat(0.5)
 	order := broker.NewMarketOrder(broker.BuyDirectionLong, 1.00, "", targetPrice, stopLossPrice)
 
 	_, err = b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	positions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 1, len(positions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 1 != len(positions) {
+		t.Fatalf("expected %d, got %d", 1, len(positions))
+	}
 
 	pos := positions[0]
-	assert.True(t, broker.BuyDirectionLong == pos.BuyDirection)
-	assert.True(t, now.Equal(pos.BuyTime))
-	assert.True(t, pos.SellPrice.Equal(decimal.NewFromFloat(0)))
+	if broker.BuyDirectionLong != pos.BuyDirection {
+		t.Fatalf("expected true")
+	}
+	if !(now.Equal(pos.BuyTime)) {
+		t.Fatalf("expected true")
+	}
+	if !(pos.SellPrice.Equal(decimal.NewFromFloat(0))) {
+		t.Fatalf("expected true")
+	}
 
 	// Sell position
 	bid = decimal.NewFromFloat(2.0)
@@ -43,25 +62,42 @@ func TestBuyAndSellLong(t *testing.T) {
 	b.currentTick = tick.New("", now, bid, ask)
 
 	err = b.Sell(pos)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Update pos after Sell()
 	closedPositions, err := b.GetClosedPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 1, len(closedPositions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 1 != len(closedPositions) {
+		t.Fatalf("expected %d, got %d", 1, len(closedPositions))
+	}
+
 	pos = closedPositions[0]
 
 	assertDecimal(t, bid, pos.SellPrice)
 
-	perfAbs := pos.PerformanceAbsolute(decimal.NewFromFloat(0), decimal.NewFromFloat(0)) // must take SellPrice instead of given currentPrice
-	assert.EqualFloat64(t, 1, perfAbs)
+	perfAbs := pos.PerformanceAbsolute(decimal.NewFromFloat(0), decimal.NewFromFloat(0))
+	if 1 != perfAbs {
+		t.Fatalf("expected %v, got %v", 1, perfAbs)
+	}
 
-	perfPercent := pos.PerformanceInPercentage(decimal.NewFromFloat(0), decimal.NewFromFloat(0)) // must take SellPrice instead of given currentPrice
-	assert.EqualFloat64(t, 100, perfPercent)
-	assert.True(t, now.Equal(pos.SellTime))
+	// must take SellPrice instead of given currentPrice
+	perfPercent := pos.PerformanceInPercentage(decimal.NewFromFloat(0), decimal.NewFromFloat(0))
+	if 100 != perfPercent {
+		t.Fatalf("expected %v, got %v", 100, perfPercent)
+	}
+	// must take SellPrice instead of given currentPrice
+	if !(now.Equal(pos.SellTime)) {
+		t.Fatalf("expected true")
+	}
 }
 
 func TestLimitOrderLong(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	ask := decimal.NewFromFloat(2.0)
 	bid := decimal.NewFromFloat(2.0)
@@ -75,11 +111,17 @@ func TestLimitOrderLong(t *testing.T) {
 	order := broker.NewLimitOrder(broker.BuyDirectionLong, size, "", targetPrice, stopLossPrice, limitPrice)
 
 	_, err := b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	positions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 0, len(positions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 0 != len(positions) {
+		t.Fatalf("expected %d, got %d", 0, len(positions))
+	}
 
 	ask = limitPrice
 	bid = decimal.NewFromFloat(1.90)
@@ -87,15 +129,29 @@ func TestLimitOrderLong(t *testing.T) {
 	b.SetCurrenctPrice(tickData)
 
 	positions, err = b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 1, len(positions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 1 != len(positions) {
+		t.Fatalf("expected %d, got %d", 1, len(positions))
+	}
+
 	pos := positions[0]
-	assert.True(t, pos.BuyPrice.Equal(ask))
-	assert.EqualFloat64(t, size, pos.Size)
-	assert.True(t, broker.BuyDirectionLong == pos.BuyDirection)
+	if !pos.BuyPrice.Equal(ask) {
+		t.Fatalf("expected true")
+	}
+	if size != pos.Size {
+		t.Fatalf("expected %v, got %v", size, pos.Size)
+	}
+	if broker.BuyDirectionLong != pos.BuyDirection {
+		t.Fatalf("expected true")
+	}
+
 }
 
 func TestLimitOrderShort(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	ask := decimal.NewFromFloat(2.0)
 	bid := decimal.NewFromFloat(2.0)
@@ -109,11 +165,17 @@ func TestLimitOrderShort(t *testing.T) {
 	order := broker.NewLimitOrder(broker.BuyDirectionShort, size, "", targetPrice, stopLossPrice, limitPrice)
 
 	_, err := b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	positions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 0, len(positions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 0 != len(positions) {
+		t.Fatalf("expected %d, got %d", 0, len(positions))
+	}
 
 	ask = decimal.NewFromFloat(2.10)
 	bid = limitPrice
@@ -121,15 +183,32 @@ func TestLimitOrderShort(t *testing.T) {
 	b.SetCurrenctPrice(tickData)
 
 	positions, err = b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 1, len(positions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 1 != len(positions) {
+		t.Fatalf("expected %d, got %d", 1, len(positions))
+	}
+
 	pos := positions[0]
-	assert.True(t, pos.BuyPrice.Equal(bid))
-	assert.EqualFloat64(t, size, pos.Size)
-	assert.True(t, broker.BuyDirectionShort == pos.BuyDirection)
+	if !pos.BuyPrice.Equal(bid) {
+		t.Fatalf("expected true")
+	}
+	if size !=
+		pos.Size {
+		t.Fatalf("expected %v, got %v",
+			size, pos.Size,
+		)
+	}
+	if broker.BuyDirectionShort != pos.BuyDirection {
+		t.Fatalf("expected true")
+	}
+
 }
 
 func TestBuyAndSellShort(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	bid := decimal.NewFromFloat(2.0)
 	ask := decimal.NewFromFloat(0.9)
@@ -137,23 +216,40 @@ func TestBuyAndSellShort(t *testing.T) {
 	b.currentTick = tick.New("", now, bid, ask)
 
 	openPositions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t, 0, len(openPositions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 0 != len(openPositions) {
+		t.Fatalf("expected %d, got %d", 0, len(openPositions))
+	}
+
 	targetPrice := decimal.NewFromFloat(0.5)
 	stopLossPrice := decimal.NewFromFloat(2.0)
 	order := broker.NewMarketOrder(broker.BuyDirectionShort, 1.00, "", targetPrice, stopLossPrice)
 
 	_, err = b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	positions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 1, len(positions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 1 != len(positions) {
+		t.Fatalf("expected %d, got %d", 1, len(positions))
+	}
 
 	pos := positions[0]
-	assert.True(t, broker.BuyDirectionShort == pos.BuyDirection)
-	assert.True(t, now.Equal(pos.BuyTime))
-	assert.True(t, pos.SellPrice.Equal(decimal.NewFromFloat(0)))
+	if broker.BuyDirectionShort != pos.BuyDirection {
+		t.Fatalf("expected true")
+	}
+	if !(now.Equal(pos.BuyTime)) {
+		t.Fatalf("expected true")
+	}
+	if !(pos.SellPrice.Equal(decimal.NewFromFloat(0))) {
+		t.Fatalf("expected true")
+	}
 
 	// Sell position
 	bid = decimal.NewFromFloat(1.77)
@@ -162,93 +258,168 @@ func TestBuyAndSellShort(t *testing.T) {
 	b.currentTick = tick.New("", now, bid, ask)
 
 	err = b.Sell(pos)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	// Update pos after Sell()
 	closedPositions, err := b.GetClosedPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 1, len(closedPositions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 1 != len(closedPositions) {
+		t.Fatalf("expected %d, got %d", 1, len(closedPositions))
+	}
+
 	pos = closedPositions[0]
 
 	assertDecimal(t, ask, pos.SellPrice)
 
-	perfAbs := pos.PerformanceAbsolute(decimal.NewFromFloat(0), decimal.NewFromFloat(0)) // must take SellPrice instead of given currentPrice
-	assert.EqualFloat64(t, 1, perfAbs)
+	perfAbs := pos.PerformanceAbsolute(decimal.NewFromFloat(0), decimal.NewFromFloat(0))
+	if 1 != perfAbs {
+		t.Fatalf("expected %v, got %v", 1, perfAbs)
+	}
 
-	perfPercent := pos.PerformanceInPercentage(decimal.NewFromFloat(0), decimal.NewFromFloat(0)) // must take SellPrice instead of given currentPrice
-	assert.EqualFloat64(t, 100, perfPercent)
-	assert.True(t, now.Equal(pos.SellTime))
+	// must take SellPrice instead of given currentPrice
+	perfPercent := pos.PerformanceInPercentage(decimal.NewFromFloat(0), decimal.NewFromFloat(0))
+	if 100 != perfPercent {
+		t.Fatalf("expected %v, got %v", 100, perfPercent)
+	}
+	// must take SellPrice instead of given currentPrice
+	if !now.Equal(pos.SellTime) {
+		t.Fatalf("expected true")
+	}
 }
 
 func TestBacktest_GetOpenPositions(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	order := broker.NewMarketOrder(broker.BuyDirectionLong, 1.00, "", decimal.Zero, decimal.Zero)
 	_, err := b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
 	_, err = b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
 	_, err = b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	positions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 3, len(positions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 3 != len(positions) {
+		t.Fatalf("expected %d, got %d", 3, len(positions))
+	}
+
 	pos := positions[0]
 
 	err = b.Sell(pos)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
 	openPositions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t, 2, len(openPositions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 2 != len(openPositions) {
+		t.Fatalf("expected %d, got %d", 2, len(openPositions))
+	}
 }
 
 func TestBacktest_GetClosedPositions(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	order := broker.NewMarketOrder(broker.BuyDirectionLong, 1.00, "", decimal.Zero, decimal.Zero)
 	_, _ = b.Buy(order)
 	_, _ = b.Buy(order)
 	_, err := b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	positions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 3, len(positions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 3 != len(positions) {
+		t.Fatalf("expected %d, got %d", 3, len(positions))
+	}
+
 	pos := positions[0]
 
 	err = b.Sell(pos)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
 	openPositions, err := b.GetClosedPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t, 1, len(openPositions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 1 != len(openPositions) {
+		t.Fatalf("expected %d, got %d", 1, len(openPositions))
+	}
 }
 
 func TestBacktest_GetOpenPosition(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	order := broker.NewMarketOrder(broker.BuyDirectionLong, 1.00, "", decimal.Zero, decimal.Zero)
 	_, err := b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	_, err = b.Buy(order)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	positions, err := b.GetOpenPositions()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualInt(t.Fatalf, 2, len(positions))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 2 != len(positions) {
+		t.Fatalf("expected %d, got %d",
+			2, len(positions))
+	}
+
 	pos := positions[0]
 
 	openPosition, err := b.GetOpenPosition(pos.Reference)
-	assert.NoError(t.Fatalf, err)
-	if diff := deep.Equal(pos, openPosition); diff != nil {
-		t.Error(diff)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !reflect.DeepEqual(pos, openPosition) {
+		t.Errorf("expected %v, got %v", pos, openPosition)
 	}
 
 	err = b.Sell(pos)
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
 	_, err = b.GetOpenPosition(pos.Reference)
-	assert.EqualErrors(t, broker.ErrPositionNotFound, err)
+	if (broker.ErrPositionNotFound == nil) != (err == nil) || (broker.ErrPositionNotFound != nil && err != nil && broker.ErrPositionNotFound.Error() != err.Error()) {
+		t.Fatalf("expected error %v, got %v", broker.ErrPositionNotFound, err)
+	}
 }
 
 func Test_getBuyPriceByDirection(t *testing.T) {
+	t.Parallel()
+
 	bid := decimal.NewFromFloat(1.0)
 	ask := decimal.NewFromFloat(1.1)
 	b := New()
@@ -262,6 +433,8 @@ func Test_getBuyPriceByDirection(t *testing.T) {
 }
 
 func Test_getSellPriceByDirection(t *testing.T) {
+	t.Parallel()
+
 	bid := decimal.NewFromFloat(1.0)
 	ask := decimal.NewFromFloat(1.1)
 	b := New()
@@ -284,21 +457,32 @@ func Test_getSellPriceByDirection(t *testing.T) {
 func assertDecimal(t *testing.T, want, got decimal.Decimal) {
 	wantFloat, _ := want.Float64()
 	gotFloat, _ := got.Float64()
-	assert.EqualFloat64(t, wantFloat, gotFloat)
+	if wantFloat != gotFloat {
+		t.Fatalf("expected %v, got %v", wantFloat, gotFloat)
+	}
 }
 
 func Test_closeAllOpenPositions(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	order := broker.NewMarketOrder(broker.BuyDirectionLong, 1.00, "", decimal.Zero, decimal.Zero)
 	_, _ = b.Buy(order)
 	_, _ = b.Buy(order)
 	_, _ = b.Buy(order)
-	assert.EqualInt(t, 3, len(b.openPositions))
+	if 3 != len(b.openPositions) {
+		t.Fatalf("expected %d, got %d", 3, len(b.openPositions))
+	}
+
 	b.CloseAllOpenPositions()
-	assert.EqualInt(t, 0, len(b.openPositions))
+	if 0 != len(b.openPositions) {
+		t.Fatalf("expected %d, got %d", 0, len(b.openPositions))
+	}
 }
 
 func TestBacktest_getTotalPerf(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	b.closedPositions = map[string]broker.Position{
 		"1": {
@@ -312,10 +496,14 @@ func TestBacktest_getTotalPerf(t *testing.T) {
 			SellPrice: decimal.NewFromFloat(20),
 		},
 	}
-	assert.EqualFloat64(t, 48, getTotalPerf(b.closedPositions))
+	if 48 != getTotalPerf(b.closedPositions) {
+		t.Fatalf("expected %v, got %v", 48, getTotalPerf(b.closedPositions))
+	}
 }
 
 func TestBacktest_getTotalLossPositions(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	b.closedPositions = map[string]broker.Position{
 		"1": {
@@ -329,7 +517,9 @@ func TestBacktest_getTotalLossPositions(t *testing.T) {
 			SellPrice: decimal.NewFromFloat(20),
 		},
 	}
-	assert.EqualInt(t, 1, getTotalLossPositions(b.closedPositions))
+	if 1 != getTotalLossPositions(b.closedPositions) {
+		t.Fatalf("expected %d, got %d", 1, getTotalLossPositions(b.closedPositions))
+	}
 }
 
 //func TestBuyCheckTargetAndStopLoss(t *testing.T) {
@@ -386,6 +576,8 @@ func TestBacktest_getTotalLossPositions(t *testing.T) {
 //}
 
 func Test_getAbsoluteTradingFee(t *testing.T) {
+	t.Parallel()
+
 	b := New()
 	b.tradingFeePercent = decimal.NewFromFloat(0.26)
 	price := decimal.NewFromFloat(43.50)

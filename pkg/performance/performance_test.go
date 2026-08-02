@@ -2,14 +2,17 @@ package performance
 
 import (
 	"fmt"
-	"github.com/AMekss/assert"
-	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/ohlc"
+
 	"testing"
 	"time"
+
+	"github.com/shopspring/decimal"
+	"github.com/sklinkert/at/pkg/ohlc"
 )
 
 func TestAddOHLC(t *testing.T) {
+	t.Parallel()
+
 	v := New(5, 10)
 	now := time.Now()
 	for i := 1; i < 12; i++ {
@@ -23,7 +26,9 @@ func TestAddOHLC(t *testing.T) {
 
 	wantArray := []float64{11, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 	isArray, err := v.cb.GetAll()
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	for i := range wantArray {
 		want := wantArray[i] * 100
@@ -34,6 +39,8 @@ func TestAddOHLC(t *testing.T) {
 }
 
 func TestMedianPerformanceInPercentage(t *testing.T) {
+	t.Parallel()
+
 	v := New(10, 10)
 	now := time.Now()
 	for i := 0; i < 10; i++ {
@@ -45,29 +52,47 @@ func TestMedianPerformanceInPercentage(t *testing.T) {
 	}
 
 	perf, err := v.MedianPerformanceInPercentage()
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, 400, perf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if 400 != perf {
+		t.Fatalf("expected %v, got %v", 400, perf)
+	}
 }
 
 func TestPerformanceInPercentageQuantile(t *testing.T) {
+	t.Parallel()
+
 	v := New(1000, 1000)
 	now := time.Now()
 	for i := 0; i < 1000; i++ {
 		o := ohlc.New("EURUSD", now, time.Minute, false)
 		o.NewPrice(decimal.NewFromFloat(1.0), o.Start)
 		o.NewPrice(decimal.NewFromFloat(float64(i)+1.0), o.End)
-		assert.True(t, o.Closed())
+		if !o.Closed() {
+			t.Fatalf("expected true")
+		}
 		v.AddOHLC(o)
 	}
 
 	isArray, err := v.cb.GetAll()
-	assert.NoError(t.Fatalf, err)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	perf, err := v.PerformanceInPercentageQuantile(0)
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, isArray[0], perf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if isArray[0] != perf {
+		t.Fatalf("expected %v, got %v", isArray[0], perf)
+	}
 
 	perf, err = v.PerformanceInPercentageQuantile(1)
-	assert.NoError(t.Fatalf, err)
-	assert.EqualFloat64(t, isArray[len(isArray)-1], perf)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if isArray[len(isArray)-1] != perf {
+		t.Fatalf("expected %v, got %v", isArray[len(isArray)-1], perf)
+	}
 }

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jinzhu/copier"
 	"github.com/shopspring/decimal"
 	"github.com/sklinkert/at/pkg/tick"
 )
@@ -248,10 +247,7 @@ func smoothCandleStart(ts time.Time, period time.Duration) time.Time {
 
 // ToHeikinAshi calculates a Heikin Ashi candle from two OHLC candles
 func ToHeikinAshi(previous, now *OHLC) *OHLC {
-	var ha OHLC
-	if err := copier.Copy(&ha, now); err != nil {
-		panic(fmt.Sprintf("copier.Copy failed: %v", err))
-	}
+	ha := *now
 	ha.Open = decimal.Avg(previous.Open, previous.Close)
 	ha.Close = decimal.Avg(now.Open, now.Close, now.High, now.Low)
 	ha.High = decimal.Max(now.High, ha.Open, ha.Close)
