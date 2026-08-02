@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/signal"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/internal/trader/signalexec"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 type Trader struct {
@@ -43,6 +45,8 @@ type Trader struct {
 	orderSubscribers            []OrderSubscriber
 	closedPositionReferences    map[string]bool
 	currencyCode                string
+	signalDispatcher            signal.Dispatcher
+	signalOrchestrator          *signalexec.Orchestrator
 	sync.Mutex
 }
 
@@ -78,18 +82,6 @@ func WithPositionSubscription(subscriber PositionSubscriber) Option {
 	}
 }
 
-//func WithOrderSubscription(subscriber OrderSubscriber) Option {
-//	return func(trader *Trader) {
-//		trader.orderSubscribers = append(trader.orderSubscribers, subscriber)
-//	}
-//}
-//
-//func WithGatherPerformanceData() Option {
-//	return func(trader *Trader) {
-//		trader.gatherPerformanceData = true
-//	}
-//}
-
 func WithPersistTickData(persist bool) Option {
 	return func(trader *Trader) {
 		trader.persistTickData = persist
@@ -119,19 +111,26 @@ func WithFeedStoredCandles(strategy strategy.Strategy) Option {
 		var limit = int(strategy.GetWarmUpCandleAmount())
 		var candlePeriod = strategy.GetCandleDuration()
 
-		slog.Info(fmt.Sprintf("Searching for warmup candles with period %s", candlePeriod))
+		slog.Info("searching for warmup candles", "period", candlePeriod)
 
 		candles, err := trader.loadWarmUpCandles(trader.ctx, trader.Instrument, candlePeriod, limit)
 		if err != nil {
-			panic(fmt.Sprintf("fetching stored candles failed: %v", err))
+			slog.Error("fetching stored candles failed, skipping warm-up", "error", err)
+			return
 		}
 		sort.Sort(ohlc.OHLCList(candles))
 
-		slog.Info(fmt.Sprintf("WithFeedStoredCandles: Sending %d candles to strategy for warming up", len(candles)))
+		slog.Info("sending candles to strategy for warm-up", "count", len(candles))
 		for _, candle := range candles {
 			candle.ForceClose()
 			strategy.OnWarmUpCandle(&candle)
 		}
+	}
+}
+
+func WithSignalDispatcher(dispatcher signal.Dispatcher) Option {
+	return func(trader *Trader) {
+		trader.signalDispatcher = dispatcher
 	}
 }
 
@@ -158,13 +157,23 @@ func New(ctx context.Context, instrument, gitRev string, db *sql.DB, options ...
 		option(tr)
 	}
 
+	if tr.signalDispatcher == nil {
+		tr.signalDispatcher = signal.NewMemoryDispatcher()
+	}
+	tr.signalOrchestrator = signalexec.New(tr.signalDispatcher, tr.clog)
+
 	if tr.db == nil {
 		if tr.persistTickData || tr.persistCandleData {
-			panic("Persistence of ticks or/and candles requested but no DB given!")
+			slog.Error("persistence requested but no DB given, disabling persistence")
+			tr.persistTickData = false
+			tr.persistCandleData = false
 		}
 	} else {
 		if err := tr.ensureSchema(ctx); err != nil {
-			panic(fmt.Sprintf("db schema initialization failed: %v", err))
+			slog.Error("db schema initialization failed, disabling persistence", "error", err)
+			tr.persistTickData = false
+			tr.persistCandleData = false
+			tr.db = nil
 		}
 	}
 
@@ -240,28 +249,21 @@ func (tr *Trader) getOpenPositions() ([]broker.Position, error) {
 
 func (tr *Trader) persistTick(t tick.Tick) {
 	if err := tr.insertTick(tr.ctx, t); err != nil {
-		slog.Error(fmt.Sprintf("Cannot persist tick: %+v", t), "error", err)
+		slog.Error("cannot persist tick", "tick", t, "error", err)
 	}
 }
 
 func (tr *Trader) receiveTicks() {
-	var locBerlin, err = time.LoadLocation("Europe/Berlin")
-	if err != nil {
-		panic(fmt.Sprintf("Unable to load Europe/Berlin timezone: %v", err))
-	}
-
 	for currentTick := range tr.TickChan {
 		if tr.persistTickData {
 			go tr.persistTick(currentTick)
 		}
-		currentTick.Datetime = currentTick.Datetime.In(locBerlin)
 
 		if err := currentTick.Validate(); err != nil {
-			tr.clog.Debug(fmt.Sprintf("Invalid tick data received: %+v", currentTick), "error", err)
+			tr.clog.Debug("invalid tick data received", "tick", currentTick, "error", err)
 			continue
 		}
 
-		//tr.clog.Debugf("New tick received %s", currentTick.String())
 		tr.Lock()
 		tr.processTodayCandle(currentTick)
 		tr.processTick(currentTick)
@@ -280,10 +282,10 @@ func (tr *Trader) processTick(currentTick tick.Tick) {
 }
 
 func (tr *Trader) processClosedCandle(closedCandle *ohlc.OHLC, currentTick tick.Tick) {
-	tr.clog.Debug(fmt.Sprintf("Processing closed candle: %s", closedCandle))
+	tr.clog.Debug("processing closed candle", "candle", closedCandle)
 
 	if !closedCandle.HasPriceData() {
-		tr.clog.Debug(fmt.Sprintf("processClosedCandle: candle has missing price data, cannot process further: %s", closedCandle))
+		tr.clog.Debug("candle has missing price data, skipping", "candle", closedCandle)
 		return
 	}
 
@@ -318,7 +320,7 @@ func (tr *Trader) processClosedCandle(closedCandle *ohlc.OHLC, currentTick tick.
 	toOpen, toClose, toClosePositions := tr.strategy.OnCandle(tr.closedCandles)
 	tr.processClosableOrders(toClose)
 	tr.processClosablePositions(toClosePositions)
-	tr.processOrders(closedCandle, currentTick, toOpen)
+	tr.processOrders(toOpen)
 
 	for _, subscriber := range tr.candleSubscribers {
 		subscriber.OnCandle(*closedCandle)
@@ -326,11 +328,7 @@ func (tr *Trader) processClosedCandle(closedCandle *ohlc.OHLC, currentTick tick.
 }
 
 func (tr *Trader) processClosableOrders(orders []broker.Order) {
-	for _, order := range orders {
-		if err := tr.broker.CancelOrder(order.ID); err != nil {
-			tr.clog.Error("Unable to cancel order", "error", err, "OrderID", order.ID)
-		}
-	}
+	tr.signalExec().DispatchClosableOrders(orders)
 }
 
 func (tr *Trader) processOpenPositions(candle *ohlc.OHLC, openPositions []broker.Position) {
@@ -343,30 +341,28 @@ func (tr *Trader) processOpenPositions(candle *ohlc.OHLC, openPositions []broker
 }
 
 func (tr *Trader) processClosablePositions(toClose []broker.Position) {
-	for _, position := range toClose {
-		if err := tr.broker.Sell(position); err != nil {
-			tr.clog.Error("Unable to sell position", "error", err, "Reference", position.Reference)
-		}
-	}
+	tr.signalExec().DispatchClosablePositions(toClose)
 }
 
-// processOrders - Execute order and open new positions
-func (tr *Trader) processOrders(candle *ohlc.OHLC, currentTick tick.Tick, toOpen []broker.Order) {
-	for _, order := range toOpen {
-		order.CurrencyCode = tr.currencyCode
-
-		_, err := tr.broker.Buy(order)
-		if err != nil {
-			tr.clog.Error(fmt.Sprintf("Unable to open position: %+v", order), "error", err)
-			continue
-		}
-
-		tr.clog.Info(fmt.Sprintf("Got new order: %s", order.String()))
-
+// processOrders dispatches buy signals for new orders.
+func (tr *Trader) processOrders(toOpen []broker.Order) {
+	tr.signalExec().DispatchOpenOrders(toOpen, tr.currencyCode, func(order broker.Order) {
 		for _, subscriber := range tr.orderSubscribers {
 			subscriber.OnOrder(order)
 		}
+	})
+}
+
+func (tr *Trader) signalExec() *signalexec.Orchestrator {
+	if tr.signalOrchestrator == nil {
+		dispatcher := tr.signalDispatcher
+		if dispatcher == nil {
+			dispatcher = signal.NewMemoryDispatcher()
+			tr.signalDispatcher = dispatcher
+		}
+		tr.signalOrchestrator = signalexec.New(dispatcher, tr.clog)
 	}
+	return tr.signalOrchestrator
 }
 
 func (tr *Trader) processTickByOpenCandles(currentTick tick.Tick) (closedCandles []*ohlc.OHLC) {
@@ -424,7 +420,7 @@ func (tr *Trader) closeCandle(tick tick.Tick, candle *ohlc.OHLC) (newCandle *ohl
 	if tr.db != nil && tr.persistCandleData {
 		go func() {
 			if err := candle.Store(tr.ctx, tr.db); err != nil {
-				tr.clog.Error(fmt.Sprintf("Failed to store OHLC: %+v", candle), "error", err)
+				tr.clog.Error("failed to store OHLC", "candle", candle, "error", err)
 			}
 		}()
 	}

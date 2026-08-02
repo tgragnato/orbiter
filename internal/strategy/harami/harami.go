@@ -5,13 +5,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/circularbuffer"
-	"github.com/sklinkert/at/pkg/helper"
-	"github.com/sklinkert/at/pkg/indicator/sma"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/circularbuffer"
+	"github.com/tgragnato/orbiter/pkg/helper"
+	"github.com/tgragnato/orbiter/pkg/indicator/sma"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 // Buy if current closed candle is a bullish harami candle and market is still above SMA 200
@@ -28,7 +28,7 @@ type Harami struct {
 }
 
 const (
-	targetInPercent   = 100.0
+	targetInPercent   = 5.0
 	stopLossInPercent = 0.5
 	smaCandles        = 200
 )
@@ -128,7 +128,7 @@ func (h *Harami) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.
 		return []broker.Order{toOpenNew}, []broker.Order{}, []broker.Position{}
 	}
 
-	h.clog.Debug(fmt.Sprintf("No harami long candle found: %s", closedCandle))
+	h.clog.Debug("no harami long candle found", "candle", closedCandle)
 	return
 }
 

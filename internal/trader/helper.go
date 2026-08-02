@@ -6,30 +6,8 @@ import (
 	"sort"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/helper"
+	"github.com/tgragnato/orbiter/pkg/helper"
 )
-
-// getTotalPerformanceInPips return total performance of closed positions
-//func (tr *Trader) getTotalPerformanceInPips() (decimal.Decimal, error) {
-//	var positions, err = tr.broker.GetClosedPositions()
-//	if err != nil {
-//		return decZero, err
-//	}
-//	var totalPerfPips decimal.Decimal
-//	for _, position := range positions {
-//		targetInPips := helper.Cent2Pips(position.TargetPrice.Sub(position.BuyPrice)).Round(2)
-//		stopLossInPips := helper.Cent2Pips(position.BuyPrice.Sub(position.StopLossPrice)).Round(2)
-//		if position.BuyDirection == broker.BuyDirectionShort {
-//			targetInPips = targetInPips.Neg()
-//			stopLossInPips = stopLossInPips.Neg()
-//		}
-//
-//		perfAbs := position.PerformanceAbsolute(position.SellPrice, position.SellPrice)
-//		perfPips := helper.Cent2Pips(decimal.NewFromFloat(perfAbs))
-//		totalPerfPips = totalPerfPips.Add(perfPips)
-//	}
-//	return totalPerfPips, nil
-//}
 
 var dec100 = decimal.NewFromFloat(100)
 
@@ -41,17 +19,12 @@ func distanceInPercentage(price1, price2 decimal.Decimal) decimal.Decimal {
 	return price2.Sub(price1).Div(price1).Mul(dec100)
 }
 
-//func (tr *Trader) gapToSMAInPercent(currentTick tick.Tick) (decimal.Decimal, error) {
-//	price := currentTick.Ask.Add(currentTick.Bid).Div(decimal.NewFromFloat(2))
-//	sma, err := tr.sma.Average()
-//	if err != nil {
-//		return decZero, err
-//	}
-//	return distanceInPercentage(decimal.NewFromFloat(sma), price), nil
-//}
-
 func (tr *Trader) printPositionPerformanceByNotes() {
-	closedPositions, _ := tr.GetClosedPositions()
+	closedPositions, err := tr.GetClosedPositions()
+	if err != nil {
+		slog.Error("cannot get closed positions for performance summary", "error", err)
+		return
+	}
 
 	var perfPositionsByNote = map[string]float64{}
 	for _, position := range closedPositions {
@@ -67,6 +40,6 @@ func (tr *Trader) printPositionPerformanceByNotes() {
 	sort.Strings(sortedKeys)
 	for _, note := range sortedKeys {
 		totalProfit := perfPositionsByNote[note]
-		slog.Info(fmt.Sprintf("%25s: %s %.2f pips", "Total profit for positions with note", note, totalProfit))
+		slog.Info("position performance by note", "note", note, "total_profit_pips", totalProfit)
 	}
 }

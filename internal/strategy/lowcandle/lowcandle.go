@@ -5,13 +5,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/circularbuffer"
-	"github.com/sklinkert/at/pkg/helper"
-	"github.com/sklinkert/at/pkg/indicator/sma"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/circularbuffer"
+	"github.com/tgragnato/orbiter/pkg/helper"
+	"github.com/tgragnato/orbiter/pkg/indicator/sma"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 // Long: Buy if candle closes below the last 7 candles and is above SMA 200
@@ -25,7 +25,6 @@ type LowCandle struct {
 	previousLows  *circularbuffer.CircularBuffer
 	previousHighs *circularbuffer.CircularBuffer
 	ohlcPeriod    time.Duration
-	locEST        *time.Location
 	openPositions []broker.Position
 	openOrders    []broker.Order
 }
@@ -41,11 +40,6 @@ const (
 func New(instrument string, candleDuration time.Duration) *LowCandle {
 	clog := slog.With("INSTRUMENT", instrument, "CANDLE", candleDuration)
 
-	locEST, err := time.LoadLocation("EST")
-	if err != nil {
-		panic(fmt.Sprintf("time zone EST missing: %v", err))
-	}
-
 	return &LowCandle{
 		clog:          clog,
 		instrument:    instrument,
@@ -53,7 +47,6 @@ func New(instrument string, candleDuration time.Duration) *LowCandle {
 		previousLows:  circularbuffer.New(7, 7),
 		previousHighs: circularbuffer.New(7, 7),
 		ohlcPeriod:    candleDuration,
-		locEST:        locEST,
 	}
 }
 
@@ -83,28 +76,6 @@ func (d *LowCandle) feedIndicator(closedCandle *ohlc.OHLC) {
 
 func (d *LowCandle) GetCandleDuration() time.Duration {
 	return d.ohlcPeriod
-}
-
-func (d *LowCandle) noTradingPeriod(now time.Time) bool {
-	now = now.Local()
-
-	// Weekend
-	if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
-		return true
-	}
-
-	// Avoid trading during night hours to improve backtesting matching.
-	if now.Hour() > 20 && now.Hour() < 4 {
-		return false
-	}
-
-	// Avoid trading during US stocks markets (NYSE + NASDAQ) opening and closing
-	var estTime = now.In(d.locEST)
-	if estTime.Hour() == 9 || estTime.Hour() == 16 { // 09:30 - 16:00 EST
-		return true
-	}
-
-	return false
 }
 
 func (d *LowCandle) OnTick(_ tick.Tick) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
@@ -157,13 +128,8 @@ func (d *LowCandle) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Or
 		return
 	}
 
-	if d.noTradingPeriod(closedCandle.End) {
-		d.clog.Info("No trading period")
-		return
-	}
-
 	if closePrice < smaPrice && lowPrice < smaPrice {
-		d.clog.Debug(fmt.Sprintf("close is below SMA: %f < %f", closePrice, smaPrice))
+		d.clog.Debug("close is below SMA", "close", closePrice, "sma", smaPrice)
 		return
 	}
 
@@ -177,7 +143,7 @@ func (d *LowCandle) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Or
 		toOpenNew := d.prepareOrder(closedCandle, broker.BuyDirectionLong, 1.00)
 		return []broker.Order{toOpenNew}, []broker.Position{}
 	}
-	d.clog.Debug(fmt.Sprintf("long: closePrice >= previousCandlesLow : %f > %f", closePrice, previousCandlesLow))
+	d.clog.Debug("long: closePrice >= previousCandlesLow", "close", closePrice, "previousLow", previousCandlesLow)
 	return
 }
 
@@ -185,8 +151,6 @@ func (d *LowCandle) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 	var closedCandle = closedCandles[len(closedCandles)-1]
 	var closePrice = helper.DecimalToFloat(closedCandle.Close)
 	var highPrice = helper.DecimalToFloat(closedCandle.High)
-
-	defer d.feedIndicator(closedCandle)
 
 	smaValue, err := d.sma.Value()
 	if err != nil {
@@ -212,19 +176,14 @@ func (d *LowCandle) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 		return
 	}
 
-	if d.noTradingPeriod(closedCandle.End) {
-		d.clog.Info("No trading period")
-		return
-	}
-
 	if closePrice > smaPrice && highPrice > smaPrice {
-		d.clog.Debug(fmt.Sprintf("close is below SMA: %f < %f", closePrice, smaPrice))
+		d.clog.Debug("close is above SMA", "close", closePrice, "sma", smaPrice)
 		return
 	}
 
 	previousCandlesHigh, err := d.previousHighs.Max()
 	if err != nil {
-		d.clog.Warn("no previous low", "error", err)
+		d.clog.Warn("no previous high", "error", err)
 		return
 	}
 
@@ -232,7 +191,7 @@ func (d *LowCandle) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 		toOpenNew := d.prepareOrder(closedCandle, broker.BuyDirectionShort, 1.00)
 		return []broker.Order{toOpenNew}, []broker.Position{}
 	}
-	d.clog.Debug(fmt.Sprintf("short: closePrice <= previousCandlesHigh : %f > %f", closePrice, previousCandlesHigh))
+	d.clog.Debug("short: closePrice <= previousCandlesHigh", "close", closePrice, "previousHigh", previousCandlesHigh)
 	return
 }
 

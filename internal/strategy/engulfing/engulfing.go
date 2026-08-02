@@ -3,14 +3,14 @@ package engulfing
 import (
 	"fmt"
 	"log/slog"
-
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/helper"
-	"github.com/sklinkert/at/pkg/indicator/sma"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
 	"time"
+
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/helper"
+	"github.com/tgragnato/orbiter/pkg/indicator/sma"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 // Long: Buy if candle closes below the last 7 candles and is above SMA 200
@@ -18,13 +18,10 @@ import (
 // Source: https://www.youtube.com/watch?v=_9Bmxylp63Y
 
 type Engulfing struct {
-	clog       *slog.Logger
-	instrument string
-	sma        *sma.SMA
-	//previousLows  ring.Ring
-	//previousHighs ring.Ring
+	clog          *slog.Logger
+	instrument    string
+	sma           *sma.SMA
 	ohlcPeriod    time.Duration
-	locEST        *time.Location
 	openPositions []broker.Position
 	openOrders    []broker.Order
 }
@@ -40,17 +37,11 @@ const (
 func New(instrument string, candleDuration time.Duration) *Engulfing {
 	clog := slog.With("INSTRUMENT", instrument, "CANDLE", candleDuration)
 
-	locEST, err := time.LoadLocation("EST")
-	if err != nil {
-		panic(fmt.Sprintf("time zone EST missing: %v", err))
-	}
-
 	return &Engulfing{
 		clog:       clog,
 		instrument: instrument,
 		sma:        sma.New(smaCandles),
 		ohlcPeriod: candleDuration,
-		locEST:     locEST,
 	}
 }
 
@@ -76,23 +67,6 @@ func (d *Engulfing) feedIndicator(closedCandle *ohlc.OHLC) {
 
 func (d *Engulfing) GetCandleDuration() time.Duration {
 	return d.ohlcPeriod
-}
-
-func (d *Engulfing) noTradingPeriod(now time.Time) bool {
-	now = now.Local()
-
-	// Weekend
-	if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
-		return true
-	}
-
-	// Avoid trading during US stocks markets (NYSE + NASDAQ) opening and closing
-	//var estTime = now.In(d.locEST)
-	//if estTime.Hour() == 9 || estTime.Hour() == 16 { // 09:30 - 16:00 EST
-	//	return true
-	//}
-
-	return false
 }
 
 func (d *Engulfing) OnTick(_ tick.Tick) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
@@ -219,13 +193,8 @@ func (d *Engulfing) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 		return
 	}
 
-	if d.noTradingPeriod(closedCandle.End) {
-		d.clog.Info("No trading period")
-		return
-	}
-
 	if closePrice > smaPrice && lowPrice > smaPrice {
-		d.clog.Debug(fmt.Sprintf("close is above SMA: %f < %f", closePrice, smaPrice))
+		d.clog.Debug("close is above SMA", "close", closePrice, "sma", smaPrice)
 		return
 	}
 
@@ -268,13 +237,8 @@ func (d *Engulfing) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Or
 		return
 	}
 
-	if d.noTradingPeriod(closedCandle.End) {
-		d.clog.Info("No trading period")
-		return
-	}
-
 	if closePrice < smaPrice && lowPrice < smaPrice {
-		d.clog.Debug(fmt.Sprintf("close is below SMA: %f < %f", closePrice, smaPrice))
+		d.clog.Debug("close is below SMA", "close", closePrice, "sma", smaPrice)
 		return
 	}
 

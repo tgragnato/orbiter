@@ -4,16 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/indicator"
-	"github.com/sklinkert/at/pkg/indicator/sma"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
-	"github.com/sklinkert/at/pkg/volatility"
-	"time"
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/indicator"
+	"github.com/tgragnato/orbiter/pkg/indicator/sma"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
+	"github.com/tgragnato/orbiter/pkg/volatility"
 )
 
 type HeikinAshi struct {
@@ -135,11 +135,6 @@ func (ha *HeikinAshi) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []br
 		return
 	}
 
-	//if err := ha.checkSMA(direction, &currentTick); err != nil {
-	//	ha.clog.WithError(err).Debug("checkSMA() failed")
-	//	return
-	//}
-
 	order, err := ha.createOrder(haNow, ha.currentTick, 0.20, direction)
 	if err == nil {
 		toOpen = append(toOpen, order)
@@ -156,31 +151,6 @@ func (ha *HeikinAshi) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []br
 	return
 }
 
-// checkSMA - Check if SMA trend is supporting HA direction
-//func (ha *HeikinAshi) checkSMA(direction broker.BuyDirection, currentTick *tick.Tick) error {
-//	smaValueFloat, err := ha.sma.Value()
-//	if err != nil {
-//		return err
-//	}
-//	smaValue := decimal.NewFromFloat(smaValueFloat[sma.Value])
-//
-//	switch direction {
-//	case broker.BuyDirectionLong:
-//		if currentTick.Price().LessThan(smaValue) {
-//			return fmt.Errorf("no support from SMA; direction is long, SMA is short (%s > %s)",
-//				currentTick.Price(), smaValue)
-//		}
-//	case broker.BuyDirectionShort:
-//		if currentTick.Price().GreaterThan(smaValue) {
-//			return fmt.Errorf("no support from SMA; direction is short, SMA is long (%s > %s)",
-//				currentTick.Price(), smaValue)
-//		}
-//	default:
-//		return broker.ErrUnknownBuyDirection
-//	}
-//	return nil
-//}
-
 func (ha *HeikinAshi) createOrder(haCandle *ohlc.OHLC, currentTick tick.Tick, volaQuantileForTarget float64, direction broker.BuyDirection) (broker.Order, error) {
 	const size = 1
 
@@ -192,12 +162,12 @@ func (ha *HeikinAshi) createOrder(haCandle *ohlc.OHLC, currentTick tick.Tick, vo
 
 	targetPrice, err := ha.calcTargetPrice(direction, currentTick, volaTarget)
 	if err != nil {
-		return broker.Order{}, fmt.Errorf("calcTargetPrice() failed %v", err)
+		return broker.Order{}, fmt.Errorf("calcTargetPrice() failed: %w", err)
 	}
 
 	stopLossPrice, err := ha.calcStopLossPrice(direction, currentTick)
 	if err != nil {
-		return broker.Order{}, fmt.Errorf("calcStopLossPrice() failed %v", err)
+		return broker.Order{}, fmt.Errorf("calcStopLossPrice() failed: %w", err)
 	}
 
 	ha.clog.Debug("Creating new order",
@@ -254,40 +224,6 @@ func (ha *HeikinAshi) checkCandleAmount(direction broker.BuyDirection, offset in
 	}
 	return nil
 }
-
-//func isDOJI(candle *ohlc.OHLC) bool {
-//	if candle == nil || !candle.Closed() {
-//		return false
-//	}
-//	perfPercentage := candle.PerformanceInPercentage().Abs()
-//	if perfPercentage.LessThanOrEqual(decimal.NewFromFloat(0.25)) {
-//		return true
-//	}
-//	return false
-//}
-
-//func isBigCandle(candle *ohlc.OHLC) bool {
-//	if candle == nil || !candle.Closed() {
-//		return false
-//	}
-//	perfPercentage := candle.VolatilityInPercentage().Abs()
-//	if perfPercentage.GreaterThanOrEqual(decimal.NewFromFloat(1)) {
-//		return true
-//	}
-//	return false
-//}
-
-//func (ha *HeikinAshi) hadPositionInCandle(candle *ohlc.OHLC, closedPositions []broker.Position) bool {
-//	for _, position := range closedPositions {
-//		if position.BuyTime.After(candle.Start) && position.BuyTime.Before(candle.End) {
-//			return true
-//		}
-//		if position.SellTime.After(candle.Start) && position.SellTime.Before(candle.End) {
-//			return true
-//		}
-//	}
-//	return false
-//}
 
 func (ha *HeikinAshi) calcTargetPrice(direction broker.BuyDirection, tick tick.Tick, perfMarginInPercentage decimal.Decimal) (decimal.Decimal, error) {
 	switch direction {

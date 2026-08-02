@@ -2,8 +2,8 @@ package stochrsi
 
 import (
 	"github.com/markcheno/go-talib"
-	"github.com/sklinkert/at/pkg/circularbuffer"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/circularbuffer"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 const ValueK = "StochRSI_VALUE_K"

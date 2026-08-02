@@ -2,16 +2,16 @@ package rsiadx
 
 import (
 	"log/slog"
-
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/eo"
-	"github.com/sklinkert/at/pkg/helper"
-	indicatoradx "github.com/sklinkert/at/pkg/indicator/adx"
-	indicatorrsi "github.com/sklinkert/at/pkg/indicator/rsi"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
 	"time"
+
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/eo"
+	"github.com/tgragnato/orbiter/pkg/helper"
+	indicatoradx "github.com/tgragnato/orbiter/pkg/indicator/adx"
+	indicatorrsi "github.com/tgragnato/orbiter/pkg/indicator/rsi"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 type RSIADX struct {
@@ -68,17 +68,6 @@ func (d *RSIADX) OnWarmUpCandle(closedCandle *ohlc.OHLC) {
 	d.rsi.Insert(closedCandle)
 	d.adx.Insert(closedCandle)
 	d.eo.AddCandle(closedCandle)
-
-	rsiValue, rsiErr := d.getRSI()
-	adxValue, adxErr := d.getADX()
-	slog.Info("Processing warmup candle",
-		"Start", closedCandle.Start,
-		"Close", closedCandle.Close,
-		"RSI", rsiValue,
-		"RSI_ERR", rsiErr,
-		"ADX", adxValue,
-		"ADX_ERR", adxErr,
-	)
 }
 
 func (d *RSIADX) GetWarmUpCandleAmount() uint {

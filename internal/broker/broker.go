@@ -2,7 +2,7 @@ package broker
 
 import (
 	"errors"
-	"github.com/sklinkert/at/pkg/tick"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 type BuyDirection int

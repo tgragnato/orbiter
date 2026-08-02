@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/tick"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 const maxGapBetweenTicksInSeconds = 60
@@ -140,35 +140,35 @@ func (o *OHLC) Validate() error {
 
 func (o *OHLC) PerformanceFromOpenToHighAbsolute() decimal.Decimal {
 	if o.Open.IsZero() {
-		panic(fmt.Sprintf("ohlc.Open is zero: %+v", o))
+		return decimal.Zero
 	}
 	return o.High.Sub(o.Open).Div(o.Open).Mul(decimal.NewFromFloat(100)).Round(4)
 }
 
 func (o *OHLC) PerformanceFromOpenToLowAbsolute() decimal.Decimal {
 	if o.Open.IsZero() {
-		panic(fmt.Sprintf("ohlc.Open is zero: %+v", o))
+		return decimal.Zero
 	}
 	return o.Low.Sub(o.Open).Div(o.Open).Mul(decimal.NewFromFloat(100)).Round(4)
 }
 
 func (o *OHLC) ReversionPerformanceFromHighAbsolute() decimal.Decimal {
 	if o.High.IsZero() {
-		panic(fmt.Sprintf("ohlc.High is zero: %+v", o))
+		return decimal.Zero
 	}
 	return o.Close.Sub(o.High).Div(o.High).Mul(decimal.NewFromFloat(100)).Round(4)
 }
 
 func (o *OHLC) PerformanceInPercentage() decimal.Decimal {
 	if o.Open.IsZero() {
-		panic(fmt.Sprintf("ohlc.Open is zero: %+v", o))
+		return decimal.Zero
 	}
 	return o.Close.Sub(o.Open).Div(o.Open).Mul(decimal.NewFromFloat(100)).Round(4)
 }
 
 func (o *OHLC) VolatilityInPercentage() decimal.Decimal {
 	if o.Open.IsZero() {
-		panic(fmt.Sprintf("ohlc.Open is zero: %+v", o))
+		return decimal.Zero
 	}
 	return o.High.Sub(o.Low).Div(o.Open).Mul(decimal.NewFromFloat(100)).Round(4)
 }

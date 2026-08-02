@@ -1,13 +1,11 @@
 package performance
 
 import (
-	"fmt"
-
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 func TestAddOHLC(t *testing.T) {
@@ -19,7 +17,7 @@ func TestAddOHLC(t *testing.T) {
 		o := ohlc.New("test", now, time.Minute, false)
 		o.NewPrice(decimal.NewFromFloat(1.0), o.Start)
 		o.NewPrice(decimal.NewFromFloat(float64(i)+1), o.Start)
-		fmt.Printf("ADD: %d -> %s\n", i, o.PerformanceInPercentage())
+		t.Logf("ADD: %d -> %s", i, o.PerformanceInPercentage())
 		o.ForceClose()
 		v.AddOHLC(o)
 	}

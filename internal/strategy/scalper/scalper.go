@@ -2,13 +2,14 @@ package scalper
 
 import (
 	"fmt"
-	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
 	"log/slog"
 	"time"
+
+	"github.com/shopspring/decimal"
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 // scalper targets a small profit
@@ -101,12 +102,12 @@ func getBuyDirection(candle *ohlc.OHLC) broker.BuyDirection {
 func (mr *scalper) createOrder(openOHLC *ohlc.OHLC, direction broker.BuyDirection, size float64, orderName string) (broker.Order, error) {
 	targetPrice, err := mr.calcTargetPrice(direction, mr.currentTick, targetPercent)
 	if err != nil {
-		return broker.Order{}, fmt.Errorf("calcTargetPrice() failed %v", err)
+		return broker.Order{}, fmt.Errorf("calcTargetPrice() failed: %w", err)
 	}
 
 	stopLossPrice, err := mr.calcStopLossPrice(direction, mr.currentTick, stopLossPercent)
 	if err != nil {
-		return broker.Order{}, fmt.Errorf("calcStopLossPrice() failed %v", err)
+		return broker.Order{}, fmt.Errorf("calcStopLossPrice() failed: %w", err)
 	}
 
 	mr.clog.Debug("Creating new order",

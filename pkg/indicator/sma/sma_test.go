@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 func TestSMA_Value(t *testing.T) {

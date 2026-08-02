@@ -1,28 +1,93 @@
 version: "2"
 
+run:
+  timeout: 5m
+  allow-parallel-runners: true
+
 linters:
   enable:
+    # --- Correctness ---
     - errcheck
     - govet
     - ineffassign
-    - staticcheck
+    - staticcheck      # SA* checks: bug-finding, correctness
+    - stylecheck       # ST* checks: Go style conventions
     - unused
-    - misspell
     - unconvert
+
+    # --- Resource Leak Prevention (critical for PostgreSQL + HTTP paths) ---
+    - bodyclose        # resp.Body must be closed (Yahoo Finance adapter)
+    - sqlclosecheck    # sql.Rows / sql.Stmt must be closed
+    - rowserrcheck     # rows.Err() must be checked after iteration
+    - noctx            # HTTP requests must carry a context.Context
+    - errorlint        # enforce %w wrapping; errors.Is / errors.As
+    - durationcheck    # prevent time.Duration multiplication bugs
+
+    # --- Code Quality ---
+    - gocritic
+    - gosec
+    - revive
+    - nilnil           # ban ambiguous (nil, nil) returns
+    - misspell
+
+    # --- Engineering Standards Enforcement ---
+    - paralleltest     # t.Parallel() required in every test (§Testing)
+    - sloglint         # structured slog calls; no mixed positional/KV args (§Structured Logging)
+    - forbidigo        # ban log.Fatal / os.Exit in library code (§Tooling)
+
   settings:
     staticcheck:
-      # Start from staticcheck's default set, then drop the opinionated
-      # "quickfix" style refactors (tagged switch, De Morgan's law).
       checks:
         - all
-        - -ST1000
-        - -ST1003
-        - -ST1016
-        - -ST1020
-        - -ST1021
-        - -ST1022
-        - -QF1001
-        - -QF1003
+        - -QF1001   # De Morgan's law — reduces readability in most cases
+        - -QF1003   # if/else-if to switch — team style preference
+        - -ST1000   # Package comment not required on every file
+        - -ST1003   # Underscores allowed in test names and generated identifiers
+        # ST1016 enabled: receiver names must be consistent within a type
+        # ST1020/ST1021/ST1022 enabled: exported symbols must have doc comments
+        #   that start with the symbol name (standard Go godoc convention)
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - performance
+        - style
+      disabled-checks:
+        - hugeParam   # False positives on intentionally large config structs
+                      # (WalkForwardConfig, taa.Config, etc.)
+
+    sloglint:
+      no-mixed-args: true   # ban mixing positional args and key-value pairs
+      kv-only: true         # all args after the message must be "key", value pairs
+
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - disableStutteringCheck: true   # "Foo is a Foo" allowed in comments
+
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^log\.Fatal(f|ln)?$'
+          msg: "use slog + error returns instead of log.Fatal (§Tooling)"
+        - pattern: '^os\.Exit$'
+          msg: "use error returns instead of os.Exit in library code (§Tooling)"
+
+  exclusions:
+    rules:
+      # Test files: relax security, errcheck, and context rules
+      - linters:
+          - gosec
+          - errcheck
+          - noctx
+        path: _test\.go$
+
+      # main.go is the process boundary — os.Exit and log.Fatal are allowed
+      - linters:
+          - forbidigo
+        path: ^main\.go$
 
 issues:
   max-issues-per-linter: 0

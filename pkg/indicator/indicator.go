@@ -2,7 +2,7 @@ package indicator
 
 import (
 	"errors"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 type Indicator interface {

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 func (tr *Trader) ensureSchema(ctx context.Context) error {
@@ -85,6 +85,7 @@ func (tr *Trader) ensureSchema(ctx context.Context) error {
 			performance_record_id BIGINT REFERENCES performance_records(id) ON DELETE CASCADE,
 			reference TEXT,
 			instrument TEXT,
+			allocation_type TEXT NOT NULL DEFAULT 'SATELLITE',
 			buy_price NUMERIC(20,10),
 			buy_time TIMESTAMPTZ,
 			buy_direction SMALLINT,

@@ -1,8 +1,8 @@
 package performance
 
 import (
-	"github.com/sklinkert/at/pkg/circularbuffer"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/circularbuffer"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 type Performance struct {

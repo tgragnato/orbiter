@@ -1,124 +1,144 @@
-# Automated Trader (at)
+# 🛰️ Orbiter - Core-Satellite Portfolio Manager
 
-[![CI](https://github.com/sklinkert/at/actions/workflows/ci.yaml/badge.svg)](https://github.com/sklinkert/at/actions/workflows/ci.yaml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/sklinkert/at)](https://goreportcard.com/report/github.com/sklinkert/at)
-[![Go Reference](https://pkg.go.dev/badge/github.com/sklinkert/at.svg)](https://pkg.go.dev/github.com/sklinkert/at)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/sklinkert/at)](go.mod)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+A Go application for managing a Core-Satellite portfolio workflow with PostgreSQL-backed configuration, a Bubble Tea terminal interface, and manual execution signals.
 
-A Go framework for building, backtesting, and running automated trading strategies against real broker APIs. It works for stocks, forex, and crypto, and any broker can be plugged in behind a small interface.
+This repository has been refactored away from direct broker automation into a keyboard-driven portfolio and signal workstation:
 
-**This is a framework, not a ready-made trading bot.** The bundled strategies are illustrative examples, not profitable systems.
+- Tab 1: Unified holdings management (Core + Satellite in one table)
+- Tab 2: Non-blocking TAA signal queue viewer
+- Runtime configuration: database-driven, loaded from PostgreSQL
 
-```
- ticks / candles          decision            orders
- ───────────────▶  Strategy ────────▶  Trader ───────▶  Broker
-    (Trader)         (your logic)      (this repo)     (IG, Coinbase, …)
-```
+## Project Overview
 
-## Why use it
+Orbiter focuses on a Core-Satellite portfolio process where tactical decisions become signals in the terminal UI for manual execution.
 
-- **Plug-in architecture** — brokers, strategies, and indicators are all small interfaces. Implement one, wire it in, done.
-- **Backtest before you risk money** — replay historical prices with configurable spreads and trading fees, then print a performance summary and equity curve.
-- **Paperwallet** — simulate fills for brokers without a sandbox, so you can dry-run against live prices.
+The runtime architecture is:
 
-## Quick start
+1. Start with a PostgreSQL DSN only.
+2. Run schema migrations and bootstrap settings from the database.
+3. Launch a Bubble Tea root model composed of:
+1. Tab 1 Unified Holdings
+2. Tab 2 Signals Queue
 
-Runs a full backtest with **no external data source or account** — a small sample EUR/USD dataset ships in `examples/sample-data/`.
+This keeps startup deterministic and centralizes operational configuration in PostgreSQL instead of CLI flag sprawl.
+
+## Startup Contract (Strict DSN-Only)
+
+The runtime startup contract is **single-parameter only**:
 
 ```sh
-# 1. Import the sample tick data into PostgreSQL
-go run . import-histdata \
-  --import-histdata-csv-files examples/sample-data/EURUSD-2021-01.csv \
-  --instrument EURUSD \
-  --db-dsn postgres://postgres:postgres@localhost:5432/at?sslmode=disable
-
-# 2. Backtest the RSI strategy against it
-go run . backtesting \
-  --price-source LOCAL_DB \
-  --price-db-dsn postgres://postgres:postgres@localhost:5432/at?sslmode=disable \
-  --instrument EURUSD \
-  --strategy rsi \
-  --candle-duration 1m \
-  --year-from 2021 --month-from 1 --year-to 2021 --month-to 1
+go run . --dsn postgres://postgres:postgres@localhost:5432/orbiter?sslmode=disable
 ```
 
-The backtest prints a trade-by-trade log and a summary (positions, win rate, performance in pips), writes `results/backtesting_result.csv`, and serves an interactive chart at `http://localhost:8080/chart`.
+or via environment variable:
 
-Run `go run . <command> --help` to inspect the available flags for each subcommand.
+```sh
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/orbiter?sslmode=disable go run .
+```
 
-## Supported brokers
+Only PostgreSQL DSN is accepted at startup. All application settings are loaded from PostgreSQL (`app_settings`) during bootstrap.
 
-| Broker   | Demo account | Paperwallet trading | Real trading | Backtesting |
-| -------- | :----------: | :-----------------: | :----------: | :---------: |
-| IG.com   |      ✅      |         ❌          |      ✅      |     ✅      |
-| Coinbase |      ❌      |         ✅          |      ❌      |     ✅      |
+Bootstrap sequence:
+
+1. Open PostgreSQL using `--dsn` or `DATABASE_URL`.
+2. Run schema migrations (`schema_migrations`, `app_settings`, `holdings`).
+3. Seed default application settings if `app_settings` is empty.
+4. Validate required settings through the configuration service.
+
+Settings seeded and validated include:
+
+- Cost basis method (PMC default; FIFO/LIFO supported)
+- Data provider preferences (Yahoo default, EUR)
+- TAA parameters
+- Core/satellite target ratios
+- TUI preferences
+- Yahoo credential slot
+
+## Key Features
+
+### Unified Holdings TUI (Tab 1)
+
+- Single-table view for both Core and Satellite assets
+- Allocation badges rendered in `[CORE]` / `[SAT]` style chips
+- NAV summary bar with total, core %, satellite %, TWR %, and realized PnL
+- Instant allocation toggle with `t` key
+- Non-blocking periodic refresh
+
+### Signals TUI (Tab 2)
+
+- Non-blocking TAA signal queue display
+- Polls queued signal read model without blocking the rest of the UI
+- Designed for manual rebalance execution workflows
+
+### Analytics and Accounting
+
+- Configurable cost basis policy in PostgreSQL (`PMC`, `FIFO`, `LIFO`)
+- Time-Weighted Return (TWR) engine with sub-period geometric chaining
+- Corporate actions handling: splits and dividends
+- Realized PnL tracking with tax-lot links
+
+### Single Parameter Startup
+
+- Strict `--dsn` or `DATABASE_URL` startup contract
+- No additional runtime parameters required to launch the portfolio UI
 
 ## Architecture
 
-The `Trader` is the nerve center: it receives prices from a broker, forwards them to your strategy, and executes the orders the strategy returns.
+Runtime data flow:
 
-1. The trader sends closed candles ([what is a candlestick?](https://www.investopedia.com/terms/c/candlestick.asp)) and the current tick to the strategy.
-2. The strategy optionally feeds indicators and reads their latest values.
-3. The strategy decides which positions to open and which to close.
-4. The trader executes those orders and closes positions through the broker API.
-
-### Packages
-
-- **`internal/broker`** — the [`Broker`](internal/broker/broker.go) interface plus IG and Coinbase implementations. [`internal/paperwallet`](internal/paperwallet) simulates fills for brokers without a sandbox.
-- **`internal/strategy`** — the [`Strategy`](internal/strategy/strategy.go) interface and example strategies: `rsi`, `rsiadx`, `sma10`, `stochrsi`, `doji`, `engulfing`, `harami`, `lowcandle`, `scalper`, `heikinashi`.
-- **`pkg/indicator`** — the [`Indicator`](pkg/indicator/indicator.go) interface and implementations (SMA, RSI, ADX, Stoch, StochRSI) wrapping [go-talib](https://github.com/markcheno/go-talib).
-- **`pkg/eo`** — environment overlays that adapt a strategy to market volatility (e.g. require a stronger signal in dangerous conditions).
-- **`pkg/chart`** — renders the equity curve and price chart as HTML.
-
-New to the code? Start with the [`Strategy`](internal/strategy/strategy.go) interface, then read [`internal/strategy/rsi`](internal/strategy/rsi) as a worked example.
-
-![Overview](docs/overview.png)
-
-## Backtesting
-
-The backtest module replays historical prices through your strategy. Configure trading fees and spreads to approximate real conditions.
-
-![Terminal output](docs/backtest-result.png)
-
-It can also render an equity curve:
-
-![Equity curve](docs/backtest-equity-curve.png)
-
-Price data comes from PostgreSQL. Import your own [histdata.com](https://www.histdata.com/) CSV files with `go run . import-histdata` — the same tool used in the quick start.
-
-### Importing HistData CSV Files
-
-Use `go run . import-histdata` to convert tick CSV files into 1-minute OHLC candles and store them in PostgreSQL.
-
-1. Download CSV files from histdata.com (forex, gold, SP500 are available).
-2. Unzip the downloaded archives.
-3. Import CSV files with the tool:
-
-```sh
-go run . import-histdata \
-  --db-dsn postgres://postgres:postgres@localhost:5432/at?sslmode=disable \
-  --instrument SPXUSD \
-  --import-histdata-csv-files ./data/file1.csv,./data/file2.csv
+```
+PostgreSQL DSN -> startup.Run -> migrations/bootstrap -> root Bubble Tea program
+                                                 |-> Tab 1 holdings store (DB)
+                                                 |-> Tab 2 signal read model
 ```
 
-The backtesting command can then reuse the same PostgreSQL DSN with `--db-dsn` and `--price-db-dsn`.
+### Package Map
 
-### Paperwallet
+- `main.go`: process entrypoint, forwards CLI args to startup
+- `internal/startup`: strict DSN parsing, DB open, migration/bootstrap, root TUI launch
+- `internal/configuration`: schema migrations and typed DB-backed settings service
+- `internal/portfolio`: holdings domain model and PostgreSQL holdings store
+- `internal/portfolio/accounting`: cost basis calculators (PMC, FIFO, LIFO) and realized PnL ledger
+- `internal/portfolio/analytics`: TWR engine with cash flow and NAV snapshot persistence
+- `internal/portfolio/corporate`: corporate actions service (splits, dividends)
+- `internal/portfolio/data`: market data provider (Yahoo Finance UCITS/European EOD adapter)
+- `internal/signal`: signal message model and queue read-side model
+- `internal/tui/signals`: root tab model, Tab 1 holdings model, Tab 2 signals model
+- `internal/trader`: strategy/trading orchestration and signal dispatch production
 
-`internal/paperwallet` simulates broker behavior for environments without a demo account.
+## Getting Started
 
-- Tracks balance, trading fees, and closed/open positions.
-- Powers the backtest broker by replaying historical ticks through the trader.
+### 1) Run Migrations and Bootstrap
 
-## Contributing
+Bootstrap runs migrations and validates required settings automatically during startup.
 
-Thanks for your interest in improving `at`.
+```sh
+go run . --dsn postgres://postgres:postgres@localhost:5432/orbiter?sslmode=disable
+```
+
+or:
+
+```sh
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/orbiter?sslmode=disable go run .
+```
+
+### 2) Launch the TUI
+
+The same startup command launches the Bubble Tea UI in alt-screen mode.
+
+Keyboard essentials:
+
+- `tab` or `l`: next tab
+- `shift+tab` or `h`: previous tab
+- `t`: toggle allocation type on selected holding (Tab 1)
+- `q` or `Ctrl+C`: quit
+
+## Development
 
 ### Prerequisites
 
-- Go 1.26 or newer
-- (Optional) [golangci-lint](https://golangci-lint.run/) v2 for linting
+- Go 1.26+
+- PostgreSQL
 
 ### Common Tasks
 
@@ -133,38 +153,6 @@ golangci-lint run                 # run linter (if installed)
 go mod tidy                       # clean go.mod/go.sum
 ```
 
-Before opening a pull request, make sure `go build ./...`, `go test -race -cover ./...`, and `golangci-lint run` all pass. CI runs the same checks.
-
-### Project Layout
-
-- `main.go` — single entry point that dispatches subcommands
-- `internal/broker` — the `Broker` interface and implementations; `internal/paperwallet` simulates fills
-- `internal/strategy` — the `Strategy` interface and example strategies
-- `internal/trader` — the orchestrator connecting brokers and strategies
-- `pkg/indicator` — the `Indicator` interface and implementations
-- `pkg/{ohlc,tick,eo,chart,...}` — supporting libraries
-
-### Adding A Strategy
-
-1. Create a package under `internal/strategy/<name>` with a type that implements the [`Strategy`](internal/strategy/strategy.go) interface. [`internal/strategy/rsi`](internal/strategy/rsi) is a good template.
-2. Add a name constant to [`internal/strategy/strategy.go`](internal/strategy/strategy.go).
-3. Wire the new name into the `buildStrategy` switch in [`internal/app/support.go`](internal/app/support.go) so it can be selected via `--strategy`.
-4. Add a `_test.go` file covering the decision logic.
-
-### Adding An Indicator
-
-Implement the [`Indicator`](pkg/indicator/indicator.go) interface in a new package under `pkg/indicator/<name>`, and add tests. Existing indicators wrap [go-talib](https://github.com/markcheno/go-talib) and are good references.
-
-### Style
-
-- Log with the standard library `log/slog`, not third-party loggers.
-- Keep library code free of `log.Fatal`/`os.Exit`; return errors instead, and reserve `panic` for unreachable invariants.
-- Run `gofmt` before committing.
-
 ## Disclaimer
 
-The developers are not liable for any losses arising from buying or selling securities. All included strategies are examples and are in no case ready trading systems. Trade at your own risk.
-
-## License
-
-[MIT](LICENSE)
+The developers are not liable for losses arising from portfolio or trading decisions. Use this software at your own risk.

@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 func TestHeikinAshi_Name(t *testing.T) {

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/pkg/helper"
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/pkg/helper"
 )
 
 type PerformanceRecord struct {
@@ -330,21 +330,30 @@ func (tr *Trader) Summary() {
 		return
 	}
 
-	slog.Info(fmt.Sprintf("%25s: %s", "Instrument", pr.Instrument))
-	slog.Info(fmt.Sprintf("%25s: %s", "Strategy", pr.Strategy))
-	slog.Info(fmt.Sprintf("%25s: %s", "Candle duration", pr.CandleDuration))
-	slog.Info(fmt.Sprintf("%25s: %s -> %s", "Period", pr.FirstTrade.Format("02.01.2006"), pr.LastTrade.Format("02.01.2006")))
-	slog.Info(fmt.Sprintf("%25s: %d (%d long, %d short)", "Total positions", pr.Trades, pr.TradesLong, pr.TradesShort))
-	slog.Info(fmt.Sprintf("%25s: %s (%.2f%%)", "Total time in market", pr.TotalTimeInMarket, pr.TotalExposureInPercent))
-	slog.Info(fmt.Sprintf("%25s: %s", "AVG time in market", pr.AVGTimeInMarket))
-	slog.Info(fmt.Sprintf("%25s: %d (%.2f%%)", "Profit positions", pr.TradesWin, pr.TradesWinRationInPercent))
-	slog.Info(fmt.Sprintf("%25s: %d", "Loss positions", pr.TradesLoss))
-	slog.Info(fmt.Sprintf("%25s: %d", "Loss positions long", pr.TradesLossLong))
-	slog.Info(fmt.Sprintf("%25s: %d", "Loss positions short", pr.TradesLossShort))
-	slog.Info(fmt.Sprintf("%25s: %.2f%% %.2f (%.2f pips)", "Max win", pr.MaxWinInPercent, pr.MaxWinInPips/pipsFactor, pr.MaxWinInPips))
-	slog.Info(fmt.Sprintf("%25s: %.2f%% %.2f (%.2f pips)", "Max loss", pr.MaxLossInPercent, pr.MaxLossInPips/pipsFactor, pr.MaxLossInPips))
-	slog.Info(fmt.Sprintf("%25s: %.2f (%.2f pips)", "Total performance", pr.TotalPerformanceInPips/pipsFactor, pr.TotalPerformanceInPips))
-	slog.Info(fmt.Sprintf("%25s: %.2f (%.2f pips)", "AVG Performance", pr.AVGPerformanceInPips/pipsFactor, pr.AVGPerformanceInPips))
+	slog.Info("performance summary",
+		"instrument", pr.Instrument,
+		"strategy", pr.Strategy,
+		"candle_duration", pr.CandleDuration,
+		"period_start", pr.FirstTrade.Format("02.01.2006"),
+		"period_end", pr.LastTrade.Format("02.01.2006"),
+		"total_positions", pr.Trades,
+		"long_positions", pr.TradesLong,
+		"short_positions", pr.TradesShort,
+		"total_time_in_market", pr.TotalTimeInMarket,
+		"total_exposure_pct", pr.TotalExposureInPercent,
+		"avg_time_in_market", pr.AVGTimeInMarket,
+		"profit_positions", pr.TradesWin,
+		"win_ratio_pct", pr.TradesWinRationInPercent,
+		"loss_positions", pr.TradesLoss,
+		"loss_positions_long", pr.TradesLossLong,
+		"loss_positions_short", pr.TradesLossShort,
+		"max_win_pct", pr.MaxWinInPercent,
+		"max_win_pips", pr.MaxWinInPips,
+		"max_loss_pct", pr.MaxLossInPercent,
+		"max_loss_pips", pr.MaxLossInPips,
+		"total_performance_pips", pr.TotalPerformanceInPips,
+		"avg_performance_pips", pr.AVGPerformanceInPips,
+	)
 }
 
 func (tr *Trader) SavePerformanceRecord(chartHTML string) error {

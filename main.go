@@ -4,53 +4,29 @@ import (
 	"context"
 	"fmt"
 	"os"
+	_ "time/tzdata"
 
-	"github.com/sklinkert/at/internal/app"
+	"github.com/tgragnato/orbiter/internal/startup"
 )
 
 // GitRev is injected by the compiler via -ldflags.
 var GitRev string
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(1)
-	}
-
-	command := os.Args[1]
-	args := os.Args[2:]
 	ctx := context.Background()
-	var err error
-	switch command {
-	case "backtesting":
-		err = app.RunBacktesting(ctx, GitRev, args)
-	case "at-ig":
-		err = app.RunIG(ctx, GitRev, args)
-	case "at-coinbase":
-		err = app.RunCoinbase(ctx, GitRev, args)
-	case "import-histdata":
-		err = app.RunImportHistdata(ctx, args)
-	case "help", "-h", "--help":
-		usage()
-		return
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", command)
-		usage()
-		os.Exit(1)
-	}
-
-	if err != nil {
+	if err := startup.Run(ctx, os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
+		usage()
 		os.Exit(1)
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: at <command>")
+	fmt.Fprintln(os.Stderr, "Usage:")
+	fmt.Fprintln(os.Stderr, "  orbiter [--dsn <dsn>]                              start TUI")
+	fmt.Fprintln(os.Stderr, "  orbiter backup  [--dsn <dsn>] [--output <file>]   dump transactions to JSON")
+	fmt.Fprintln(os.Stderr, "  orbiter restore [--dsn <dsn>] [--input  <file>]   load transactions from JSON")
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "Commands:")
-	fmt.Fprintln(os.Stderr, "  backtesting      Run the historical backtester")
-	fmt.Fprintln(os.Stderr, "  at-ig            Run the IG.com live trading setup")
-	fmt.Fprintln(os.Stderr, "  at-coinbase      Run the Coinbase trading setup")
-	fmt.Fprintln(os.Stderr, "  import-histdata  Import HistData CSV files into PostgreSQL")
+	fmt.Fprintln(os.Stderr, "DSN can also be provided via DATABASE_URL environment variable.")
+	fmt.Fprintln(os.Stderr, "Default output/input file: transactions.json")
 }

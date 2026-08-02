@@ -1,20 +1,42 @@
 package eo
 
 import (
-	"fmt"
 	"sort"
 
-	ring "github.com/falzm/golang-ring"
-	"github.com/sklinkert/at/pkg/helper"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/helper"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 // Environment Overlays
 // Adapt strategy setup towards market current momentum
 
+// floatRing is a fixed-capacity FIFO queue that preserves insertion order.
+// When full, the oldest element is dropped to make room for the new one.
+type floatRing struct {
+	buf []float64
+	cap int
+}
+
+func newFloatRing(capacity int) floatRing {
+	return floatRing{buf: make([]float64, 0, capacity), cap: capacity}
+}
+
+func (r *floatRing) push(v float64) {
+	if len(r.buf) < r.cap {
+		r.buf = append(r.buf, v)
+	} else {
+		copy(r.buf, r.buf[1:])
+		r.buf[r.cap-1] = v
+	}
+}
+
+func (r *floatRing) values() []float64 {
+	return r.buf
+}
+
 type EnvironmentOverlay struct {
-	candles             ring.Ring
-	priceChangesPercent ring.Ring
+	candles             floatRing
+	priceChangesPercent floatRing
 }
 
 type RiskLevel int
@@ -31,29 +53,23 @@ const (
 )
 
 func New() *EnvironmentOverlay {
-	candles := ring.Ring{}
-	candles.SetCapacity(minCandles)
-
-	priceChangesPercent := ring.Ring{}
-	priceChangesPercent.SetCapacity(minCandles)
-
 	return &EnvironmentOverlay{
-		candles:             candles,
-		priceChangesPercent: priceChangesPercent,
+		candles:             newFloatRing(minCandles),
+		priceChangesPercent: newFloatRing(minCandles),
 	}
 }
 
 func (eo *EnvironmentOverlay) AddCandle(candle *ohlc.OHLC) {
 	closePrice, _ := candle.Close.Float64()
-	eo.candles.Enqueue(closePrice)
+	eo.candles.push(closePrice)
 
 	perfPercent, _ := candle.PerformanceInPercentage().Float64()
-	eo.priceChangesPercent.Enqueue(perfPercent)
+	eo.priceChangesPercent.push(perfPercent)
 }
 
 func (eo *EnvironmentOverlay) riskLevel() RiskLevel {
-	var prices = eo.candles.Values()
-	var priceChangesPercent = eo.priceChangesPercent.Values()
+	var prices = eo.candles.values()
+	var priceChangesPercent = eo.priceChangesPercent.values()
 	if len(prices) < minCandles || len(priceChangesPercent) < minCandles {
 		return DefaultRisk
 	}
@@ -92,6 +108,6 @@ func (eo *EnvironmentOverlay) RSI() (upperThreshold, lowerThreshold float64) {
 	case RExtreme:
 		return 95, 5
 	default:
-		panic(fmt.Sprintf("Unsupported risk level %d", int(riskLevel)))
+		return 85, 15
 	}
 }

@@ -1,14 +1,15 @@
 package stochrsi
 
 import (
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/helper"
-	"github.com/sklinkert/at/pkg/indicator/stochrsi"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
 	"log/slog"
 	"time"
+
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/helper"
+	"github.com/tgragnato/orbiter/pkg/indicator/stochrsi"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 type RSI struct {
@@ -64,11 +65,6 @@ func (d *RSI) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Ord
 
 	d.rsi.Insert(closedCandle)
 	if len(d.openPositions) > 0 {
-		return
-	}
-
-	// No night trading
-	if closedCandle.End.Hour() < 10 || closedCandle.End.Hour() > 20 {
 		return
 	}
 

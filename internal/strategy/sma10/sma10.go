@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/helper"
-	"github.com/sklinkert/at/pkg/indicator/sma"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/helper"
+	"github.com/tgragnato/orbiter/pkg/indicator/sma"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 // Long: Buy if candle closes below the last 7 candles and is above SMA 200
@@ -23,7 +23,6 @@ type SMA struct {
 	sma           *sma.SMA
 	sma10         *sma.SMA
 	ohlcPeriod    time.Duration
-	locEST        *time.Location
 	openPositions []broker.Position
 	openOrders    []broker.Order
 }
@@ -39,18 +38,12 @@ const (
 func New(instrument string, candleDuration time.Duration) *SMA {
 	clog := slog.With("INSTRUMENT", instrument, "CANDLE", candleDuration)
 
-	locEST, err := time.LoadLocation("EST")
-	if err != nil {
-		panic(fmt.Sprintf("time zone EST missing: %v", err))
-	}
-
 	return &SMA{
 		clog:       clog,
 		instrument: instrument,
 		sma:        sma.New(smaCandles),
 		sma10:      sma.New(10),
 		ohlcPeriod: candleDuration,
-		locEST:     locEST,
 	}
 }
 
@@ -77,23 +70,6 @@ func (d *SMA) feedIndicator(closedCandle *ohlc.OHLC) {
 
 func (d *SMA) GetCandleDuration() time.Duration {
 	return d.ohlcPeriod
-}
-
-func (d *SMA) noTradingPeriod(now time.Time) bool {
-	now = now.Local()
-
-	// Weekend
-	if now.Weekday() == time.Saturday || now.Weekday() == time.Sunday {
-		return true
-	}
-
-	// Avoid trading during US stocks markets (NYSE + NASDAQ) opening and closing
-	var estTime = now.In(d.locEST)
-	if estTime.Hour() == 9 || estTime.Hour() == 16 { // 09:30 - 16:00 EST
-		return true
-	}
-
-	return false
 }
 
 func (d *SMA) OnTick(_ tick.Tick) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
@@ -147,13 +123,8 @@ func (d *SMA) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, t
 		return
 	}
 
-	if d.noTradingPeriod(closedCandle.End) {
-		d.clog.Info("No trading period")
-		return
-	}
-
 	if closePrice < sma200Price {
-		d.clog.Debug(fmt.Sprintf("close is below SMA: %f < %f", closePrice, sma200Price))
+		d.clog.Debug("close is below SMA200", "close", closePrice, "sma200", sma200Price)
 		return
 	}
 
@@ -161,7 +132,7 @@ func (d *SMA) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, t
 		toOpenNew := d.prepareOrder(closedCandle, broker.BuyDirectionLong, 1.00)
 		return []broker.Order{toOpenNew}, []broker.Position{}
 	}
-	d.clog.Debug(fmt.Sprintf("long: closePrice >= SMA10 : %f >= %f", closePrice, sma10Price))
+	d.clog.Debug("long: closePrice >= SMA10", "close", closePrice, "sma10", sma10Price)
 	return
 }
 
@@ -195,13 +166,8 @@ func (d *SMA) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, 
 		return
 	}
 
-	if d.noTradingPeriod(closedCandle.End) {
-		d.clog.Info("No trading period")
-		return
-	}
-
 	if closePrice > sma200Price {
-		d.clog.Debug(fmt.Sprintf("close is below SMA: %f < %f", closePrice, sma200Price))
+		d.clog.Debug("close is above SMA200", "close", closePrice, "sma200", sma200Price)
 		return
 	}
 
@@ -209,7 +175,7 @@ func (d *SMA) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, 
 		toOpenNew := d.prepareOrder(closedCandle, broker.BuyDirectionShort, 1.00)
 		return []broker.Order{toOpenNew}, []broker.Position{}
 	}
-	d.clog.Debug(fmt.Sprintf("short: closePrice <= SMA10 : %f <= %f", closePrice, sma10Price))
+	d.clog.Debug("short: closePrice <= SMA10", "close", closePrice, "sma10", sma10Price)
 	return
 }
 

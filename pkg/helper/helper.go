@@ -1,10 +1,8 @@
 package helper
 
 import (
-	"fmt"
-
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/internal/broker"
+	"github.com/tgragnato/orbiter/internal/broker"
 )
 
 // Pips2Cent - Convert pips to cent
@@ -35,7 +33,7 @@ func CalcStopLossPriceByPercentage(price, percentage decimal.Decimal, orderDirec
 	case broker.BuyDirectionShort:
 		return price.Add(percentFrom).Round(6)
 	default:
-		panic(fmt.Sprintf("Unexpected order direction %q", orderDirection.String()))
+		return decimal.Zero
 	}
 }
 
@@ -48,7 +46,7 @@ func CalcTargetPriceByPercentage(price, percentage decimal.Decimal, orderDirecti
 	case broker.BuyDirectionShort:
 		return price.Sub(percentFrom).Round(6)
 	default:
-		panic(fmt.Sprintf("Unexpected order direction %q", orderDirection.String()))
+		return decimal.Zero
 	}
 }
 

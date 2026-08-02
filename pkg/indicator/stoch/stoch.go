@@ -2,8 +2,8 @@ package stoch
 
 import (
 	"github.com/markcheno/go-talib"
-	"github.com/sklinkert/at/pkg/circularbuffer"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/circularbuffer"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 const ValueK = "Stoch_VALUE_K"

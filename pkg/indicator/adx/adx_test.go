@@ -1,14 +1,12 @@
 package adx
 
 import (
-	"fmt"
-
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/indicator"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/indicator"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 func TestADX_Bearish_Trend_Above_35(t *testing.T) {
@@ -20,7 +18,7 @@ func TestADX_Bearish_Trend_Above_35(t *testing.T) {
 	}
 
 	adxValue, err := adx1.Value()
-	fmt.Printf("adx1 -> %f\n", adxValue[Value])
+	t.Logf("adx1 -> %f", adxValue[Value])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -38,7 +36,7 @@ func TestADX_Bullish_Trend_Above_35(t *testing.T) {
 	}
 
 	adxValue, err := adx1.Value()
-	fmt.Printf("adx1 -> %f\n", adxValue[Value])
+	t.Logf("adx1 -> %f", adxValue[Value])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

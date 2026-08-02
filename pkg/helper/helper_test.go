@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/internal/broker"
+	"github.com/tgragnato/orbiter/internal/broker"
 )
 
 func TestCent2Pips(t *testing.T) {

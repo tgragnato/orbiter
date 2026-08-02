@@ -1,15 +1,13 @@
 package rsi
 
 import (
-	"fmt"
-
 	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/indicator"
-	"github.com/sklinkert/at/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/indicator"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 func TestRSI_Value(t *testing.T) {
@@ -42,7 +40,7 @@ func TestRSI_Value_Shift(t *testing.T) {
 		rsi1.Insert(generateCandle(price))
 	}
 	rsiValue, err := rsi1.Value()
-	fmt.Printf("rsi1 -> %f\n", rsiValue[Value])
+	t.Logf("rsi1 -> %f", rsiValue[Value])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -55,7 +53,7 @@ func TestRSI_Value_Shift(t *testing.T) {
 		rsi2.Insert(generateCandle(price))
 	}
 	rsiValue, err = rsi2.Value()
-	fmt.Printf("rsi2 -> %f\n", rsiValue[Value])
+	t.Logf("rsi2 -> %f", rsiValue[Value])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,7 +80,7 @@ func TestRSI_Random(t *testing.T) {
 		rsi1.Insert(generateCandle(price))
 	}
 	rsiValue, err := rsi1.Value()
-	fmt.Printf("rsi1 -> %f\n", rsiValue[Value])
+	t.Logf("rsi1 -> %f", rsiValue[Value])
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -98,10 +96,10 @@ func TestRSI_Random(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	fmt.Printf("rsi2 -> %f\n", rsi2Value[Value])
+	t.Logf("rsi2 -> %f", rsi2Value[Value])
 
 	diff := rsi2Value[Value] - rsiValue[Value]
-	fmt.Printf("diff: %f\n", diff)
+	t.Logf("diff: %f", diff)
 	if diff >= 1 {
 		t.Fatalf("expected true")
 	}

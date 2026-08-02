@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/tick"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 func TestTrader_flashCrashCheck(t *testing.T) {

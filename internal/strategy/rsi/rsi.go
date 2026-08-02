@@ -2,16 +2,16 @@ package rsi
 
 import (
 	"log/slog"
+	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/internal/broker"
-	"github.com/sklinkert/at/internal/strategy"
-	"github.com/sklinkert/at/pkg/helper"
-	indicatorrsi "github.com/sklinkert/at/pkg/indicator/rsi"
-	"github.com/sklinkert/at/pkg/indicator/sma"
-	"github.com/sklinkert/at/pkg/ohlc"
-	"github.com/sklinkert/at/pkg/tick"
-	"time"
+	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/helper"
+	indicatorrsi "github.com/tgragnato/orbiter/pkg/indicator/rsi"
+	"github.com/tgragnato/orbiter/pkg/indicator/sma"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 type RSI struct {
@@ -53,14 +53,6 @@ func (d *RSI) GetCandleDuration() time.Duration {
 func (d *RSI) OnWarmUpCandle(closedCandle *ohlc.OHLC) {
 	d.rsi.Insert(closedCandle)
 	d.sma.Insert(closedCandle)
-
-	rsiValue, err := d.getRSIValues()
-	slog.Info("Processing warmup candle",
-		"Start", closedCandle.Start,
-		"Close", closedCandle.Close,
-		"RSI", rsiValue,
-		"RSI_ERR", err,
-	)
 }
 
 func (d *RSI) GetWarmUpCandleAmount() uint {
@@ -84,20 +76,7 @@ func (d *RSI) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Ord
 	d.rsi.Insert(closedCandle)
 	d.sma.Insert(closedCandle)
 
-	rsiValue, err := d.getRSIValues()
-	slog.Info("Processing Candle",
-		"RSI", rsiValue,
-		"RSI_ERR", err,
-		"Close", closedCandle.Close,
-	)
-
-	// No night trading
-	//if currentTick.Datetime.Hour() < 10 || currentTick.Datetime.Hour() > 20 {
-	//	return
-	//}
-
 	for _, openPosition := range d.openPositions {
-		//log.Infof("Have open position: %s", openPosition.String())
 
 		if openPosition.Age(closedCandle.End) > maxAgeOpenPosition &&
 			openPosition.PerformanceAbsolute(closedCandle.Close, closedCandle.Close) > 0 {
@@ -144,27 +123,23 @@ func (d *RSI) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Ord
 }
 
 func (d *RSI) isSMALongSignal(closePrice decimal.Decimal) bool {
-	return true
-
-	//smaValue, err := d.sma.Value()
-	//if err != nil {
-	//	log.WithError(err).Warn("No SMA")
-	//	return false
-	//}
-	//smaPrice := decimal.NewFromFloat(smaValue[sma.Value])
-	//return closePrice.GreaterThan(smaPrice)
+	smaValue, err := d.sma.Value()
+	if err != nil {
+		slog.Warn("No SMA", "error", err)
+		return false
+	}
+	smaPrice := decimal.NewFromFloat(smaValue[sma.Value])
+	return closePrice.GreaterThan(smaPrice)
 }
 
 func (d *RSI) isSMAShortSignal(closePrice decimal.Decimal) bool {
-	return true
-
-	//smaValue, err := d.sma.Value()
-	//if err != nil {
-	//	log.WithError(err).Warn("No SMA")
-	//	return false
-	//}
-	//smaPrice := decimal.NewFromFloat(smaValue[sma.Value])
-	//return closePrice.LessThan(smaPrice)
+	smaValue, err := d.sma.Value()
+	if err != nil {
+		slog.Warn("No SMA", "error", err)
+		return false
+	}
+	smaPrice := decimal.NewFromFloat(smaValue[sma.Value])
+	return closePrice.LessThan(smaPrice)
 }
 
 func (d *RSI) isRSILongSignal() bool {

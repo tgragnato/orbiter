@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/shopspring/decimal"
-	"github.com/sklinkert/at/pkg/tick"
+	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
 var maxAllowedDistanceInPercent = decimal.NewFromFloat(0.5)
