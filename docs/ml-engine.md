@@ -153,19 +153,21 @@ conviction = tanh(rawPrediction / scale)
 To avoid lookahead bias, the model is validated with **purged walk-forward CV**:
 
 ```
-samples:  [0 .......... TrainSize | Embargo | TestSize | TestSize | ...]
-fold 0:    train[0:300]            gap[10]   test[310:370]
-fold 1:    train[60:360]           gap[10]   test[370:430]
-...
+samples:  [0 ................... TrainSize | Embargo | TestSize | TestSize | ...]
+fold 0:    train[0:1250]          gap[10]   test[1260:1320]
+fold 1:    train[60:1310]         gap[10]   test[1320:1380]
+...  (~11 folds from 8 years of EOD history)
 ```
 
 Default parameters (set in `startup.go`):
 
 | Parameter | Value | Meaning |
 |-----------|-------|---------|
-| `TrainSize` | 300 | Samples in each training window |
+| `TrainSize` | 1250 | Samples per training window (~5 years of EOD data, covers multiple market regimes) |
 | `TestSize` | 60 | Samples in each test window |
 | `Embargo` | 10 | Samples dropped between train end and test start |
+| `LabelHorizon` | 5 | Forward bars used for the label; purge removes trailing samples whose labels bleed into the test window |
+| `FeaturesPerSplit` | 12 | Candidate features evaluated at each split (~45% of 26) |
 | `NTrees` | 50 | Trees per forest per fold |
 | `MaxDepth` | 5 | Maximum tree depth |
 | `MinSamples` | 10 | Minimum samples per leaf |

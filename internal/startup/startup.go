@@ -119,7 +119,7 @@ func runTUI(ctx context.Context, args []string) error {
 		}
 		return samples
 	}, ml.WalkForwardConfig{
-		TrainSize:        300,
+		TrainSize:        1250,
 		TestSize:         60,
 		Embargo:          10,
 		LabelHorizon:     5,

@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	historyYears = 3  // years of EOD history requested per symbol
+	historyYears = 8  // years of EOD history requested per symbol (~2016 bars, ~11 walk-forward folds with TrainSize=1250)
 	warmupBars   = 40 // leading bars consumed for indicator convergence and discarded
 	forwardDays  = 5  // label horizon: 5-trading-day forward log-return (improves SNR over 1-day)
 )
