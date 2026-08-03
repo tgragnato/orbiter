@@ -64,6 +64,17 @@ func (r *mlRunner) Conviction(symbol string) float64 {
 	return 0
 }
 
+// Symbols implements taa.SymbolProvider. Returns all symbols the ML engine has
+// conviction scores for, in no particular order.
+func (r *mlRunner) Symbols() []string {
+	var syms []string
+	r.conviction.Range(func(k, _ any) bool {
+		syms = append(syms, k.(string))
+		return true
+	})
+	return syms
+}
+
 // Trigger requests an immediate training run, ignoring the 24-hour interval.
 // If training is already in progress the request is silently dropped.
 func (r *mlRunner) Trigger() {

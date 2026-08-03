@@ -21,17 +21,22 @@ const (
 	TypeRebalance Type = "REBALANCE"
 	// TypeCorePMCFloorAlert fires when a Core holding price falls to or below PMC.
 	TypeCorePMCFloorAlert Type = "CORE_PMC_FLOOR_ALERT"
+	// TypeEntry suggests opening a new satellite position not currently held.
+	TypeEntry Type = "ENTRY"
 )
 
 // Message is an execution intent emitted by trader/strategy and consumed by UI.
 type Message struct {
-	Type       Type
-	CreatedAt  time.Time
-	Instrument string
-	Summary    string
-	OrderID    string
-	Order      *broker.Order
-	Position   *broker.Position
+	Type          Type
+	CreatedAt     time.Time
+	Instrument    string
+	Summary       string
+	OrderID       string
+	Order         *broker.Order
+	Position      *broker.Position
+	TargetWeight  float64 // target allocation as fraction of total satellite NAV [0,1]
+	CurrentWeight float64 // current allocation as fraction of total satellite NAV [0,1]
+	DeltaEUR      float64 // positive = buy, negative = sell
 }
 
 // Dispatcher receives signals for downstream presentation/handling.
@@ -77,12 +82,33 @@ func NewCancelOrderMessage(now time.Time, order broker.Order) Message {
 }
 
 // NewRebalanceMessage builds a tactical rebalance signal for a Satellite holding.
-func NewRebalanceMessage(now time.Time, symbol string, conviction float64, direction string) Message {
+func NewRebalanceMessage(now time.Time, symbol string, conviction float64, direction string, currentWeight, targetWeight, deltaEUR float64) Message {
 	return Message{
-		Type:       TypeRebalance,
-		CreatedAt:  now,
-		Instrument: symbol,
-		Summary:    fmt.Sprintf("Rebalance %s %s (conviction %.2f)", symbol, direction, conviction),
+		Type:          TypeRebalance,
+		CreatedAt:     now,
+		Instrument:    symbol,
+		Summary:       fmt.Sprintf("Rebalance %s %s %.1f%%→%.1f%% (Δ%.0f€, conviction %.2f)", symbol, direction, currentWeight*100, targetWeight*100, deltaEUR, conviction),
+		CurrentWeight: currentWeight,
+		TargetWeight:  targetWeight,
+		DeltaEUR:      deltaEUR,
+	}
+}
+
+// NewEntryMessage suggests opening a new satellite position for a symbol not currently held.
+// targetWeight is the suggested allocation as a fraction of total satellite NAV; deltaEUR is
+// the recommended investment amount.
+func NewEntryMessage(now time.Time, symbol string, conviction float64, targetWeight, deltaEUR float64) Message {
+	direction := "long"
+	if conviction < 0 {
+		direction = "short"
+	}
+	return Message{
+		Type:         TypeEntry,
+		CreatedAt:    now,
+		Instrument:   symbol,
+		Summary:      fmt.Sprintf("Entry %s %s target %.1f%% (Δ%.0f€, conviction %.2f)", symbol, direction, targetWeight*100, deltaEUR, conviction),
+		TargetWeight: targetWeight,
+		DeltaEUR:     deltaEUR,
 	}
 }
 

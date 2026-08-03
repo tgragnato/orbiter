@@ -30,24 +30,6 @@ type config struct {
 	dsn string
 }
 
-// configTargetReader adapts configuration.Service to the taa.TargetReader interface.
-type configTargetReader struct{ svc *configuration.Service }
-
-func (r *configTargetReader) GetCoreSatelliteTargets(ctx context.Context) (taa.CoreSatelliteTargets, error) {
-	s, err := r.svc.GetCoreSatelliteTargets(ctx)
-	if err != nil {
-		return taa.CoreSatelliteTargets{}, err
-	}
-	return taa.CoreSatelliteTargets{CoreRatio: s.CoreRatio, SatelliteRatio: s.SatelliteRatio}, nil
-}
-
-func (r *configTargetReader) GetRebalanceThreshold(ctx context.Context) (float64, error) {
-	s, err := r.svc.GetTAA(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return s.RebalanceThreshold, nil
-}
 
 var (
 	openPostgresFn = openPostgres
@@ -154,15 +136,14 @@ func runTUI(ctx context.Context, args []string) error {
 		store,
 		taa.NullPMCReader{},
 		runner,
+		runner,
 		signalRuntime.Dispatcher,
 		taa.Config{
-			TaxRate:            0.26,
-			BrokerFeePercent:   0.0019,
-			MaxBrokerFeeEUR:    18.90,
-			Buffer:             0.01,
-			RebalanceThreshold: 0.05,
+			TaxRate:          0.26,
+			BrokerFeePercent: 0.0019,
+			MaxBrokerFeeEUR:  18.90,
+			Buffer:           0.01,
 		},
-		&configTargetReader{svc: configSvc},
 	)
 	go func() {
 		if err := taaEngine.Evaluate(ctx); err != nil {

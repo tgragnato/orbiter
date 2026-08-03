@@ -1,13 +1,11 @@
 // Package taa implements the Tactical Asset Allocation signal engine.
-// It enforces two portfolio-level constraints before emitting rebalance signals:
+// It enforces two per-holding constraints before emitting signals:
 //
-//  1. Core PMC Floor: never emit a sell/rebalance for Core holdings when
-//     the current market price is at or below the purchase cost (PMC).
-//     Instead, a CORE_PMC_FLOOR_ALERT signal is emitted.
+//  1. Core PMC Floor: emit CORE_PMC_FLOOR_ALERT when market price ≤ PMC.
 //
-//  2. Satellite Friction Gate: only emit a TypeRebalance signal for Satellite
-//     holdings when the expected alpha exceeds the combined friction of capital
-//     gains tax, broker fees, and a configurable buffer.
+//  2. Satellite Friction Gate: emit REBALANCE or ENTRY only when the ML
+//     conviction exceeds the combined friction of broker fees, capital-gains
+//     tax, and a configurable safety buffer.
 package taa
 
 import (
@@ -24,22 +22,6 @@ import (
 // An error means no cost data is available; in that case the floor check is skipped.
 type PMCReader interface {
 	PMC(ctx context.Context, symbol string) (float64, error)
-}
-
-// CoreSatelliteTargets holds the target allocation ratios for the portfolio.
-type CoreSatelliteTargets struct {
-	CoreRatio      float64
-	SatelliteRatio float64
-}
-
-// TargetReader provides live TAA parameters from persistent settings.
-// Implement this with configuration.Service in production code.
-type TargetReader interface {
-	GetCoreSatelliteTargets(ctx context.Context) (CoreSatelliteTargets, error)
-	// GetRebalanceThreshold returns the minimum absolute allocation drift (e.g.
-	// 0.05 = 5%) required before rebalance signals are considered. When this
-	// method returns an error or zero the engine falls back to Config.RebalanceThreshold.
-	GetRebalanceThreshold(ctx context.Context) (float64, error)
 }
 
 // ConvictionProvider returns the current ML conviction score in [-1,+1] for a
@@ -59,9 +41,6 @@ type Config struct {
 	MaxBrokerFeeEUR float64
 	// Buffer is an additional threshold above taxes+fees required to trade.
 	Buffer float64
-	// RebalanceThreshold is the minimum absolute allocation drift (e.g. 0.05 = 5%)
-	// required before any rebalance signal is considered.
-	RebalanceThreshold float64
 }
 
 // Engine evaluates all holdings in the store and emits TAA signals when
@@ -70,9 +49,9 @@ type Engine struct {
 	store      portfolio.HoldingsStore
 	pmc        PMCReader
 	conviction ConvictionProvider
+	symbols    SymbolProvider // optional; nil disables entry signal evaluation
 	dispatcher signal.Dispatcher
 	cfg        Config
-	targets    TargetReader // optional; nil disables the portfolio-level drift gate
 }
 
 // NewEngine creates a TAA signal engine.
@@ -80,17 +59,17 @@ func NewEngine(
 	store portfolio.HoldingsStore,
 	pmc PMCReader,
 	conviction ConvictionProvider,
+	symbols SymbolProvider,
 	dispatcher signal.Dispatcher,
 	cfg Config,
-	targets TargetReader,
 ) *Engine {
 	return &Engine{
 		store:      store,
 		pmc:        pmc,
 		conviction: conviction,
+		symbols:    symbols,
 		dispatcher: dispatcher,
 		cfg:        cfg,
-		targets:    targets,
 	}
 }
 
@@ -102,52 +81,45 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 		return fmt.Errorf("taa.Evaluate: list holdings: %w", err)
 	}
 
-	// Portfolio-level drift gate: skip per-holding evaluation when the actual
-	// core/satellite split is within the configured rebalance threshold.
-	// Both the target ratios and the threshold are fetched live from settings
-	// when a TargetReader is wired; the static Config values serve as fallback.
-	if e.targets != nil && len(holdings) > 0 {
-		tgt, err := e.targets.GetCoreSatelliteTargets(ctx)
-		if err == nil {
-			threshold := e.cfg.RebalanceThreshold
-			if dynThreshold, thErr := e.targets.GetRebalanceThreshold(ctx); thErr == nil && dynThreshold > 0 {
-				threshold = dynThreshold
-			}
-
-			totalNAV, coreNAV := 0.0, 0.0
-			for _, h := range holdings {
-				if !h.TAAEnabled || h.Quantity <= 0 {
-					continue
-				}
-				nav := h.NAV()
-				totalNAV += nav
-				if h.AllocationType == portfolio.AllocationCore {
-					coreNAV += nav
-				}
-			}
-			if totalNAV > 0 {
-				drift := abs(coreNAV/totalNAV - tgt.CoreRatio)
-				if drift < threshold {
-					slog.Debug("TAA drift within threshold; skipping evaluation",
-						"drift", drift, "threshold", threshold)
-					return nil
-				}
-			}
-		}
-	}
-
 	now := time.Now().UTC()
+
+	// Core holdings: per-holding PMC floor check.
 	for _, h := range holdings {
-		if !h.TAAEnabled || h.Quantity <= 0 {
+		if !h.TAAEnabled || h.Quantity <= 0 || h.AllocationType != portfolio.AllocationCore {
 			continue
 		}
-		switch h.AllocationType {
-		case portfolio.AllocationCore:
-			e.evaluateCore(ctx, h, now)
-		case portfolio.AllocationSatellite:
-			e.evaluateSatellite(ctx, h, now)
+		e.evaluateCore(ctx, h, now)
+	}
+
+	// Satellite holdings: portfolio-level conviction-weighted optimizer.
+	for _, msg := range optimizeSatellite(holdings, e.conviction, e.cfg, now) {
+		if err := e.dispatcher.Dispatch(msg); err != nil {
+			slog.Error("dispatch rebalance signal", "symbol", msg.Instrument, "error", err)
+		} else {
+			slog.Info("rebalance signal dispatched",
+				"symbol", msg.Instrument,
+				"current_weight", msg.CurrentWeight,
+				"target_weight", msg.TargetWeight,
+				"delta_eur", msg.DeltaEUR,
+			)
 		}
 	}
+
+	// Entry signals: tracked symbols not yet held with strong conviction.
+	if e.symbols != nil {
+		for _, msg := range evaluateEntries(holdings, e.symbols.Symbols(), e.conviction, e.cfg, now) {
+			if err := e.dispatcher.Dispatch(msg); err != nil {
+				slog.Error("dispatch entry signal", "symbol", msg.Instrument, "error", err)
+			} else {
+				slog.Info("entry signal dispatched",
+					"symbol", msg.Instrument,
+					"target_weight", msg.TargetWeight,
+					"delta_eur", msg.DeltaEUR,
+				)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -179,46 +151,6 @@ func (e *Engine) evaluateCore(ctx context.Context, h portfolio.Holding, now time
 	}
 }
 
-func (e *Engine) evaluateSatellite(ctx context.Context, h portfolio.Holding, now time.Time) {
-	conviction := e.conviction.Conviction(h.Symbol)
-
-	// Effective fee rate: BrokerFeePercent unless the absolute cap is cheaper.
-	feeRate := e.cfg.BrokerFeePercent
-	if e.cfg.MaxBrokerFeeEUR > 0 {
-		posValue := h.Quantity * h.MarketPrice
-		if posValue > 0 {
-			if capped := e.cfg.MaxBrokerFeeEUR / posValue; capped < feeRate {
-				feeRate = capped
-			}
-		}
-	}
-
-	// Friction: round-trip fee cost + tax on that gain + safety buffer.
-	friction := feeRate*(1+e.cfg.TaxRate) + e.cfg.Buffer
-	expectedAlpha := abs(conviction)
-
-	if expectedAlpha <= friction {
-		slog.Debug("satellite friction gate blocked rebalance",
-			"symbol", h.Symbol,
-			"conviction", conviction,
-			"friction", friction,
-		)
-		return
-	}
-
-	// Emit rebalance signal only when conviction exceeds the threshold.
-	direction := "increase"
-	if conviction < 0 {
-		direction = "decrease"
-	}
-	msg := signal.NewRebalanceMessage(now, h.Symbol, conviction, direction)
-	if err := e.dispatcher.Dispatch(msg); err != nil {
-		slog.Error("dispatch rebalance signal", "symbol", h.Symbol, "error", err)
-	} else {
-		slog.Info("rebalance signal dispatched", "symbol", h.Symbol,
-			"conviction", conviction, "direction", direction)
-	}
-}
 
 func abs(v float64) float64 {
 	if v < 0 {

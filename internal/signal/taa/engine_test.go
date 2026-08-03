@@ -53,6 +53,10 @@ func (f *fakeDispatcher) Dispatch(msg signal.Message) error {
 	return nil
 }
 
+type fakeSymbolProvider struct{ syms []string }
+
+func (f *fakeSymbolProvider) Symbols() []string { return f.syms }
+
 // --- tests ---
 
 func TestEvaluateCorePMCFloorAlert(t *testing.T) {
@@ -63,9 +67,9 @@ func TestEvaluateCorePMCFloorAlert(t *testing.T) {
 	pmc := &fakePMC{prices: map[string]float64{"VWCE.DE": 100}} // price below PMC
 	dispatch := &fakeDispatcher{}
 
-	engine := NewEngine(store, pmc, &fakeConviction{0}, dispatch, Config{
-		TaxRate: 0.26, BrokerFeePercent: 0.001, Buffer: 0.01, RebalanceThreshold: 0.05,
-	}, nil)
+	engine := NewEngine(store, pmc, &fakeConviction{0}, nil, dispatch, Config{
+		TaxRate: 0.26, BrokerFeePercent: 0.001, Buffer: 0.01,
+	})
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate error: %v", err)
 	}
@@ -86,7 +90,7 @@ func TestEvaluateCoreAboveFloor(t *testing.T) {
 	pmc := &fakePMC{prices: map[string]float64{"VWCE.DE": 100}} // price above PMC
 	dispatch := &fakeDispatcher{}
 
-	engine := NewEngine(store, pmc, &fakeConviction{0}, dispatch, Config{}, nil)
+	engine := NewEngine(store, pmc, &fakeConviction{0}, nil, dispatch, Config{})
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate error: %v", err)
 	}
@@ -102,9 +106,9 @@ func TestEvaluateSatelliteGatePasses(t *testing.T) {
 	}}
 	// conviction=0.9 >> friction=0.26*0.001+0.001+0.01 ≈ 0.011
 	dispatch := &fakeDispatcher{}
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.9}, dispatch, Config{
+	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.9}, nil, dispatch, Config{
 		TaxRate: 0.26, BrokerFeePercent: 0.001, Buffer: 0.01,
-	}, nil)
+	})
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -123,9 +127,9 @@ func TestEvaluateSatelliteGateBlocked(t *testing.T) {
 	}}
 	// conviction=0.005 << friction ≈ 0.011 → should be blocked
 	dispatch := &fakeDispatcher{}
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.005}, dispatch, Config{
+	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.005}, nil, dispatch, Config{
 		TaxRate: 0.26, BrokerFeePercent: 0.001, Buffer: 0.01,
-	}, nil)
+	})
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -137,7 +141,7 @@ func TestEvaluateSatelliteGateBlocked(t *testing.T) {
 func TestEvaluateStoreError(t *testing.T) {
 	t.Parallel()
 	store := &fakeStore{err: errors.New("db error")}
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0}, &fakeDispatcher{}, Config{}, nil)
+	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0}, nil, &fakeDispatcher{}, Config{})
 	if err := engine.Evaluate(context.Background()); err == nil {
 		t.Error("expected error from store, got nil")
 	}
@@ -149,7 +153,7 @@ func TestEvaluateCoreNoPMCSkipsFloor(t *testing.T) {
 		{ID: 1, Symbol: "X", Quantity: 1, MarketPrice: 50, AllocationType: portfolio.AllocationCore, TAAEnabled: true},
 	}}
 	dispatch := &fakeDispatcher{}
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0}, dispatch, Config{}, nil)
+	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0}, nil, dispatch, Config{})
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -185,102 +189,6 @@ func TestAbsHelper(t *testing.T) {
 	}
 }
 
-// --- TargetReader / drift gate tests ---
-
-type fakeTargetReader struct {
-	targets            CoreSatelliteTargets
-	rebalanceThreshold float64 // 0 means "not set"; engine falls back to Config value
-	err                error
-}
-
-func (f *fakeTargetReader) GetCoreSatelliteTargets(_ context.Context) (CoreSatelliteTargets, error) {
-	return f.targets, f.err
-}
-
-func (f *fakeTargetReader) GetRebalanceThreshold(_ context.Context) (float64, error) {
-	if f.err != nil {
-		return 0, f.err
-	}
-	return f.rebalanceThreshold, nil
-}
-
-func TestEvaluateDriftGateBlocksWhenWithinThreshold(t *testing.T) {
-	t.Parallel()
-	// Core holding worth 80, satellite worth 20 → 80% core exactly on target.
-	store := &fakeStore{holdings: []portfolio.Holding{
-		{ID: 1, Symbol: "CORE1", Quantity: 1, MarketPrice: 80, AllocationType: portfolio.AllocationCore, TAAEnabled: true},
-		{ID: 2, Symbol: "SAT1", Quantity: 1, MarketPrice: 20, AllocationType: portfolio.AllocationSatellite, TAAEnabled: true},
-	}}
-	dispatch := &fakeDispatcher{}
-	targets := &fakeTargetReader{targets: CoreSatelliteTargets{CoreRatio: 0.8, SatelliteRatio: 0.2}}
-
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.9}, dispatch, Config{
-		TaxRate: 0.26, BrokerFeePercent: 0.001, Buffer: 0.01, RebalanceThreshold: 0.05,
-	}, targets)
-
-	if err := engine.Evaluate(context.Background()); err != nil {
-		t.Fatalf("Evaluate error: %v", err)
-	}
-	// Drift = |0.80 - 0.80| = 0.0 < 0.05 → no signals emitted.
-	if len(dispatch.dispatched) != 0 {
-		t.Errorf("expected 0 signals when drift within threshold, got %d", len(dispatch.dispatched))
-	}
-}
-
-func TestEvaluateDriftGatePassesWhenAboveThreshold(t *testing.T) {
-	t.Parallel()
-	// Core 60%, target 80% → drift = 0.20 > 0.05 → evaluate per-holding.
-	store := &fakeStore{holdings: []portfolio.Holding{
-		{ID: 1, Symbol: "SAT1", Quantity: 1, MarketPrice: 100, AllocationType: portfolio.AllocationSatellite, TAAEnabled: true},
-	}}
-	dispatch := &fakeDispatcher{}
-	targets := &fakeTargetReader{targets: CoreSatelliteTargets{CoreRatio: 0.8, SatelliteRatio: 0.2}}
-
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.9}, dispatch, Config{
-		TaxRate: 0.26, BrokerFeePercent: 0.001, Buffer: 0.01, RebalanceThreshold: 0.05,
-	}, targets)
-
-	if err := engine.Evaluate(context.Background()); err != nil {
-		t.Fatalf("Evaluate error: %v", err)
-	}
-	// Drift = |0.0 - 0.8| = 0.8 > 0.05 → satellite evaluated → rebalance emitted.
-	if len(dispatch.dispatched) != 1 {
-		t.Errorf("expected 1 signal above drift threshold, got %d", len(dispatch.dispatched))
-	}
-}
-
-func TestEvaluateDynamicThresholdOverridesConfig(t *testing.T) {
-	t.Parallel()
-	// Portfolio is exactly on target (drift = 0), but the DB threshold is 0.
-	// The Config threshold is 0.05, so without the dynamic override the gate
-	// would block (drift 0 < 0.05). With the DB threshold set to 0 the
-	// condition dynThreshold > 0 is false → falls back to Config → still blocks.
-	// Set DB threshold to a value that forces the gate OPEN: threshold = 0 is
-	// not useful; instead, set it very small so drift > threshold.
-	// Core 60%, target 80% → drift 0.20; static Config threshold 0.99 blocks.
-	// Dynamic threshold 0.10 passes → satellite signal emitted.
-	store := &fakeStore{holdings: []portfolio.Holding{
-		{ID: 1, Symbol: "SAT1", Quantity: 1, MarketPrice: 100, AllocationType: portfolio.AllocationSatellite, TAAEnabled: true},
-	}}
-	dispatch := &fakeDispatcher{}
-	targets := &fakeTargetReader{
-		targets:            CoreSatelliteTargets{CoreRatio: 0.8, SatelliteRatio: 0.2},
-		rebalanceThreshold: 0.10, // DB value overrides Config value of 0.99
-	}
-
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.9}, dispatch, Config{
-		TaxRate: 0.26, BrokerFeePercent: 0.001, Buffer: 0.01,
-		RebalanceThreshold: 0.99, // would block without the DB override
-	}, targets)
-
-	if err := engine.Evaluate(context.Background()); err != nil {
-		t.Fatalf("Evaluate error: %v", err)
-	}
-	// drift = |0.0/100 - 0.8| = 0.8 > DB threshold 0.10 → gate passes → 1 signal.
-	if len(dispatch.dispatched) != 1 {
-		t.Errorf("expected 1 signal with dynamic threshold override, got %d", len(dispatch.dispatched))
-	}
-}
 
 func TestEvaluateSatellitePerOrderFeeCapNotAggregate(t *testing.T) {
 	t.Parallel()
@@ -294,9 +202,9 @@ func TestEvaluateSatellitePerOrderFeeCapNotAggregate(t *testing.T) {
 		{ID: 2, Symbol: "B", Quantity: 100, MarketPrice: 1, AllocationType: portfolio.AllocationSatellite, TAAEnabled: true},
 	}}
 	dispatch := &fakeDispatcher{}
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.005}, dispatch, Config{
+	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.005}, nil, dispatch, Config{
 		TaxRate: 0, BrokerFeePercent: 0.01, MaxBrokerFeeEUR: 18.90, Buffer: 0,
-	}, nil)
+	})
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -316,9 +224,9 @@ func TestEvaluateSkipsTAADisabledHoldings(t *testing.T) {
 		{ID: 2, Symbol: "B", Quantity: 10, MarketPrice: 100, AllocationType: portfolio.AllocationSatellite, TAAEnabled: true},
 	}}
 	dispatch := &fakeDispatcher{}
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.9}, dispatch, Config{
+	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.9}, nil, dispatch, Config{
 		TaxRate: 0.26, BrokerFeePercent: 0.001, Buffer: 0.01,
-	}, nil)
+	})
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -338,9 +246,9 @@ func TestEvaluateSkipsZeroQtyHoldings(t *testing.T) {
 		{ID: 2, Symbol: "OPEN", Quantity: 5, MarketPrice: 100, AllocationType: portfolio.AllocationSatellite, TAAEnabled: true},
 	}}
 	dispatch := &fakeDispatcher{}
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.9}, dispatch, Config{
+	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.9}, nil, dispatch, Config{
 		TaxRate: 0.26, BrokerFeePercent: 0.001, Buffer: 0.01,
-	}, nil)
+	})
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}
@@ -360,9 +268,7 @@ func TestEvaluateCoreUsesHoldingPMCWhenPresent(t *testing.T) {
 	}}
 	dispatch := &fakeDispatcher{}
 
-	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0}, dispatch, Config{
-		RebalanceThreshold: 0.05,
-	}, nil)
+	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0}, nil, dispatch, Config{})
 
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate error: %v", err)
