@@ -52,7 +52,7 @@ func (c *Checkpoint) Save(ctx context.Context, modelName string, f *Forest, m Me
 		return fmt.Errorf("marshal forest: %w", err)
 	}
 
-	metricsJSON := fmt.Sprintf(`{"fold":%d,"mse":%f,"mae":%f,"sharpe":%f}`, m.Fold, m.MSE, m.MAE, m.Sharpe)
+	metricsJSON := fmt.Sprintf(`{"fold":%d,"mse":%f,"mae":%f,"sortino":%f}`, m.Fold, m.MSE, m.MAE, m.Sortino)
 
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {

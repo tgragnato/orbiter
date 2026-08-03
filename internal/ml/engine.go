@@ -26,7 +26,7 @@ const (
 
 // TrainingResult holds the output of one completed training run.
 type TrainingResult struct {
-	// BestForest is the forest with the highest walk-forward Sharpe ratio.
+	// BestForest is the forest with the highest walk-forward Sortino ratio.
 	BestForest *Forest
 	// AllFolds contains per-fold metrics from walk-forward CV.
 	AllFolds []WalkForwardResult
@@ -109,7 +109,7 @@ func (e *Engine) run(ctx context.Context, samples []Sample, cfg WalkForwardConfi
 		default:
 		}
 
-		e.log("fold %d: MSE=%.6f MAE=%.6f Sharpe=%.3f", r.Fold, r.Metrics.MSE, r.Metrics.MAE, r.Metrics.Sharpe)
+		e.log("fold %d: MSE=%.6f MAE=%.6f Sortino=%.3f", r.Fold, r.Metrics.MSE, r.Metrics.MAE, r.Metrics.Sortino)
 
 		// Handle pause/resume/cancel between folds.
 		for {
@@ -179,8 +179,8 @@ func (e *Engine) run(ctx context.Context, samples []Sample, cfg WalkForwardConfi
 		e.Results <- tr
 	}
 
-	e.log("training done: best fold %d Sharpe=%.3f predScale=%.6f",
-		best.Fold, best.Metrics.Sharpe, scale)
+	e.log("training done: best fold %d Sortino=%.3f predScale=%.6f",
+		best.Fold, best.Metrics.Sortino, scale)
 }
 
 func (e *Engine) log(format string, args ...any) {

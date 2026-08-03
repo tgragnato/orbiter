@@ -72,19 +72,40 @@ func TestMSEMAE(t *testing.T) {
 	}
 }
 
-func TestSharpe(t *testing.T) {
+func TestSortino(t *testing.T) {
 	t.Parallel()
-	// Constant positive returns → very high Sharpe.
+	// Constant positive returns → no downside → capped value.
 	returns := make([]float64, 252)
 	for i := range returns {
 		returns[i] = 0.001
 	}
-	s := Sharpe(returns)
-	if s <= 0 {
-		t.Errorf("Sharpe for positive constant returns = %f, want > 0", s)
+	s := Sortino(returns)
+	if s != 10.0 {
+		t.Errorf("Sortino for positive constant returns = %f, want 10.0 (no downside)", s)
 	}
-	if got := Sharpe([]float64{1}); got != 0 {
-		t.Errorf("Sharpe single return = %f, want 0", got)
+
+	// Mixed returns with negatives → finite positive ratio.
+	mixed := make([]float64, 252)
+	for i := range mixed {
+		if i%3 == 0 {
+			mixed[i] = -0.001
+		} else {
+			mixed[i] = 0.002
+		}
+	}
+	sm := Sortino(mixed)
+	if sm <= 0 {
+		t.Errorf("Sortino for mixed returns = %f, want > 0", sm)
+	}
+
+	if got := Sortino([]float64{1}); got != 0 {
+		t.Errorf("Sortino single return = %f, want 0", got)
+	}
+
+	// All negative returns → mean < 0, dd > 0 → valid negative Sortino.
+	neg := []float64{-0.01, -0.02, -0.01}
+	if got := Sortino(neg); got >= 0 {
+		t.Errorf("Sortino all-negative returns = %f, want < 0", got)
 	}
 }
 

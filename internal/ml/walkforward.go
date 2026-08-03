@@ -90,10 +90,10 @@ func WalkForwardCV(
 		}
 
 		m := Metrics{
-			Fold:   fold,
-			MSE:    MSE(preds, labels),
-			MAE:    MAE(preds, labels),
-			Sharpe: Sharpe(returns),
+			Fold:    fold,
+			MSE:     MSE(preds, labels),
+			MAE:     MAE(preds, labels),
+			Sortino: Sortino(returns),
 		}
 		r := WalkForwardResult{
 			Fold:       fold,
@@ -126,14 +126,14 @@ func purge(trainSamples []Sample, testStart, testEnd int) []Sample {
 	return trainSamples
 }
 
-// BestFold returns the fold with the highest Sharpe ratio.
+// BestFold returns the fold with the highest Sortino ratio.
 func BestFold(results []WalkForwardResult) *WalkForwardResult {
 	if len(results) == 0 {
 		return nil
 	}
 	best := &results[0]
 	for i := 1; i < len(results); i++ {
-		if results[i].Metrics.Sharpe > best.Metrics.Sharpe {
+		if results[i].Metrics.Sortino > best.Metrics.Sortino {
 			best = &results[i]
 		}
 	}

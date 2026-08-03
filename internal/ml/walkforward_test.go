@@ -86,9 +86,9 @@ func TestWalkForwardCVInvalidConfig(t *testing.T) {
 func TestBestFold(t *testing.T) {
 	t.Parallel()
 	results := []WalkForwardResult{
-		{Fold: 0, Metrics: Metrics{Sharpe: 0.5}},
-		{Fold: 1, Metrics: Metrics{Sharpe: 1.5}},
-		{Fold: 2, Metrics: Metrics{Sharpe: 1.0}},
+		{Fold: 0, Metrics: Metrics{Sortino: 0.5}},
+		{Fold: 1, Metrics: Metrics{Sortino: 1.5}},
+		{Fold: 2, Metrics: Metrics{Sortino: 1.0}},
 	}
 	best := BestFold(results)
 	if best == nil || best.Fold != 1 {

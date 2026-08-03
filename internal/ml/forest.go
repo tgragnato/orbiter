@@ -65,10 +65,10 @@ func (f *Forest) ConvictionScore(feat [featureCount]float64, scale float64) floa
 
 // Metrics holds cross-validation metrics for a single walk-forward fold.
 type Metrics struct {
-	Fold  int
-	MSE   float64
-	MAE   float64
-	Sharpe float64
+	Fold    int
+	MSE     float64
+	MAE     float64
+	Sortino float64
 }
 
 // MSE computes mean-squared error between predictions and labels.
@@ -96,18 +96,31 @@ func MAE(preds, labels []float64) float64 {
 	return sum / float64(len(preds))
 }
 
-// Sharpe computes an annualised Sharpe ratio from a return series (assumes
-// daily observations, 252 trading days/year).
-func Sharpe(returns []float64) float64 {
+// Sortino computes an annualised Sortino ratio from a return series (assumes
+// daily observations, 252 trading days/year). MAR is 0: only negative returns
+// contribute to downside deviation, so positive volatility is not penalised.
+func Sortino(returns []float64) float64 {
 	if len(returns) < 2 {
 		return 0
 	}
 	mean := features.Mean(returns)
-	std := features.StdDev(returns, mean)
-	if std == 0 {
+
+	// Downside deviation: RMS of min(0, r_t) over all observations.
+	sumSq := 0.0
+	for _, r := range returns {
+		if r < 0 {
+			sumSq += r * r
+		}
+	}
+	dd := math.Sqrt(sumSq / float64(len(returns)))
+
+	if dd == 0 {
+		if mean > 0 {
+			return 10.0
+		}
 		return 0
 	}
-	return mean / std * math.Sqrt(252)
+	return mean / dd * math.Sqrt(252)
 }
 
 // --- internal helpers ---
