@@ -36,11 +36,12 @@ const (
 	forwardDays  = 1  // label horizon: 1-trading-day forward log-return
 )
 
-// CurrentSamples returns the most recent feature vector for each active holding.
-// It reuses samplesFromCandles and takes the last produced sample per symbol,
-// which corresponds to bar n-2 (one day before the latest close). The Label
-// field is populated but should be ignored — it is a current-bar feature vector,
-// not a forward-return target.
+// CurrentSamples returns the most recent feature vector for each TAA-eligible
+// holding, including those with Quantity=0 (closed positions preserved in the
+// portfolio). Zero-qty holdings are included so the TAA entry-signal path can
+// compute conviction scores and suggest re-entry when the asset returns to trend.
+// The Label field is populated but should be ignored — it is a current-bar
+// feature vector, not a forward-return target.
 func CurrentSamples(ctx context.Context, store portfolio.HoldingsStore, provider data.DataProvider) (map[string]ml.Sample, error) {
 	holdings, err := store.ListHoldings(ctx)
 	if err != nil {
@@ -53,7 +54,7 @@ func CurrentSamples(ctx context.Context, store portfolio.HoldingsStore, provider
 	result := make(map[string]ml.Sample)
 	seen := make(map[string]bool)
 	for _, h := range holdings {
-		if h.Quantity <= 0 || seen[h.Symbol] {
+		if !h.TAAEnabled || seen[h.Symbol] {
 			continue
 		}
 		seen[h.Symbol] = true

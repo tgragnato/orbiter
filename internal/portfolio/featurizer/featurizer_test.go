@@ -63,6 +63,42 @@ func syntheticCandles(n int, basePrice float64) []data.Candle {
 
 // --- tests ---
 
+func TestCurrentSamplesIncludesZeroQtyTAAEnabled(t *testing.T) {
+	t.Parallel()
+	// Closed position (Quantity=0) with TAAEnabled=true must be included so
+	// the TAA entry-signal path can compute conviction for re-entry.
+	store := &fakeStore{holdings: []portfolio.Holding{
+		{Symbol: "ETF1", Quantity: 0, TAAEnabled: true},
+	}}
+	provider := &fakeProvider{candles: map[string][]data.Candle{
+		"ETF1": syntheticCandles(200, 100),
+	}}
+	samples, err := CurrentSamples(context.Background(), store, provider)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := samples["ETF1"]; !ok {
+		t.Error("expected CurrentSamples to include zero-qty TAAEnabled holding for re-entry conviction")
+	}
+}
+
+func TestCurrentSamplesExcludesTAADisabled(t *testing.T) {
+	t.Parallel()
+	store := &fakeStore{holdings: []portfolio.Holding{
+		{Symbol: "ETF1", Quantity: 10, TAAEnabled: false},
+	}}
+	provider := &fakeProvider{candles: map[string][]data.Candle{
+		"ETF1": syntheticCandles(200, 100),
+	}}
+	samples, err := CurrentSamples(context.Background(), store, provider)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := samples["ETF1"]; ok {
+		t.Error("expected CurrentSamples to exclude TAAEnabled=false holding")
+	}
+}
+
 func TestExtractMLSamplesEmptyHoldings(t *testing.T) {
 	t.Parallel()
 	store := &fakeStore{}
