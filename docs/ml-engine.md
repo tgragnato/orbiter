@@ -180,7 +180,7 @@ Per-fold metrics collected on the out-of-sample test window:
 - **MAE** — mean absolute error
 - **Sortino** — annualised Sortino ratio of the simulated strategy: `sign(prediction) × actual_return`, assuming 252 trading days/year; downside deviation uses MAR = 0 so positive volatility is not penalised
 
-`BestFold` selects the forest with the highest Sortino. That forest becomes the active model delivered via `Engine.Results`.
+`MergeForests` combines all fold forests into a single ensemble by concatenating their trees, so predictions average across every fold. This avoids fold-selection bias that would arise from picking the single highest OOS Sortino ratio, which reflects noise in a short test window rather than robustness. `BestFold` is available for diagnostic logging only and is not used for live inference.
 
 ---
 
@@ -227,6 +227,6 @@ Trained forests can be saved to and loaded from PostgreSQL via `ml.Checkpoint`:
 - Table: `ml_model_checkpoints` — columns `model_name`, `metrics_json` (JSONB), `model_data` (bytea), `is_active`, `created_at`.
 - On save with `isActive = true`, all other rows for the same `model_name` are demoted first.
 - Retention: only the 5 most recent inactive checkpoints per model name are kept; older rows are pruned in the same transaction.
-- `LoadActive` returns `ErrNoActiveModel` when no active checkpoint exists, so callers can fall back to training from scratch.
+- `LoadActive` returns the forest and its `created_at` timestamp, or `ErrNoActiveModel` when no active checkpoint exists.
 
-After each training run `mlRunner.applyResult` saves the best forest to `ml_model_checkpoints` with `isActive = true` and recomputes per-symbol conviction scores via `featurizer.CurrentSamples`. On restart, `mlRunner.seedFromCheckpoint` (runs as a goroutine) loads the last active checkpoint and pre-populates conviction scores so the TAA engine starts with real model output rather than zeros.
+After each training run `mlRunner.applyResult` saves the merged ensemble to `ml_model_checkpoints` with `isActive = true` and recomputes per-symbol conviction scores via `featurizer.CurrentSamples`. On restart, `mlRunner.run` calls `initLastRunFromCheckpoint` synchronously before `maybeStart`: it queries the DB for the active checkpoint and initialises `lastRun` from its `created_at` timestamp so the 24-hour throttle survives restarts. If a checkpoint is found, `seedConvictionScores` is launched as a separate goroutine to fetch current feature vectors and populate conviction scores without blocking the training scheduler. If no checkpoint exists yet, both calls are no-ops and a fresh training run starts immediately.

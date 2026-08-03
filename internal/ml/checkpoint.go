@@ -92,22 +92,25 @@ func (c *Checkpoint) Save(ctx context.Context, modelName string, f *Forest, m Me
 }
 
 // LoadActive loads the currently active model for the given name.
+// Returns the forest and the time it was created (for throttle initialisation).
 // Returns ErrNoActiveModel when no active checkpoint exists.
-func (c *Checkpoint) LoadActive(ctx context.Context, modelName string) (*Forest, error) {
+func (c *Checkpoint) LoadActive(ctx context.Context, modelName string) (*Forest, time.Time, error) {
 	var data []byte
+	var createdAt time.Time
 	err := c.db.QueryRowContext(ctx, `
-		SELECT model_data FROM ml_model_checkpoints
+		SELECT model_data, created_at FROM ml_model_checkpoints
 		WHERE model_name = $1 AND is_active = true
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, modelName).Scan(&data)
+	`, modelName).Scan(&data, &createdAt)
 	if err == sql.ErrNoRows {
-		return nil, ErrNoActiveModel
+		return nil, time.Time{}, ErrNoActiveModel
 	}
 	if err != nil {
-		return nil, fmt.Errorf("query active checkpoint: %w", err)
+		return nil, time.Time{}, fmt.Errorf("query active checkpoint: %w", err)
 	}
-	return unmarshalForest(data)
+	f, err := unmarshalForest(data)
+	return f, createdAt, err
 }
 
 // ErrNoActiveModel is returned when no active checkpoint exists for a model.

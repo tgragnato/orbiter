@@ -99,6 +99,14 @@ func (r *mlRunner) run(ctx context.Context) {
 		}
 	}()
 
+	// Initialise lastRun from the checkpoint timestamp before maybeStart checks
+	// the 24-hour interval — otherwise lastRun is zero on every restart and a
+	// full retrain fires even if one completed recently.
+	// The conviction score population (network I/O) runs in a separate goroutine
+	// so it never blocks the training scheduler.
+	if forest := r.initLastRunFromCheckpoint(ctx); forest != nil {
+		go r.seedConvictionScores(ctx, forest)
+	}
 	r.maybeStart(ctx, true)
 
 	ticker := time.NewTicker(time.Hour)
@@ -149,18 +157,31 @@ func (r *mlRunner) applyResult(ctx context.Context, result ml.TrainingResult) {
 	slog.Info("ml: conviction scores updated", "symbols", len(samples))
 }
 
-// seedFromCheckpoint loads the most recent active checkpoint and pre-populates
-// per-symbol conviction scores. Must be called as a goroutine — fetching current
-// candles involves network I/O and must not block startup.
-func (r *mlRunner) seedFromCheckpoint(ctx context.Context) {
-	if r.checkpoint == nil || r.currentSamples == nil {
-		return
+// initLastRunFromCheckpoint queries the DB for the active checkpoint and
+// initialises lastRun from its created_at timestamp. Returns the forest so the
+// caller can seed conviction scores asynchronously; returns nil on any error.
+func (r *mlRunner) initLastRunFromCheckpoint(ctx context.Context) *ml.Forest {
+	if r.checkpoint == nil {
+		return nil
 	}
-	forest, err := r.checkpoint.LoadActive(ctx, "MAIN")
+	forest, createdAt, err := r.checkpoint.LoadActive(ctx, "MAIN")
 	if err != nil {
 		if err != ml.ErrNoActiveModel {
 			slog.Warn("ml: checkpoint load failed", "error", err)
 		}
+		return nil
+	}
+	r.mu.Lock()
+	r.lastRun = createdAt
+	r.mu.Unlock()
+	return forest
+}
+
+// seedConvictionScores fetches current feature vectors and populates per-symbol
+// conviction scores from the given forest. Runs asynchronously — involves
+// network I/O and must not block the training scheduler.
+func (r *mlRunner) seedConvictionScores(ctx context.Context, forest *ml.Forest) {
+	if r.currentSamples == nil {
 		return
 	}
 	samples, err := r.currentSamples(ctx)

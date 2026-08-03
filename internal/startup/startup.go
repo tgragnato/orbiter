@@ -131,7 +131,6 @@ func runTUI(ctx context.Context, args []string) error {
 		return featurizer.CurrentSamples(ctx, store, yahooProvider)
 	})
 	go runner.run(ctx)
-	go runner.seedFromCheckpoint(ctx)
 
 	// TAA engine: 0.19 % broker fee capped at €18.90, evaluated every 24 h.
 	taaEngine := taa.NewEngine(
