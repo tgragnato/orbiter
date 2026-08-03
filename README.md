@@ -5,7 +5,10 @@ A Go application for managing a Core-Satellite portfolio workflow with PostgreSQ
 This repository has been refactored away from direct broker automation into a keyboard-driven portfolio and signal workstation:
 
 - Tab 1: Unified holdings management (Core + Satellite in one table)
-- Tab 2: Non-blocking TAA signal queue viewer
+- Tab 2: Non-blocking TAA signal queue viewer with ML confidence scores
+- Tab 3: Live settings editor backed by PostgreSQL
+- Tab 4: Structured log viewer (slog stream)
+- Tab 5: Transaction ledger with add/edit support
 - Runtime configuration: database-driven, loaded from PostgreSQL
 
 ## Project Overview
@@ -16,9 +19,12 @@ The runtime architecture is:
 
 1. Start with a PostgreSQL DSN only.
 2. Run schema migrations and bootstrap settings from the database.
-3. Launch a Bubble Tea root model composed of:
-1. Tab 1 Unified Holdings
-2. Tab 2 Signals Queue
+3. Launch a Bubble Tea root model composed of five tabs:
+   1. Holdings — unified Core + Satellite view
+   2. Signals — TAA signal queue with ML confidence scores
+   3. Settings — live PostgreSQL-backed configuration editor
+   4. Logs — structured slog stream
+   5. Transactions — ledger with add/edit support
 
 This keeps startup deterministic and centralizes operational configuration in PostgreSQL instead of CLI flag sprawl.
 
@@ -68,7 +74,35 @@ Settings seeded and validated include:
 
 - Non-blocking TAA signal queue display
 - Polls queued signal read model without blocking the rest of the UI
+- Shows ML confidence scores from the random forest engine
 - Designed for manual rebalance execution workflows
+
+### Settings TUI (Tab 3)
+
+- Live editor for all PostgreSQL-backed `app_settings`
+- Changes take effect without restarting the application
+
+### Logs TUI (Tab 4)
+
+- Structured `slog` stream redirected from the default logger
+- Captures output from background goroutines (TAA, ML, price feed)
+
+### Transactions TUI (Tab 5)
+
+- Full transaction ledger with keyboard-driven add and edit forms
+- Mutations in this tab trigger an automatic refresh of the holdings tab
+
+### ML Engine
+
+- Random forest regressor trained on 26-feature EOD sample vectors
+- Features in three groups: batch go-talib indicators (0–12), streaming `ScoredStrategy` conviction scores (13–22), and incremental `pkg/indicator` outputs (23–25)
+- Walk-forward cross-validation with configurable train/test/embargo windows; best fold selected by Sharpe ratio
+- 24-hour auto-scheduling; best forest persisted to PostgreSQL and conviction scores seeded on restart
+
+### Backup and Restore
+
+- `backup` subcommand: exports all transactions to a versioned JSON file
+- `restore` subcommand: re-inserts transactions from a JSON backup via `AddTransaction` (additive — truncate tables first for a clean restore)
 
 ### Analytics and Accounting
 
@@ -87,24 +121,42 @@ Settings seeded and validated include:
 Runtime data flow:
 
 ```
-PostgreSQL DSN -> startup.Run -> migrations/bootstrap -> root Bubble Tea program
-                                                 |-> Tab 1 holdings store (DB)
-                                                 |-> Tab 2 signal read model
+main.go
+  └─ startup.Run
+       ├─ backup / restore subcommands (JSON transaction export / import)
+       └─ runTUI
+            ├─ parseConfig  (--dsn / DATABASE_URL)
+            ├─ openPostgres
+            ├─ configuration.Bootstrap
+            │    ├─ schema migrations  (app_settings, holdings, …)
+            │    └─ seed default settings
+            │
+            ├─ signal.NewRuntime  ──► SignalRuntime { Dispatcher, ReadModel }
+            │
+            ├─ portfolio.NewPostgresStore  (HoldingsStore + TransactionStore + PriceStore)
+            │
+            ├─ [goroutine] mlRunner  (24 h auto-schedule)
+            │    ├─ featurizer.ExtractMLSamples  ──► portfolio store + Yahoo data
+            │    │    ├─ go-talib batch indicators       (features 0–12)
+            │    │    └─ strategy.ScoredStrategy scores  (features 13–22)
+            │    └─ ml.Engine  (Random Forest, WalkForward CV)
+            │
+            ├─ [goroutine] taa.Engine  (24 h ticker)
+            │    ├─ reads holdings from store
+            │    ├─ applies conviction + PMC reader
+            │    └─ dispatches signals ──► signal.Dispatcher
+            │
+            ├─ [goroutine] feed.Updater  (30 min ticker)
+            │    ├─ data.YahooProvider  (EOD OHLC, UCITS/EUR)
+            │    └─ DividendSyncer  (syncs income when store supports it)
+            │
+            └─ Bubble Tea RootModel  (alt-screen)
+                 ├─ Tab 1: Holdings     (HoldingsStore, TransactionStore)
+                 ├─ Tab 2: Signals      (signal.ReadModel, ml.Engine)
+                 ├─ Tab 3: Settings     (configuration.Service)
+                 ├─ Tab 4: Logs         (slog → TUIHandler → LogChannel)
+                 └─ Tab 5: Transactions (TransactionEditor)
 ```
-
-### Package Map
-
-- `main.go`: process entrypoint, forwards CLI args to startup
-- `internal/startup`: strict DSN parsing, DB open, migration/bootstrap, root TUI launch
-- `internal/configuration`: schema migrations and typed DB-backed settings service
-- `internal/portfolio`: holdings domain model and PostgreSQL holdings store
-- `internal/portfolio/accounting`: cost basis calculators (PMC, FIFO, LIFO) and realized PnL ledger
-- `internal/portfolio/analytics`: TWR engine with cash flow and NAV snapshot persistence
-- `internal/portfolio/corporate`: corporate actions service (splits, dividends)
-- `internal/portfolio/data`: market data provider (Yahoo Finance UCITS/European EOD adapter)
-- `internal/signal`: signal message model and queue read-side model
-- `internal/tui/signals`: root tab model, Tab 1 holdings model, Tab 2 signals model
-- `internal/trader`: strategy/trading orchestration and signal dispatch production
 
 ## Getting Started
 
@@ -121,17 +173,6 @@ or:
 ```sh
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/orbiter?sslmode=disable go run .
 ```
-
-### 2) Launch the TUI
-
-The same startup command launches the Bubble Tea UI in alt-screen mode.
-
-Keyboard essentials:
-
-- `tab` or `l`: next tab
-- `shift+tab` or `h`: previous tab
-- `t`: toggle allocation type on selected holding (Tab 1)
-- `q` or `Ctrl+C`: quit
 
 ## Development
 
@@ -152,6 +193,11 @@ gofmt -w $(find . -name '*.go')   # format all Go sources
 golangci-lint run                 # run linter (if installed)
 go mod tidy                       # clean go.mod/go.sum
 ```
+
+### Documentation
+
+- [/docs/engineering-standards.md](/docs/engineering-standards.md)
+- [/docs/ml-engine.md](/docs/ml-engine.md)
 
 ## Disclaimer
 

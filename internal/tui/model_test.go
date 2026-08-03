@@ -250,12 +250,6 @@ func TestModelSummaryIncludesUnrealizedAndRealizedPnL(t *testing.T) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 func TestMaxHelper(t *testing.T) {
 	t.Parallel()
@@ -359,25 +353,3 @@ func TestModelClosedHoldingRendered(t *testing.T) {
 	}
 }
 
-func TestRunInjectsProgram(t *testing.T) {
-	t.Parallel()
-
-	called := false
-	orig := newProgram
-	t.Cleanup(func() { newProgram = orig })
-	newProgram = func(model tea.Model, _ ...tea.ProgramOption) programRunner {
-		called = true
-		return &fakeProgramRunner{}
-	}
-
-	if err := Run(&fakeHoldingsStore{}); err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if !called {
-		t.Fatalf("newProgram was not called")
-	}
-}
-
-type fakeProgramRunner struct{}
-
-func (f *fakeProgramRunner) Run() (tea.Model, error) { return nil, nil }

@@ -9,10 +9,25 @@ import (
 	"time"
 
 	talib "github.com/markcheno/go-talib"
+	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/internal/ml"
 	"github.com/tgragnato/orbiter/internal/portfolio"
 	"github.com/tgragnato/orbiter/internal/portfolio/data"
 	"github.com/tgragnato/orbiter/internal/portfolio/features"
+	"github.com/tgragnato/orbiter/internal/strategy"
+	stratdoji "github.com/tgragnato/orbiter/internal/strategy/doji"
+	stratengulf "github.com/tgragnato/orbiter/internal/strategy/engulfing"
+	stratha "github.com/tgragnato/orbiter/internal/strategy/HeikinAshi"
+	stratharami "github.com/tgragnato/orbiter/internal/strategy/harami"
+	stratlowcandle "github.com/tgragnato/orbiter/internal/strategy/lowcandle"
+	stratrsi "github.com/tgragnato/orbiter/internal/strategy/rsi"
+	stratrsiadx "github.com/tgragnato/orbiter/internal/strategy/rsiadx"
+	stratscalper "github.com/tgragnato/orbiter/internal/strategy/scalper"
+	stratsma10 "github.com/tgragnato/orbiter/internal/strategy/sma10"
+	stratstochrsi "github.com/tgragnato/orbiter/internal/strategy/stochrsi"
+	"github.com/tgragnato/orbiter/pkg/indicator/round"
+	"github.com/tgragnato/orbiter/pkg/indicator/stoch"
+	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
 const (
@@ -20,6 +35,41 @@ const (
 	warmupBars   = 40 // leading bars consumed for indicator convergence and discarded
 	forwardDays  = 1  // label horizon: 1-trading-day forward log-return
 )
+
+// CurrentSamples returns the most recent feature vector for each active holding.
+// It reuses samplesFromCandles and takes the last produced sample per symbol,
+// which corresponds to bar n-2 (one day before the latest close). The Label
+// field is populated but should be ignored — it is a current-bar feature vector,
+// not a forward-return target.
+func CurrentSamples(ctx context.Context, store portfolio.HoldingsStore, provider data.DataProvider) (map[string]ml.Sample, error) {
+	holdings, err := store.ListHoldings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	from := now.AddDate(-historyYears, 0, 0)
+
+	result := make(map[string]ml.Sample)
+	seen := make(map[string]bool)
+	for _, h := range holdings {
+		if h.Quantity <= 0 || seen[h.Symbol] {
+			continue
+		}
+		seen[h.Symbol] = true
+
+		candles, err := provider.GetEOD(h.Symbol, from, now)
+		if err != nil || len(candles) < warmupBars+forwardDays+1 {
+			continue
+		}
+		samples := samplesFromCandles(h.Symbol, candles)
+		if len(samples) == 0 {
+			continue
+		}
+		result[h.Symbol] = samples[len(samples)-1]
+	}
+	return result, nil
+}
 
 // ExtractMLSamples fetches historyYears of EOD candles for every active
 // holding (Quantity > 0) and converts them into ml.Sample vectors ready for
@@ -46,16 +96,54 @@ func ExtractMLSamples(ctx context.Context, store portfolio.HoldingsStore, provid
 		if err != nil || len(candles) < warmupBars+forwardDays+1 {
 			continue
 		}
-		all = append(all, samplesFromCandles(candles)...)
+		all = append(all, samplesFromCandles(h.Symbol, candles)...)
 	}
 	return all, nil
+}
+
+// candleToOHLC converts a data.Candle (float64 fields) to *ohlc.OHLC
+// (decimal.Decimal fields) so strategy indicators can consume it.
+// The resulting candle is treated as a closed EOD bar.
+func candleToOHLC(c data.Candle, symbol string) *ohlc.OHLC {
+	price := c.AdjustedClose
+	if price <= 0 {
+		price = c.Close
+	}
+	o := ohlc.New(symbol, c.Time, 24*time.Hour, false)
+	o.Open = decimal.NewFromFloat(c.Open)
+	o.High = decimal.NewFromFloat(c.High)
+	o.Low = decimal.NewFromFloat(c.Low)
+	o.Close = decimal.NewFromFloat(price)
+	// EOD bars are always closed; ForceClose is required so pkg/indicator
+	// implementations (rsi, adx, sma, stoch, stochrsi) don't silently drop
+	// the bar when checking o.Closed().
+	o.ForceClose()
+	return o
+}
+
+// newScoredStrategies instantiates one of each ScoredStrategy implementation.
+// All use 24 h as the candle duration (EOD data).
+func newScoredStrategies(symbol string) []strategy.ScoredStrategy {
+	dur := 24 * time.Hour
+	return []strategy.ScoredStrategy{
+		stratdoji.New(symbol),
+		stratengulf.New(symbol, dur),
+		stratharami.New(symbol, dur),
+		stratha.New(symbol),
+		stratlowcandle.New(symbol, dur),
+		stratrsi.New(symbol, dur),
+		stratrsiadx.New(symbol, dur),
+		stratscalper.New(symbol),
+		stratsma10.New(symbol, dur),
+		stratstochrsi.New(symbol),
+	}
 }
 
 // samplesFromCandles converts a chronological EOD candle slice for one symbol
 // into ml.Sample vectors. warmupBars leading bars are consumed by the
 // indicators and discarded; the final bar is reserved as the label for the
 // preceding row, so it is not itself turned into a sample.
-func samplesFromCandles(candles []data.Candle) []ml.Sample {
+func samplesFromCandles(symbol string, candles []data.Candle) []ml.Sample {
 	n := len(candles)
 	opens  := make([]float64, n)
 	highs  := make([]float64, n)
@@ -80,12 +168,47 @@ func samplesFromCandles(candles []data.Candle) []ml.Sample {
 	hammer      := hammerSignals(opens, highs, lows, closes)
 	haSignals   := heikinAshiSignals(opens, highs, lows, closes)
 
+	// Convert all candles to *ohlc.OHLC once for strategy consumption.
+	ohlcSlice := make([]*ohlc.OHLC, n)
+	for i, c := range candles {
+		ohlcSlice[i] = candleToOHLC(c, symbol)
+	}
+
+	// Instantiate all ScoredStrategies and incremental indicators, then feed
+	// the warm-up window. OnWarmUpCandle / Insert on every bar keeps state
+	// current without triggering any broker logic.
+	strats := newScoredStrategies(symbol)
+	stochInd := stoch.New(14, 3)
+	roundInd := round.New()
+	for i := 0; i < warmupBars && i < n; i++ {
+		for _, s := range strats {
+			s.OnWarmUpCandle(ohlcSlice[i])
+		}
+		stochInd.Insert(ohlcSlice[i])
+		roundInd.Insert(ohlcSlice[i])
+	}
+
 	var samples []ml.Sample
 	for i := warmupBars; i < n-forwardDays; i++ {
+		// Update all incremental state with bar i before reading any value.
+		for _, s := range strats {
+			s.OnWarmUpCandle(ohlcSlice[i])
+		}
+		stochInd.Insert(ohlcSlice[i])
+		roundInd.Insert(ohlcSlice[i])
+
 		c, cnext := closes[i], closes[i+forwardDays]
 		if c <= 0 || cnext <= 0 {
 			continue
 		}
+
+		// Build a candle window for strategies that inspect recent bars
+		// directly (scalper needs 10, HeikinAshi needs 3, others ignore it).
+		winStart := i - 99
+		if winStart < 0 {
+			winStart = 0
+		}
+		window := ohlcSlice[winStart : i+1]
 
 		var s ml.Sample
 		s.Features[ml.FeatRSI]       = rsiSeries[i] / 100.0
@@ -101,6 +224,32 @@ func samplesFromCandles(candles []data.Candle) []ml.Sample {
 		s.Features[ml.FeatReturn5]   = logRet(closes, i, 5)
 		s.Features[ml.FeatReturn20]  = logRet(closes, i, 20)
 		s.Features[ml.FeatZScore20]  = returnZScore(closes, i, 20)
+		// Strategy conviction scores (indices 13–22): each Score() reads the
+		// indicator state already updated by OnWarmUpCandle above, so there
+		// is no lookahead — all scores are based strictly on bars 0..i.
+		s.Features[ml.FeatScoreDoji]     = strats[0].Score(window)
+		s.Features[ml.FeatScoreEngulf]   = strats[1].Score(window)
+		s.Features[ml.FeatScoreHarami]   = strats[2].Score(window)
+		s.Features[ml.FeatScoreHA]       = strats[3].Score(window)
+		s.Features[ml.FeatScoreLowCand]  = strats[4].Score(window)
+		s.Features[ml.FeatScoreRSI]      = strats[5].Score(window)
+		s.Features[ml.FeatScoreRSIADX]   = strats[6].Score(window)
+		s.Features[ml.FeatScoreScalper]  = strats[7].Score(window)
+		s.Features[ml.FeatScoreSMA10]    = strats[8].Score(window)
+		s.Features[ml.FeatScoreStochRSI] = strats[9].Score(window)
+		// Fast Stochastic %K and %D from pkg/indicator/stoch (indices 23–24).
+		if vals, err := stochInd.Value(); err == nil {
+			s.Features[ml.FeatStochK] = vals[stoch.ValueK] / 100.0
+			s.Features[ml.FeatStochD] = vals[stoch.ValueD] / 100.0
+		}
+		// Round-number proximity: position of close within the weak round band (index 25).
+		if vals, err := roundInd.Value(); err == nil {
+			lower := vals[round.LowerRoundNumberWeak]
+			upper := vals[round.UpperRoundNumberWeak]
+			if band := upper - lower; band > 0 {
+				s.Features[ml.FeatRoundWeak] = (c - lower) / band
+			}
+		}
 		s.Label = math.Log(cnext / c)
 		samples = append(samples, s)
 	}

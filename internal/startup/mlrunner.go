@@ -2,38 +2,51 @@ package startup
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/tgragnato/orbiter/internal/ml"
 )
 
-// mlRunner wraps ml.Engine with 24-hour auto-scheduling and implements the
-// signals.MLEngine interface so it can be handed directly to the TUI.
+// mlRunner wraps ml.Engine with 24-hour auto-scheduling and implements both
+// the signals.MLEngine and taa.ConvictionProvider interfaces.
 //
 // Training runs automatically when:
 //   - The engine is idle/done AND the last run was more than interval ago.
 //   - Trigger() is called (bypasses the interval check).
 //
-// If no samples are available the scheduler stays idle without error.
+// After each training run the best forest is saved to PostgreSQL via checkpoint
+// and per-symbol conviction scores are recomputed from current candle data.
 type mlRunner struct {
-	engine   *ml.Engine
-	samples  func() []ml.Sample
-	cfg      ml.WalkForwardConfig
-	interval time.Duration
+	engine         *ml.Engine
+	samples        func() []ml.Sample
+	cfg            ml.WalkForwardConfig
+	interval       time.Duration
+	checkpoint     *ml.Checkpoint
+	currentSamples func(context.Context) (map[string]ml.Sample, error)
 
-	mu      sync.Mutex
-	lastRun time.Time
-	trigger chan struct{}
+	mu         sync.Mutex
+	lastRun    time.Time
+	trigger    chan struct{}
+	conviction sync.Map // map[string]float64
 }
 
-func newMLRunner(engine *ml.Engine, samples func() []ml.Sample, cfg ml.WalkForwardConfig) *mlRunner {
+func newMLRunner(
+	engine *ml.Engine,
+	samples func() []ml.Sample,
+	cfg ml.WalkForwardConfig,
+	checkpoint *ml.Checkpoint,
+	currentSamples func(context.Context) (map[string]ml.Sample, error),
+) *mlRunner {
 	return &mlRunner{
-		engine:   engine,
-		samples:  samples,
-		cfg:      cfg,
-		interval: 24 * time.Hour,
-		trigger:  make(chan struct{}, 1),
+		engine:         engine,
+		samples:        samples,
+		cfg:            cfg,
+		interval:       24 * time.Hour,
+		trigger:        make(chan struct{}, 1),
+		checkpoint:     checkpoint,
+		currentSamples: currentSamples,
 	}
 }
 
@@ -42,9 +55,17 @@ func (r *mlRunner) Pause()               { r.engine.Pause() }
 func (r *mlRunner) Resume()              { r.engine.Resume() }
 func (r *mlRunner) LogsChan() chan string { return r.engine.LogsChan() }
 
+// Conviction implements taa.ConvictionProvider. Returns the most recently
+// computed conviction score for symbol in [-1,+1], or 0 when no score exists.
+func (r *mlRunner) Conviction(symbol string) float64 {
+	if v, ok := r.conviction.Load(symbol); ok {
+		return v.(float64)
+	}
+	return 0
+}
+
 // Trigger requests an immediate training run, ignoring the 24-hour interval.
-// If training is already in progress the request is silently dropped (the
-// current run covers the need).
+// If training is already in progress the request is silently dropped.
 func (r *mlRunner) Trigger() {
 	select {
 	case r.trigger <- struct{}{}:
@@ -52,9 +73,21 @@ func (r *mlRunner) Trigger() {
 	}
 }
 
-// run is the background scheduler goroutine. It checks whether training is
-// due immediately on startup, then re-checks every hour.
+// run is the background scheduler goroutine. It also spawns a separate goroutine
+// that drains Engine.Results so every completed training run is persisted and
+// its conviction scores are applied to the TAA engine.
 func (r *mlRunner) run(ctx context.Context) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case result := <-r.engine.Results:
+				r.applyResult(ctx, result)
+			}
+		}
+	}()
+
 	r.maybeStart(ctx, true)
 
 	ticker := time.NewTicker(time.Hour)
@@ -66,11 +99,69 @@ func (r *mlRunner) run(ctx context.Context) {
 			r.engine.Cancel()
 			return
 		case <-r.trigger:
-			r.maybeStart(ctx, false) // forced, skip interval
+			r.maybeStart(ctx, false)
 		case <-ticker.C:
-			r.maybeStart(ctx, true) // respect 24 h interval
+			r.maybeStart(ctx, true)
 		}
 	}
+}
+
+// applyResult persists the best forest to the checkpoint store and recomputes
+// per-symbol conviction scores from the current feature vectors.
+func (r *mlRunner) applyResult(ctx context.Context, result ml.TrainingResult) {
+	if result.BestForest == nil {
+		return
+	}
+
+	if r.checkpoint != nil {
+		var m ml.Metrics
+		if best := ml.BestFold(result.AllFolds); best != nil {
+			m = best.Metrics
+		}
+		if err := r.checkpoint.Save(ctx, "MAIN", result.BestForest, m, true); err != nil {
+			slog.Warn("ml: checkpoint save failed", "error", err)
+		}
+	}
+
+	if r.currentSamples == nil {
+		return
+	}
+	samples, err := r.currentSamples(ctx)
+	if err != nil {
+		slog.Warn("ml: current samples failed", "error", err)
+		return
+	}
+	for sym, s := range samples {
+		score := result.BestForest.ConvictionScore(s.Features, result.PredictionScale)
+		r.conviction.Store(sym, score)
+	}
+	slog.Info("ml: conviction scores updated", "symbols", len(samples))
+}
+
+// seedFromCheckpoint loads the most recent active checkpoint and pre-populates
+// per-symbol conviction scores. Must be called as a goroutine — fetching current
+// candles involves network I/O and must not block startup.
+func (r *mlRunner) seedFromCheckpoint(ctx context.Context) {
+	if r.checkpoint == nil || r.currentSamples == nil {
+		return
+	}
+	forest, err := r.checkpoint.LoadActive(ctx, "MAIN")
+	if err != nil {
+		if err != ml.ErrNoActiveModel {
+			slog.Warn("ml: checkpoint load failed", "error", err)
+		}
+		return
+	}
+	samples, err := r.currentSamples(ctx)
+	if err != nil {
+		slog.Warn("ml: seed current samples failed", "error", err)
+		return
+	}
+	for sym, s := range samples {
+		score := forest.ConvictionScore(s.Features, 0.01)
+		r.conviction.Store(sym, score)
+	}
+	slog.Info("ml: conviction seeded from checkpoint", "symbols", len(samples))
 }
 
 // maybeStart launches training when the engine is idle/done.

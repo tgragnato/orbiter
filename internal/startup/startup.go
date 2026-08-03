@@ -125,8 +125,10 @@ func runTUI(ctx context.Context, args []string) error {
 	logCh := signals.NewLogChannel()
 	slog.SetDefault(slog.New(signals.NewTUIHandler(logCh)))
 
-	// ML engine with 24-hour auto-scheduling; no-op until samples are wired.
+	// ML engine with 24-hour auto-scheduling, checkpoint persistence, and
+	// per-symbol conviction scoring for the TAA engine.
 	yahooProvider := data.NewYahooProvider(&http.Client{Timeout: 30 * time.Second})
+	ckpt := ml.NewCheckpoint(db)
 	runner := newMLRunner(ml.NewEngine(), func() []ml.Sample {
 		samples, err := featurizer.ExtractMLSamples(ctx, store, yahooProvider)
 		if err != nil {
@@ -141,14 +143,17 @@ func runTUI(ctx context.Context, args []string) error {
 		NTrees:     50,
 		MaxDepth:   5,
 		MinSamples: 10,
+	}, ckpt, func(ctx context.Context) (map[string]ml.Sample, error) {
+		return featurizer.CurrentSamples(ctx, store, yahooProvider)
 	})
 	go runner.run(ctx)
+	go runner.seedFromCheckpoint(ctx)
 
 	// TAA engine: 0.19 % broker fee capped at €18.90, evaluated every 24 h.
 	taaEngine := taa.NewEngine(
 		store,
 		taa.NullPMCReader{},
-		taa.ConstantConviction{},
+		runner,
 		signalRuntime.Dispatcher,
 		taa.Config{
 			TaxRate:            0.26,
@@ -180,12 +185,11 @@ func runTUI(ctx context.Context, args []string) error {
 	// Price feed: refresh EOD quotes every 30 minutes and sync dividend income when
 	// the store supports the DividendSyncer interface (no-op otherwise).
 	if priceStore != nil {
-		yahooFeed := data.NewYahooProvider(&http.Client{Timeout: 30 * time.Second})
 		var priceFeed *feed.Updater
 		if ds, ok := store.(feed.DividendSyncer); ok {
-			priceFeed = feed.NewWithDividendSync(priceStore, ds, yahooFeed, 30*time.Minute)
+			priceFeed = feed.NewWithDividendSync(priceStore, ds, yahooProvider, 30*time.Minute)
 		} else {
-			priceFeed = feed.New(priceStore, yahooFeed, 30*time.Minute)
+			priceFeed = feed.New(priceStore, yahooProvider, 30*time.Minute)
 		}
 		go priceFeed.Run(ctx)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync/atomic"
 )
 
@@ -200,47 +201,26 @@ func (e *Engine) log(format string, args ...any) {
 	}
 }
 
-// predictionScale returns the standard deviation of all out-of-sample
-// predictions across folds, used to calibrate ConvictionScore.
+// predictionScale returns a calibration scale for ConvictionScore based on
+// the root-mean-square error across walk-forward folds. RMSE approximates the
+// typical magnitude of predictions, so tanh(pred/scale) stays in a useful
+// range rather than saturating or collapsing to zero.
 func predictionScale(results []WalkForwardResult) float64 {
-	var preds []float64
+	var totalMSE float64
+	var count int
 	for _, r := range results {
 		if r.Forest == nil {
 			continue
 		}
-		// Use the first sample of each test window as a representative point.
-		// (Exact calibration is done at inference time anyway.)
-		_ = r
+		totalMSE += r.Metrics.MSE
+		count++
 	}
-	if len(preds) == 0 {
+	if count == 0 || totalMSE <= 0 {
 		return 0.01
 	}
-	// Compute std dev of predictions.
-	sum := 0.0
-	for _, p := range preds {
-		sum += p
-	}
-	mean := sum / float64(len(preds))
-	v := 0.0
-	for _, p := range preds {
-		d := p - mean
-		v += d * d
-	}
-	if len(preds) < 2 {
+	scale := math.Sqrt(totalMSE / float64(count))
+	if scale <= 0 {
 		return 0.01
 	}
-	std := 0.0
-	if v > 0 {
-		std = v / float64(len(preds)-1)
-		// sqrt approximation: use iterative Newton's method
-		x := std
-		for i := 0; i < 20; i++ {
-			x = (x + std/x) / 2
-		}
-		std = x
-	}
-	if std == 0 {
-		return 0.01
-	}
-	return std
+	return scale
 }

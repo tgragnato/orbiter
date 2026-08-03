@@ -226,11 +226,11 @@ func TestExtractMLSamplesMultipleSymbols(t *testing.T) {
 func TestSamplesFromCandlesHeikinAshiNoLookahead(t *testing.T) {
 	t.Parallel()
 	candles := syntheticCandles(warmupBars+10, 100)
-	s1 := samplesFromCandles(candles)
+	s1 := samplesFromCandles("TEST", candles)
 
 	// Mutating a future candle must not change earlier samples.
 	candles[len(candles)-1].Close *= 100
-	s2 := samplesFromCandles(candles)
+	s2 := samplesFromCandles("TEST", candles)
 	if len(s1) == 0 || len(s2) == 0 {
 		t.Skip("no samples produced")
 	}

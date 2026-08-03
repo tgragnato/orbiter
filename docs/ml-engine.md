@@ -1,0 +1,228 @@
+# ML Engine
+
+Orbiter embeds a pure-Go Random Forest that produces a **conviction score** in `[-1, +1]` for each active holding. The TAA engine reads this score when deciding whether the expected alpha from a satellite rebalance exceeds the friction gate (taxes + broker fees + buffer). A score near `+1` means the model expects strong positive return; near `-1` means the opposite.
+
+No third-party ML library is used. All training, inference, and serialisation are implemented in `internal/ml`.
+
+---
+
+## Pipeline overview
+
+```
+feed.Updater (30 min)
+  └─ Yahoo EOD candles → PostgreSQL market_price
+
+mlRunner (24 h, or on Trigger())
+  └─ featurizer.ExtractMLSamples
+       ├─ 3 years of EOD candles per active holding (Yahoo)
+       ├─ batch indicators via go-talib          (features 0–12)
+       ├─ streaming strategy scores via ScoredStrategy  (features 13–22)
+       ├─ incremental pkg/indicator/stoch + round (features 23–25)
+       └─ 26-feature Sample vectors + 1-day log-return label
+  └─ ml.Engine.Start  (background goroutine)
+       └─ WalkForwardCV
+            ├─ fold 1: train Forest → test → Metrics (MSE, MAE, Sharpe)
+            ├─ fold 2: ...
+            └─ fold N: ...
+       └─ BestFold (highest Sharpe) → TrainingResult
+            └─ Engine.Results channel → TUI Tab 2 (Signals)
+```
+
+---
+
+## Feature vector (26 dimensions)
+
+Each `ml.Sample` carries a fixed 26-element `[featureCount]float64` array. All features are scale-invariant — raw prices are never fed to the model.
+
+The vector is split into three groups produced by different mechanisms inside `featurizer.samplesFromCandles`.
+
+### Group A — batch indicators (indices 0–12)
+
+Computed by go-talib over the full EOD close/high/low/open arrays in a single batch pass. Fast, stateless.
+
+| Index | Constant | Source | Description |
+|-------|----------|--------|-------------|
+| 0 | `FeatRSI` | go-talib `Rsi(closes, 14)` | Divided by 100 → `[0, 1]` |
+| 1 | `FeatStochRSI` | go-talib `StochRsi(closes, 14, 14, 3, SMA)` | K line divided by 100 → `[0, 1]` |
+| 2 | `FeatRSIADX` | RSI × ADX | Interaction term: momentum × trend strength |
+| 3 | `FeatSMA10` | go-talib `Sma(closes, 10)` | `(close − SMA10) / SMA10` — price distance from 10-day average |
+| 4 | `FeatLowCandle` | featurizer `hammerSignals` | Hammer / inverted hammer: `+1`, `−1`, or `0` |
+| 5 | `FeatEngulfing` | featurizer `engulfingSignals` | Bullish/bearish engulfing: `+1`, `−1`, or `0` |
+| 6 | `FeatHarami` | featurizer `haramiSignals` | Bullish/bearish harami: `+1`, `−1`, or `0` |
+| 7 | `FeatHA` | featurizer `heikinAshiSignals` | `(haClose − haOpen) / haOpen` |
+| 8 | `FeatScalper` | featurizer `bodyRatio` | `(close − open) / (high − low)` — candle body directionality |
+| 9 | `FeatReturn1` | featurizer `logRet` | `log(close[i] / close[i−1])` |
+| 10 | `FeatReturn5` | featurizer `logRet` | `log(close[i] / close[i−5])` |
+| 11 | `FeatReturn20` | featurizer `logRet` | `log(close[i] / close[i−20])` |
+| 12 | `FeatZScore20` | featurizer `returnZScore` | z-score of the current 1-day log-return vs the prior 20 days |
+
+### Group B — streaming strategy conviction scores (indices 13–22)
+
+Produced by running each `strategy.ScoredStrategy` implementation **incrementally** over the same candle history, bar by bar. Each `Score()` returns a value in `[-1, +1]`. Because `OnWarmUpCandle` is called before `Score()` is read at every bar, there is no lookahead bias.
+
+| Index | Constant | Strategy | Score logic |
+|-------|----------|----------|-------------|
+| 13 | `FeatScoreDoji` | `strategy/doji` | `+0.3` when previous candle is a doji (potential breakout setup), else `0` |
+| 14 | `FeatScoreEngulf` | `strategy/engulfing` | `±0.8` for bullish/bearish engulfing two-bar pattern, else `0` |
+| 15 | `FeatScoreHarami` | `strategy/harami` | `+0.8` for bullish harami (long-only setup), else `0` |
+| 16 | `FeatScoreHA` | `strategy/HeikinAshi` | `±0.4/0.7` from two consecutive confirmed Heikin-Ashi candles |
+| 17 | `FeatScoreLowCand` | `strategy/lowcandle` | `±0.8` when close breaks the rolling 7-candle high/low range |
+| 18 | `FeatScoreRSI` | `strategy/rsi` | Continuous `[-1, +1]` from `pkg/indicator/rsi` (RSI 14, SMA 200) |
+| 19 | `FeatScoreRSIADX` | `strategy/rsiadx` | RSI conviction scaled by normalised ADX strength; `0` when ADX < 35 |
+| 20 | `FeatScoreScalper` | `strategy/scalper` | `±0.8` counter-trend fade when last candle direction diverges from all 9 prior |
+| 21 | `FeatScoreSMA10` | `strategy/sma10` | Proportional `[-1, +1]` from price position relative to SMA-10 and SMA-200 |
+| 22 | `FeatScoreStochRSI` | `strategy/stochrsi` | Continuous `[-1, +1]` from average of StochRSI K and D lines |
+
+### Group C — incremental pkg/indicator outputs (indices 23–25)
+
+Produced by `pkg/indicator/stoch` and `pkg/indicator/round`, fed one candle at a time via `Insert()`. All `pkg/indicator` implementations require `o.Closed() == true`; `candleToOHLC` calls `ForceClose()` on every EOD bar to satisfy this contract.
+
+| Index | Constant | Source | Description |
+|-------|----------|--------|-------------|
+| 23 | `FeatStochK` | `pkg/indicator/stoch` `StochF(14, 3)` | Fast Stochastic %K / 100 → `[0, 1]` |
+| 24 | `FeatStochD` | `pkg/indicator/stoch` `StochF(14, 3)` | Fast Stochastic %D / 100 → `[0, 1]` |
+| 25 | `FeatRoundWeak` | `pkg/indicator/round` | `(close − lowerWeak) / (upperWeak − lowerWeak)` → `[0, 1]`; values near 0 or 1 indicate price proximity to a psychological round-number level |
+
+**Label**: `log(close[i+1] / close[i])` — next-day log-return (regression target).
+
+### Warm-up and lookahead guarantee
+
+```
+bar 0 … 39   → OnWarmUpCandle (all strategies)   — state accumulates, no score read
+               stochInd.Insert / roundInd.Insert  — indicator state accumulates
+bar 40 … n-2 → OnWarmUpCandle (updates state with bar i)
+               stochInd.Insert / roundInd.Insert
+               Score(window[0..i])                — reads state, no future data
+               stochInd.Value() / roundInd.Value()
+               go-talib series[i]                 — batch-computed, no future data
+               Label = log(close[i+1] / close[i])
+```
+
+The first 40 bars are consumed for indicator convergence (`warmupBars = 40`). The final bar is reserved as the label for bar `n-2`, so it never becomes a sample itself.
+
+### Feature subsampling
+
+With `featureCount = 26`, each tree draws `floor(sqrt(26)) = 5` randomly selected features per split. This is automatic — `Forest.nFeatures` is computed from `featureCount` at construction time.
+
+### go-talib and pkg/indicator: complementary roles
+
+go-talib computes Group A features in a single batch call over the full EOD array — efficient and stateless.
+
+`pkg/indicator` provides incremental implementations used in two ways:
+- **Via `strategy.ScoredStrategy`** (Group B): RSI, ADX, SMA, StochRSI power the 10 strategy implementations, each called via `OnWarmUpCandle`.
+- **Directly** (Group C): `pkg/indicator/stoch` and `pkg/indicator/round` are instantiated in the featurizer and fed via `Insert()`, bypassing the strategy layer entirely.
+
+The groups intentionally overlap in signal content (e.g. both Group A and Group B carry an RSI reading) — the random forest learns which representation is more predictive for each split.
+
+---
+
+## Random Forest
+
+### Tree (`internal/ml/tree.go`)
+
+Each tree is a standard CART regression tree:
+
+- **Split criterion**: variance reduction — the split that maximises `parentVariance − weightedVariance(left, right)` is chosen.
+- **Candidate thresholds**: midpoints between consecutive sorted unique values, capped at 32 per feature to keep training time bounded.
+- **Stopping conditions**: max depth reached, or fewer than `minSamples` samples at a node.
+- **Leaf prediction**: mean label of the samples that reached that leaf.
+
+### Forest (`internal/ml/forest.go`)
+
+- **Bootstrap aggregation (bagging)**: each tree is trained on a bootstrap resample of the full training set (sampling with replacement, same size).
+- **Feature subsampling**: each tree sees only `floor(sqrt(26)) = 5` randomly selected features at each split, chosen via a partial Fisher-Yates shuffle.
+- **Reproducibility**: tree `i` uses LCG seed `i+1` (linear congruential generator), so the same sample set always produces the same forest.
+- **Inference**: prediction is the average across all trees.
+
+### Conviction score
+
+The raw forest prediction is an expected log-return. It is converted to `[-1, +1]` via a soft tanh transform:
+
+```
+conviction = tanh(rawPrediction / scale)
+```
+
+`scale` is `sqrt(mean MSE across walk-forward folds)`, computed in `predictionScale()`. RMSE approximates the typical magnitude of predictions, keeping the tanh in a useful operating range. Defaults to `0.01` when no valid folds are available.
+
+---
+
+## Walk-forward cross-validation (`internal/ml/walkforward.go`)
+
+To avoid lookahead bias, the model is validated with **purged walk-forward CV**:
+
+```
+samples:  [0 .......... TrainSize | Embargo | TestSize | TestSize | ...]
+fold 0:    train[0:300]            gap[10]   test[310:370]
+fold 1:    train[60:360]           gap[10]   test[370:430]
+...
+```
+
+Default parameters (set in `startup.go`):
+
+| Parameter | Value | Meaning |
+|-----------|-------|---------|
+| `TrainSize` | 300 | Samples in each training window |
+| `TestSize` | 60 | Samples in each test window |
+| `Embargo` | 10 | Samples dropped between train end and test start |
+| `NTrees` | 50 | Trees per forest per fold |
+| `MaxDepth` | 5 | Maximum tree depth |
+| `MinSamples` | 10 | Minimum samples per leaf |
+
+The window slides forward by `TestSize` each fold. The embargo prevents label leakage when forward return horizons could overlap across the boundary.
+
+Per-fold metrics collected on the out-of-sample test window:
+
+- **MSE** — mean squared error between predicted and actual log-returns
+- **MAE** — mean absolute error
+- **Sharpe** — annualised Sharpe ratio of the simulated strategy: `sign(prediction) × actual_return`, assuming 252 trading days/year
+
+`BestFold` selects the forest with the highest Sharpe. That forest becomes the active model delivered via `Engine.Results`.
+
+---
+
+## Engine state machine (`internal/ml/engine.go`)
+
+`ml.Engine` runs training in a background goroutine with four states:
+
+```
+Idle ──Start()──► Running ──Pause()──► Paused ──Resume()──► Running
+                      │                                         │
+                   Cancel()                                  Cancel()
+                      │                                         │
+                      └──────────────► Done ◄───────────────-───┘
+```
+
+State transitions use `atomic.Int32` so the TUI can poll `Status()` without locking. Between folds the loop drains the `ctrl` channel, allowing pause/resume/cancel without blocking mid-fold.
+
+Training logs are streamed through `Engine.Logs` (buffered channel, capacity 512). On overflow the oldest entry is dropped to make room for the newest — it behaves as a ring buffer.
+
+When training completes, the `TrainingResult` is sent on `Engine.Results` (capacity 1). If a stale result is already sitting there it is drained first so the new result is never dropped.
+
+---
+
+## Scheduler (`internal/startup/mlrunner.go`)
+
+`mlRunner` wraps `ml.Engine` and adds scheduling logic:
+
+- **Automatic**: checks every hour whether 24 hours have elapsed since the last completed run. If yes, calls `featurizer.ExtractMLSamples` and starts training.
+- **Manual**: `Trigger()` bypasses the interval check and starts immediately (if the engine is idle/done).
+- **No-op on empty portfolio**: if `ExtractMLSamples` returns zero samples (e.g. no holdings with `Quantity > 0`), the run is skipped silently.
+- **Context-aware**: when the TUI exits, the parent context is cancelled, `mlRunner.run` calls `engine.Cancel()`, and the training goroutine stops at the next fold boundary.
+
+`mlRunner` implements two interfaces simultaneously:
+- `signals.MLEngine` — handed directly to the Signals tab (Tab 2) for status, pause/resume, and log streaming.
+- `taa.ConvictionProvider` — wired into the TAA engine in place of `ConstantConviction{}`. `Conviction(symbol)` reads from a `sync.Map` updated after each training run; returns `0` until the first run or checkpoint seed completes.
+
+---
+
+## Persistence (`internal/ml/checkpoint.go`)
+
+Trained forests can be saved to and loaded from PostgreSQL via `ml.Checkpoint`:
+
+- Serialisation: `encoding/gob` via exported mirror structs (`forestData`, `treeData`, `nodeData`).
+- Table: `ml_model_checkpoints` — columns `model_name`, `metrics_json` (JSONB), `model_data` (bytea), `is_active`, `created_at`.
+- On save with `isActive = true`, all other rows for the same `model_name` are demoted first.
+- Retention: only the 5 most recent inactive checkpoints per model name are kept; older rows are pruned in the same transaction.
+- `LoadActive` returns `ErrNoActiveModel` when no active checkpoint exists, so callers can fall back to training from scratch.
+
+After each training run `mlRunner.applyResult` saves the best forest to `ml_model_checkpoints` with `isActive = true` and recomputes per-symbol conviction scores via `featurizer.CurrentSamples`. On restart, `mlRunner.seedFromCheckpoint` (runs as a goroutine) loads the last active checkpoint and pre-populates conviction scores so the TAA engine starts with real model output rather than zeros.
