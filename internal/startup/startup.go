@@ -119,12 +119,13 @@ func runTUI(ctx context.Context, args []string) error {
 		}
 		return samples
 	}, ml.WalkForwardConfig{
-		TrainSize:  300,
-		TestSize:   60,
-		Embargo:    10,
-		NTrees:     50,
-		MaxDepth:   5,
-		MinSamples: 10,
+		TrainSize:    300,
+		TestSize:     60,
+		Embargo:      10,
+		LabelHorizon: 5,
+		NTrees:       50,
+		MaxDepth:     5,
+		MinSamples:   10,
 	}, ckpt, func(ctx context.Context) (map[string]ml.Sample, error) {
 		return featurizer.CurrentSamples(ctx, store, yahooProvider)
 	})

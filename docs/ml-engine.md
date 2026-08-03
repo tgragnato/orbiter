@@ -20,13 +20,13 @@ mlRunner (24 h, or on Trigger())
        ├─ batch indicators via go-talib          (features 0–12)
        ├─ streaming strategy scores via ScoredStrategy  (features 13–22)
        ├─ incremental pkg/indicator/stoch + round (features 23–25)
-       └─ 26-feature Sample vectors + 1-day log-return label
+       └─ 26-feature Sample vectors + 5-day log-return label
   └─ ml.Engine.Start  (background goroutine)
        └─ WalkForwardCV
             ├─ fold 1: train Forest → test → Metrics (MSE, MAE, Sortino)
             ├─ fold 2: ...
             └─ fold N: ...
-       └─ BestFold (highest Sortino) → TrainingResult
+       └─ MergeForests (all-fold ensemble) → TrainingResult
             └─ Engine.Results channel → TUI Tab 2 (Signals)
 ```
 

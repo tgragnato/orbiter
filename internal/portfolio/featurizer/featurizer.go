@@ -33,7 +33,7 @@ import (
 const (
 	historyYears = 3  // years of EOD history requested per symbol
 	warmupBars   = 40 // leading bars consumed for indicator convergence and discarded
-	forwardDays  = 1  // label horizon: 1-trading-day forward log-return
+	forwardDays  = 5  // label horizon: 5-trading-day forward log-return (improves SNR over 1-day)
 )
 
 // CurrentSamples returns the most recent feature vector for each TAA-eligible

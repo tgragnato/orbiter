@@ -11,6 +11,11 @@ type WalkForwardConfig struct {
 	// Embargo is the number of samples dropped between train end and test start
 	// to prevent label leakage from overlapping return horizons.
 	Embargo int
+	// LabelHorizon is the number of forward bars the label spans (e.g. 5 for a
+	// 5-day forward return). purge uses this to strip the trailing LabelHorizon
+	// training samples whose forward-return labels bleed into the test window.
+	// A value of 0 disables purging (safe only when Embargo >= LabelHorizon).
+	LabelHorizon int
 	// NTrees is the number of trees per forest in each fold.
 	NTrees int
 	// MaxDepth limits tree depth.
@@ -66,7 +71,7 @@ func WalkForwardCV(
 			break
 		}
 
-		trainSamples := purge(samples[trainStart:trainEnd], testStart, testEnd)
+		trainSamples := purge(samples[trainStart:trainEnd], trainStart, testStart, cfg.LabelHorizon)
 		if len(trainSamples) == 0 {
 			fold++
 			continue
@@ -115,15 +120,23 @@ func WalkForwardCV(
 	return results, nil
 }
 
-// purge removes any training sample whose index falls within [testStart, testEnd)
-// after applying the embargo. For a fixed feature window (single-point labels)
-// the purge set is empty, but the function is kept general.
-func purge(trainSamples []Sample, testStart, testEnd int) []Sample {
-	// With non-overlapping single-step labels, purging removes nothing.
-	// Retained for correctness when label horizons exceed one period.
-	_ = testStart
-	_ = testEnd
-	return trainSamples
+// purge removes training samples whose forward-return label bleeds into the
+// test window. Sample at position j in trainSamples has absolute index
+// trainStart+j and a label that closes at trainStart+j+labelHorizon. It leaks
+// if trainStart+j+labelHorizon >= testStart, i.e. j >= testStart-labelHorizon-trainStart.
+// When labelHorizon is 0 or the embargo already covers the horizon, nothing is removed.
+func purge(trainSamples []Sample, trainStart, testStart, labelHorizon int) []Sample {
+	if labelHorizon <= 0 {
+		return trainSamples
+	}
+	cutoff := testStart - labelHorizon - trainStart
+	if cutoff <= 0 {
+		return nil
+	}
+	if cutoff >= len(trainSamples) {
+		return trainSamples
+	}
+	return trainSamples[:cutoff]
 }
 
 // BestFold returns the fold with the highest Sortino ratio.

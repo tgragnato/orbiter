@@ -212,7 +212,8 @@ func TestExtractMLSamplesFeatureCount(t *testing.T) {
 func TestExtractMLSamplesLabelIsForwardReturn(t *testing.T) {
 	t.Parallel()
 	// Build candles with known prices so we can verify the label.
-	n := warmupBars + 5
+	// Need warmupBars + forwardDays + 1 to produce exactly one sample.
+	n := warmupBars + forwardDays + 1
 	candles := make([]data.Candle, n)
 	for i := range candles {
 		p := 100.0 + float64(i)
@@ -231,7 +232,7 @@ func TestExtractMLSamplesLabelIsForwardReturn(t *testing.T) {
 		t.Fatalf("expected samples, got err=%v len=%d", err, len(samples))
 	}
 
-	// First sample covers candles[warmupBars]; label = log(close[warmupBars+1] / close[warmupBars])
+	// First sample covers candles[warmupBars]; label = log(close[warmupBars+forwardDays] / close[warmupBars])
 	wantLabel := math.Log(candles[warmupBars+forwardDays].AdjustedClose / candles[warmupBars].AdjustedClose)
 	if math.Abs(samples[0].Label-wantLabel) > 1e-9 {
 		t.Fatalf("label = %f, want %f", samples[0].Label, wantLabel)
