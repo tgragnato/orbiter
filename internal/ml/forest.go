@@ -15,11 +15,19 @@ type Forest struct {
 	minSamples int
 }
 
-// NewForest creates an untrained Forest.
-func NewForest(nTrees, maxDepth, minSamples int) *Forest {
+// NewForest creates an untrained Forest. featuresPerSplit is the number of
+// candidate features sampled at each split (m_try); 0 defaults to 12 (~45% of
+// featureCount). The value is clamped to [1, featureCount].
+func NewForest(nTrees, maxDepth, minSamples, featuresPerSplit int) *Forest {
+	if featuresPerSplit <= 0 {
+		featuresPerSplit = 12
+	}
+	if featuresPerSplit > featureCount {
+		featuresPerSplit = featureCount
+	}
 	return &Forest{
 		Trees:      make([]*Tree, 0, nTrees),
-		nFeatures:  int(math.Round(math.Sqrt(float64(featureCount)))),
+		nFeatures:  featuresPerSplit,
 		maxDepth:   maxDepth,
 		minSamples: minSamples,
 	}

@@ -8,7 +8,7 @@ import (
 func TestForestFitPredict(t *testing.T) {
 	t.Parallel()
 	samples := makeSamples(300)
-	f := NewForest(10, 4, 3)
+	f := NewForest(10, 4, 3, 0)
 	f.Fit(samples, 10)
 
 	if len(f.Trees) != 10 {
@@ -25,7 +25,7 @@ func TestForestFitPredict(t *testing.T) {
 
 func TestForestEmptyPredict(t *testing.T) {
 	t.Parallel()
-	f := NewForest(5, 3, 2)
+	f := NewForest(5, 3, 2, 0)
 	// No Fit called
 	pred := f.Predict([featureCount]float64{})
 	if pred != 0 {
@@ -36,7 +36,7 @@ func TestForestEmptyPredict(t *testing.T) {
 func TestConvictionScore(t *testing.T) {
 	t.Parallel()
 	samples := makeSamples(200)
-	f := NewForest(5, 3, 2)
+	f := NewForest(5, 3, 2, 0)
 	f.Fit(samples, 5)
 
 	var feat [featureCount]float64
@@ -49,7 +49,7 @@ func TestConvictionScore(t *testing.T) {
 
 func TestConvictionScoreZeroScale(t *testing.T) {
 	t.Parallel()
-	f := NewForest(3, 2, 2)
+	f := NewForest(3, 2, 2, 0)
 	f.Fit(makeSamples(50), 3)
 	score := f.ConvictionScore([featureCount]float64{}, 0) // zero scale → uses 0.01
 	if math.IsNaN(score) {

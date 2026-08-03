@@ -18,6 +18,10 @@ type WalkForwardConfig struct {
 	LabelHorizon int
 	// NTrees is the number of trees per forest in each fold.
 	NTrees int
+	// FeaturesPerSplit is the number of randomly sampled candidate features
+	// evaluated at each tree split (m_try). A value of 0 uses the default of
+	// 12 (~45 % of 26 features). Values are clamped to [1, featureCount].
+	FeaturesPerSplit int
 	// MaxDepth limits tree depth.
 	MaxDepth int
 	// MinSamples is the minimum number of samples in a leaf.
@@ -77,7 +81,7 @@ func WalkForwardCV(
 			continue
 		}
 
-		f := NewForest(cfg.NTrees, cfg.MaxDepth, cfg.MinSamples)
+		f := NewForest(cfg.NTrees, cfg.MaxDepth, cfg.MinSamples, cfg.FeaturesPerSplit)
 		f.Fit(trainSamples, cfg.NTrees)
 
 		preds := make([]float64, cfg.TestSize)

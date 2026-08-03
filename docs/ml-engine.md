@@ -97,14 +97,14 @@ bar 40 … n-2 → OnWarmUpCandle (updates state with bar i)
                Score(window[0..i])                — reads state, no future data
                stochInd.Value() / roundInd.Value()
                go-talib series[i]                 — batch-computed, no future data
-               Label = log(close[i+1] / close[i])
+               Label = log(close[i+5] / close[i])   # 5-day forward log-return
 ```
 
-The first 40 bars are consumed for indicator convergence (`warmupBars = 40`). The final bar is reserved as the label for bar `n-2`, so it never becomes a sample itself.
+The first 40 bars are consumed for indicator convergence (`warmupBars = 40`). The trailing `forwardDays` bars are reserved for labelling, so they do not themselves become samples.
 
 ### Feature subsampling
 
-With `featureCount = 26`, each tree draws `floor(sqrt(26)) = 5` randomly selected features per split. This is automatic — `Forest.nFeatures` is computed from `featureCount` at construction time.
+With `featureCount = 26` and `FeaturesPerSplit = 12`, each tree evaluates 12 randomly selected candidate features at each split (~45% of total). This is set in `WalkForwardConfig.FeaturesPerSplit`; a value of 0 falls back to the default of 12. The value is clamped to `[1, featureCount]` at construction time.
 
 ### go-talib and pkg/indicator: complementary roles
 
@@ -132,7 +132,7 @@ Each tree is a standard CART regression tree:
 ### Forest (`internal/ml/forest.go`)
 
 - **Bootstrap aggregation (bagging)**: each tree is trained on a bootstrap resample of the full training set (sampling with replacement, same size).
-- **Feature subsampling**: each tree sees only `floor(sqrt(26)) = 5` randomly selected features at each split, chosen via a partial Fisher-Yates shuffle.
+- **Feature subsampling**: each tree evaluates 12 randomly selected candidate features at each split (~45% of 26), chosen via a partial Fisher-Yates shuffle. Configurable via `WalkForwardConfig.FeaturesPerSplit`.
 - **Reproducibility**: tree `i` uses LCG seed `i+1` (linear congruential generator), so the same sample set always produces the same forest.
 - **Inference**: prediction is the average across all trees.
 

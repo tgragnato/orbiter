@@ -108,7 +108,7 @@ func TestEngineStartIdempotent(t *testing.T) {
 func TestForestGobRoundTrip(t *testing.T) {
 	t.Parallel()
 	samples := makeSamples(200)
-	f := NewForest(5, 3, 2)
+	f := NewForest(5, 3, 2, 0)
 	f.Fit(samples, 5)
 
 	data, err := marshalForest(f)
