@@ -28,8 +28,8 @@ func TestEngineStartAndComplete(t *testing.T) {
 
 	select {
 	case result := <-engine.Results:
-		if result.BestForest == nil {
-			t.Error("expected non-nil BestForest")
+		if result.Forest == nil {
+			t.Error("expected non-nil Forest")
 		}
 		if len(result.AllFolds) == 0 {
 			t.Error("expected at least one fold")

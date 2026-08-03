@@ -120,7 +120,7 @@ func (r *mlRunner) run(ctx context.Context) {
 // applyResult persists the best forest to the checkpoint store and recomputes
 // per-symbol conviction scores from the current feature vectors.
 func (r *mlRunner) applyResult(ctx context.Context, result ml.TrainingResult) {
-	if result.BestForest == nil {
+	if result.Forest == nil {
 		return
 	}
 
@@ -129,7 +129,7 @@ func (r *mlRunner) applyResult(ctx context.Context, result ml.TrainingResult) {
 		if best := ml.BestFold(result.AllFolds); best != nil {
 			m = best.Metrics
 		}
-		if err := r.checkpoint.Save(ctx, "MAIN", result.BestForest, m, true); err != nil {
+		if err := r.checkpoint.Save(ctx, "MAIN", result.Forest, m, true); err != nil {
 			slog.Warn("ml: checkpoint save failed", "error", err)
 		}
 	}
@@ -143,7 +143,7 @@ func (r *mlRunner) applyResult(ctx context.Context, result ml.TrainingResult) {
 		return
 	}
 	for sym, s := range samples {
-		score := result.BestForest.ConvictionScore(s.Features, result.PredictionScale)
+		score := result.Forest.ConvictionScore(s.Features, result.PredictionScale)
 		r.conviction.Store(sym, score)
 	}
 	slog.Info("ml: conviction scores updated", "symbols", len(samples))

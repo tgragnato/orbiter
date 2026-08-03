@@ -26,8 +26,10 @@ const (
 
 // TrainingResult holds the output of one completed training run.
 type TrainingResult struct {
-	// BestForest is the forest with the highest walk-forward Sortino ratio.
-	BestForest *Forest
+	// Forest is the merged ensemble of all walk-forward fold forests.
+	// Using all folds avoids selection bias from picking the single best OOS
+	// Sortino ratio, which reflects 60-day window noise rather than robustness.
+	Forest *Forest
 	// AllFolds contains per-fold metrics from walk-forward CV.
 	AllFolds []WalkForwardResult
 	// PredictionScale is the standard deviation of predictions across all test
@@ -155,15 +157,16 @@ func (e *Engine) run(ctx context.Context, samples []Sample, cfg WalkForwardConfi
 		return
 	}
 
-	best := BestFold(results)
-	if best == nil {
+	ensemble := MergeForests(results)
+	if ensemble == nil {
 		e.log("no valid folds produced")
 		return
 	}
 
+	best := BestFold(results) // diagnostic only — not used for inference
 	scale := predictionScale(results)
 	tr := TrainingResult{
-		BestForest:      best.Forest,
+		Forest:          ensemble,
 		AllFolds:        results,
 		PredictionScale: scale,
 	}
@@ -179,8 +182,10 @@ func (e *Engine) run(ctx context.Context, samples []Sample, cfg WalkForwardConfi
 		e.Results <- tr
 	}
 
-	e.log("training done: best fold %d Sortino=%.3f predScale=%.6f",
-		best.Fold, best.Metrics.Sortino, scale)
+	if best != nil {
+		e.log("training done: %d folds merged, best fold %d Sortino=%.3f predScale=%.6f",
+			len(results), best.Fold, best.Metrics.Sortino, scale)
+	}
 }
 
 func (e *Engine) log(format string, args ...any) {

@@ -127,6 +127,7 @@ func purge(trainSamples []Sample, testStart, testEnd int) []Sample {
 }
 
 // BestFold returns the fold with the highest Sortino ratio.
+// Used for diagnostic logging only — not for live inference (see MergeForests).
 func BestFold(results []WalkForwardResult) *WalkForwardResult {
 	if len(results) == 0 {
 		return nil
@@ -138,4 +139,30 @@ func BestFold(results []WalkForwardResult) *WalkForwardResult {
 		}
 	}
 	return best
+}
+
+// MergeForests combines all fold forests into a single Forest by concatenating
+// their trees. The merged ensemble averages predictions across every fold,
+// eliminating fold-selection bias that arises from picking the single highest
+// OOS Sortino ratio (which reflects noise in a 60-day window, not robustness).
+func MergeForests(results []WalkForwardResult) *Forest {
+	if len(results) == 0 {
+		return nil
+	}
+	merged := &Forest{}
+	for _, r := range results {
+		if r.Forest == nil || len(r.Forest.Trees) == 0 {
+			continue
+		}
+		if merged.nFeatures == 0 {
+			merged.nFeatures = r.Forest.nFeatures
+			merged.maxDepth = r.Forest.maxDepth
+			merged.minSamples = r.Forest.minSamples
+		}
+		merged.Trees = append(merged.Trees, r.Forest.Trees...)
+	}
+	if len(merged.Trees) == 0 {
+		return nil
+	}
+	return merged
 }

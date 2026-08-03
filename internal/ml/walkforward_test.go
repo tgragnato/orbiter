@@ -83,6 +83,52 @@ func TestWalkForwardCVInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestMergeForests(t *testing.T) {
+	t.Parallel()
+	samples := makeSamples(600)
+	cfg := WalkForwardConfig{
+		TrainSize:  200,
+		TestSize:   50,
+		Embargo:    5,
+		NTrees:     5,
+		MaxDepth:   3,
+		MinSamples: 5,
+	}
+	results, err := WalkForwardCV(samples, cfg, nil)
+	if err != nil {
+		t.Fatalf("WalkForwardCV error: %v", err)
+	}
+
+	merged := MergeForests(results)
+	if merged == nil {
+		t.Fatal("MergeForests returned nil")
+	}
+
+	totalTrees := 0
+	for _, r := range results {
+		if r.Forest != nil {
+			totalTrees += len(r.Forest.Trees)
+		}
+	}
+	if len(merged.Trees) != totalTrees {
+		t.Errorf("merged tree count = %d, want %d", len(merged.Trees), totalTrees)
+	}
+
+	// Prediction must be finite.
+	feat := samples[0].Features
+	pred := merged.Predict(feat)
+	if pred != pred { // NaN check
+		t.Error("merged forest Predict returned NaN")
+	}
+
+	if got := MergeForests(nil); got != nil {
+		t.Errorf("MergeForests(nil) = %v, want nil", got)
+	}
+	if got := MergeForests([]WalkForwardResult{{Forest: nil}}); got != nil {
+		t.Errorf("MergeForests with nil forests = %v, want nil", got)
+	}
+}
+
 func TestBestFold(t *testing.T) {
 	t.Parallel()
 	results := []WalkForwardResult{
