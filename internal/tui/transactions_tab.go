@@ -338,18 +338,18 @@ func (m TransactionsTabModel) View() string {
 func (m *TransactionsTabModel) buildEntries() {
 	entries := make([]txDisplayEntry, 0, len(m.txs)+len(m.divs))
 
-	for i, tx := range m.txs {
+	for i := range m.txs {
 		kind := "BUY"
-		if tx.Type == portfolio.TransactionSell {
+		if m.txs[i].Type == portfolio.TransactionSell {
 			kind = "SELL"
 		}
 		sleeve := "SAT"
-		if tx.AllocationType == portfolio.AllocationCore {
+		if m.txs[i].AllocationType == portfolio.AllocationCore {
 			sleeve = "CORE"
 		}
 		entries = append(entries, txDisplayEntry{
-			date: tx.ExecutedAt, symbol: tx.Symbol, kind: kind,
-			qty: tx.Quantity, price: tx.Price, fee: tx.Fee,
+			date: m.txs[i].ExecutedAt, symbol: m.txs[i].Symbol, kind: kind,
+			qty: m.txs[i].Quantity, price: m.txs[i].Price, fee: m.txs[i].Fee,
 			sleeve: sleeve, txIndex: i,
 		})
 	}
@@ -389,10 +389,10 @@ func (m *TransactionsTabModel) syncRows() {
 func (m TransactionsTabModel) knownSymbols() []string {
 	seen := make(map[string]bool)
 	var syms []string
-	for _, tx := range m.txs {
-		if !seen[tx.Symbol] {
-			seen[tx.Symbol] = true
-			syms = append(syms, tx.Symbol)
+	for i := range m.txs {
+		if !seen[m.txs[i].Symbol] {
+			seen[m.txs[i].Symbol] = true
+			syms = append(syms, m.txs[i].Symbol)
 		}
 	}
 	return syms

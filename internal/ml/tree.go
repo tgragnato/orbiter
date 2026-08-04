@@ -91,8 +91,8 @@ func meanLabel(samples []Sample) float64 {
 		return 0
 	}
 	sum := 0.0
-	for _, s := range samples {
-		sum += s.Label
+	for i := range samples {
+		sum += samples[i].Label
 	}
 	return sum / float64(len(samples))
 }
@@ -103,8 +103,8 @@ func variance(samples []Sample) float64 {
 	}
 	mean := meanLabel(samples)
 	v := 0.0
-	for _, s := range samples {
-		d := s.Label - mean
+	for i := range samples {
+		d := samples[i].Label - mean
 		v += d * d
 	}
 	return v / float64(len(samples))
@@ -116,11 +116,11 @@ func weightedVariance(left, right []Sample) float64 {
 }
 
 func split(samples []Sample, fi int, threshold float64) (left, right []Sample) {
-	for _, s := range samples {
-		if s.Features[fi] <= threshold {
-			left = append(left, s)
+	for i := range samples {
+		if samples[i].Features[fi] <= threshold {
+			left = append(left, samples[i])
 		} else {
-			right = append(right, s)
+			right = append(right, samples[i])
 		}
 	}
 	return
@@ -130,8 +130,8 @@ func split(samples []Sample, fi int, threshold float64) (left, right []Sample) {
 // between consecutive sorted unique values (capped at 32 candidates).
 func uniqueThresholds(samples []Sample, fi int) []float64 {
 	vals := make([]float64, len(samples))
-	for i, s := range samples {
-		vals[i] = s.Features[fi]
+	for i := range samples {
+		vals[i] = samples[i].Features[fi]
 	}
 	sort.Float64s(vals)
 

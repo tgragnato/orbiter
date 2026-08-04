@@ -37,7 +37,7 @@ func (s *PostgresStore) ListHoldings(ctx context.Context) ([]Holding, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	holdings := make([]Holding, 0)
 	for rows.Next() {
@@ -256,7 +256,7 @@ func (s *PostgresStore) cleanupStaleDividendRecords(ctx context.Context, symbol 
 	if err != nil {
 		return fmt.Errorf("list dividend dates for cleanup %s: %w", symbol, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var toDelete []time.Time
 	for rows.Next() {
@@ -301,7 +301,7 @@ func (s *PostgresStore) ListTransactions(ctx context.Context, symbol string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("list transactions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var txs []Transaction
 	for rows.Next() {
@@ -438,7 +438,7 @@ func (s *PostgresStore) ListDividendIncome(ctx context.Context) ([]DividendRecor
 	if err != nil {
 		return nil, fmt.Errorf("list dividend income: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var records []DividendRecord
 	for rows.Next() {
@@ -459,7 +459,7 @@ func (s *PostgresStore) ActiveSymbols(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("active symbols: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var symbols []string
 	for rows.Next() {
@@ -482,7 +482,7 @@ func (s *PostgresStore) AllTransactionSymbols(ctx context.Context) ([]string, er
 	if err != nil {
 		return nil, fmt.Errorf("all transaction symbols: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var symbols []string
 	for rows.Next() {

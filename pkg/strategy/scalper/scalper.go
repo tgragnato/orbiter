@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/tgragnato/orbiter/internal/broker"
-	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
@@ -37,7 +37,7 @@ func New(instrument string) *scalper {
 	return mr
 }
 
-func (mr *scalper) OnPosition(openPositions []broker.Position, _ []broker.Position) {
+func (mr *scalper) OnPosition(openPositions, _ []broker.Position) {
 	mr.openPositions = openPositions
 }
 
@@ -81,7 +81,7 @@ func (mr *scalper) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broke
 		}
 	}
 
-	newOrder, err := mr.createOrder(closedCandle, buyDirection, 1, "scalper")
+	newOrder, err := mr.createOrder(closedCandle, buyDirection, 1)
 	if err != nil {
 		slog.Error("createOrder() failed", "error", err)
 		return
@@ -99,7 +99,7 @@ func getBuyDirection(candle *ohlc.OHLC) broker.BuyDirection {
 	}
 }
 
-func (mr *scalper) createOrder(openOHLC *ohlc.OHLC, direction broker.BuyDirection, size float64, orderName string) (broker.Order, error) {
+func (mr *scalper) createOrder(openOHLC *ohlc.OHLC, direction broker.BuyDirection, size float64) (broker.Order, error) {
 	targetPrice, err := mr.calcTargetPrice(direction, mr.currentTick, targetPercent)
 	if err != nil {
 		return broker.Order{}, fmt.Errorf("calcTargetPrice() failed: %w", err)
@@ -123,14 +123,14 @@ func (mr *scalper) createOrder(openOHLC *ohlc.OHLC, direction broker.BuyDirectio
 	return broker.NewMarketOrder(direction, size, openOHLC.Instrument, targetPrice, stopLossPrice), nil
 }
 
-func (mr *scalper) calcTargetPrice(direction broker.BuyDirection, tick tick.Tick, percentage decimal.Decimal) (decimal.Decimal, error) {
+func (mr *scalper) calcTargetPrice(direction broker.BuyDirection, t tick.Tick, percentage decimal.Decimal) (decimal.Decimal, error) {
 	switch direction {
 	case broker.BuyDirectionLong:
-		var currentPrice = tick.Ask
+		var currentPrice = t.Ask
 		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(percentage)
 		return currentPrice.Add(percentFrom).Round(6), nil
 	case broker.BuyDirectionShort:
-		var currentPrice = tick.Bid
+		var currentPrice = t.Bid
 		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(percentage)
 		return currentPrice.Sub(percentFrom).Round(6), nil
 	default:
@@ -138,14 +138,14 @@ func (mr *scalper) calcTargetPrice(direction broker.BuyDirection, tick tick.Tick
 	}
 }
 
-func (mr *scalper) calcStopLossPrice(direction broker.BuyDirection, tick tick.Tick, percentage decimal.Decimal) (decimal.Decimal, error) {
+func (mr *scalper) calcStopLossPrice(direction broker.BuyDirection, t tick.Tick, percentage decimal.Decimal) (decimal.Decimal, error) {
 	switch direction {
 	case broker.BuyDirectionLong:
-		var currentPrice = tick.Ask
+		var currentPrice = t.Ask
 		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(percentage)
 		return currentPrice.Sub(percentFrom).Round(6), nil
 	case broker.BuyDirectionShort:
-		var currentPrice = tick.Bid
+		var currentPrice = t.Bid
 		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(percentage)
 		return currentPrice.Add(percentFrom).Round(6), nil
 	default:

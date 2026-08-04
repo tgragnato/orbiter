@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -229,11 +230,15 @@ func RunMigrations(ctx context.Context, db *sql.DB) error {
 		}
 
 		if _, err := tx.ExecContext(ctx, m.sql); err != nil {
-			tx.Rollback()
+			if rErr := tx.Rollback(); rErr != nil {
+				err = errors.Join(err, rErr)
+			}
 			return fmt.Errorf("apply migration %d (%s): %w", m.version, m.name, err)
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`, m.version, m.name); err != nil {
-			tx.Rollback()
+			if rErr := tx.Rollback(); rErr != nil {
+				err = errors.Join(err, rErr)
+			}
 			return fmt.Errorf("record migration %d (%s): %w", m.version, m.name, err)
 		}
 

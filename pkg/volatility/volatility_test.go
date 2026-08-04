@@ -53,7 +53,7 @@ func TestMedianVolatilityInPercentage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if 400 != perf {
+	if perf != 400 {
 		t.Fatalf("expected %v, got %v", 400, perf)
 	}
 }

@@ -80,7 +80,7 @@ func (r *PostgresRepository) List(ctx context.Context) ([]Setting, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	settings := make([]Setting, 0)
 	for rows.Next() {

@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/tgragnato/orbiter/internal/broker"
-	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
@@ -44,7 +44,7 @@ func New(instrument string) *Doji {
 
 func (d *Doji) OnWarmUpCandle(_ *ohlc.OHLC) {}
 
-func (d *Doji) OnPosition(openPositions []broker.Position, _ []broker.Position) {
+func (d *Doji) OnPosition(openPositions, _ []broker.Position) {
 	d.openPositions = openPositions
 }
 
@@ -61,7 +61,7 @@ func (d *Doji) GetWarmUpCandleAmount() uint {
 }
 
 // OnCandle records the latest closed candle for tick-level breakout detection.
-func (d *Doji) OnCandle(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, toClose []broker.Order, toClosePositions []broker.Position) {
+func (d *Doji) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
 	d.previousCandle = closedCandles[len(closedCandles)-1]
 	return
 }

@@ -274,7 +274,7 @@ func (f transactionFormModel) updateFocusedInput(msg tea.Msg) (transactionFormMo
 
 // buildTx validates form inputs and returns a ready-to-persist Transaction or
 // an error message string if validation fails.
-func (f transactionFormModel) buildTx() (portfolio.Transaction, string) {
+func (f transactionFormModel) buildTx() (tx portfolio.Transaction, errMsg string) {
 	symbol := strings.ToUpper(strings.TrimSpace(f.symbolInput.Value()))
 	if symbol == "" {
 		return portfolio.Transaction{}, "symbol is required"

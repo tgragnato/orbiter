@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/tgragnato/orbiter/internal/broker"
-	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/indicator"
 	"github.com/tgragnato/orbiter/pkg/indicator/sma"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
 	"github.com/tgragnato/orbiter/pkg/volatility"
 )
@@ -54,7 +54,7 @@ func (ha *HeikinAshi) GetWarmUpCandleAmount() uint {
 
 func (ha *HeikinAshi) OnWarmUpCandle(_ *ohlc.OHLC) {}
 
-func (ha *HeikinAshi) OnPosition(_ []broker.Position, _ []broker.Position) {}
+func (ha *HeikinAshi) OnPosition(_, _ []broker.Position) {}
 func (ha *HeikinAshi) OnOrder(_ []broker.Order)                            {}
 
 func (ha *HeikinAshi) OnTick(currentTick tick.Tick) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
@@ -88,11 +88,12 @@ func (ha *HeikinAshi) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []br
 	ha.closedHACandles = append(ha.closedHACandles, haNow)
 
 	var direction broker.BuyDirection
-	if isLongCandle(haNow) && isLongCandle(haPrevious) && haNow.Close.GreaterThan(haPrevious.Close) {
+	switch {
+	case isLongCandle(haNow) && isLongCandle(haPrevious) && haNow.Close.GreaterThan(haPrevious.Close):
 		direction = broker.BuyDirectionLong
-	} else if isShortCandle(haNow) && isShortCandle(haPrevious) && haNow.Close.LessThan(haPrevious.Close) {
+	case isShortCandle(haNow) && isShortCandle(haPrevious) && haNow.Close.LessThan(haPrevious.Close):
 		direction = broker.BuyDirectionShort
-	} else {
+	default:
 		// undecided
 		return
 	}
@@ -114,7 +115,8 @@ func (ha *HeikinAshi) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []br
 	}
 
 	var havePositionInRightDirection = false
-	for _, position := range ha.openPositions {
+	for i := range ha.openPositions {
+		position := ha.openPositions[i]
 		if position.BuyDirection == direction {
 			havePositionInRightDirection = true
 			continue
@@ -194,13 +196,13 @@ func isLongCandle(candle *ohlc.OHLC) bool {
 
 func (ha *HeikinAshi) checkCandleAmount(direction broker.BuyDirection, offset int) error {
 	const candlesToCheck = 4
-	max := candlesToCheck + offset
+	maxVal := candlesToCheck + offset
 	lenCandles := len(ha.closedHACandles)
 
-	if lenCandles < max {
+	if lenCandles < maxVal {
 		return errors.New("not enough closed candles to check")
 	}
-	candles := ha.closedHACandles[lenCandles-max : lenCandles-offset]
+	candles := ha.closedHACandles[lenCandles-maxVal : lenCandles-offset]
 	if len(candles) != candlesToCheck {
 		return fmt.Errorf("unexecpted amount of candles: %d", len(candles))
 	}
@@ -225,14 +227,14 @@ func (ha *HeikinAshi) checkCandleAmount(direction broker.BuyDirection, offset in
 	return nil
 }
 
-func (ha *HeikinAshi) calcTargetPrice(direction broker.BuyDirection, tick tick.Tick, perfMarginInPercentage decimal.Decimal) (decimal.Decimal, error) {
+func (ha *HeikinAshi) calcTargetPrice(direction broker.BuyDirection, t tick.Tick, perfMarginInPercentage decimal.Decimal) (decimal.Decimal, error) {
 	switch direction {
 	case broker.BuyDirectionLong:
-		var currentPrice = tick.Ask
+		var currentPrice = t.Ask
 		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(perfMarginInPercentage)
 		return currentPrice.Add(percentFrom).Round(6), nil
 	case broker.BuyDirectionShort:
-		var currentPrice = tick.Bid
+		var currentPrice = t.Bid
 		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(perfMarginInPercentage)
 		return currentPrice.Sub(percentFrom).Round(6), nil
 	default:
@@ -240,7 +242,7 @@ func (ha *HeikinAshi) calcTargetPrice(direction broker.BuyDirection, tick tick.T
 	}
 }
 
-func (ha *HeikinAshi) calcStopLossPrice(direction broker.BuyDirection, tick tick.Tick) (decimal.Decimal, error) {
+func (ha *HeikinAshi) calcStopLossPrice(direction broker.BuyDirection, t tick.Tick) (decimal.Decimal, error) {
 	volaMaxFloat, err := ha.volaTracker.VolatilityInPercentageQuantile(0.95)
 	if err != nil {
 		return decimal.Zero, err
@@ -249,9 +251,9 @@ func (ha *HeikinAshi) calcStopLossPrice(direction broker.BuyDirection, tick tick
 
 	switch direction {
 	case broker.BuyDirectionLong:
-		return tick.Price().Sub(volaMax), nil
+		return t.Price().Sub(volaMax), nil
 	case broker.BuyDirectionShort:
-		return tick.Price().Add(volaMax), nil
+		return t.Price().Add(volaMax), nil
 	default:
 		return decimal.Zero, errors.New("unknown direction")
 	}

@@ -2,6 +2,7 @@ package startup
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -50,9 +51,9 @@ func newMLRunner(
 	}
 }
 
-func (r *mlRunner) Status() int32        { return r.engine.Status() }
-func (r *mlRunner) Pause()               { r.engine.Pause() }
-func (r *mlRunner) Resume()              { r.engine.Resume() }
+func (r *mlRunner) Status() int32         { return r.engine.Status() }
+func (r *mlRunner) Pause()                { r.engine.Pause() }
+func (r *mlRunner) Resume()               { r.engine.Resume() }
 func (r *mlRunner) LogsChan() chan string { return r.engine.LogsChan() }
 
 // Conviction implements taa.ConvictionProvider. Returns the most recently
@@ -150,8 +151,8 @@ func (r *mlRunner) applyResult(ctx context.Context, result ml.TrainingResult) {
 		slog.Warn("ml: current samples failed", "error", err)
 		return
 	}
-	for sym, s := range samples {
-		score := result.Forest.ConvictionScore(s.Features, result.PredictionScale)
+	for sym := range samples {
+		score := result.Forest.ConvictionScore(samples[sym].Features, result.PredictionScale)
 		r.conviction.Store(sym, score)
 	}
 	slog.Info("ml: conviction scores updated", "symbols", len(samples))
@@ -166,7 +167,7 @@ func (r *mlRunner) initLastRunFromCheckpoint(ctx context.Context) *ml.Forest {
 	}
 	forest, createdAt, err := r.checkpoint.LoadActive(ctx, "MAIN")
 	if err != nil {
-		if err != ml.ErrNoActiveModel {
+		if !errors.Is(err, ml.ErrNoActiveModel) {
 			slog.Warn("ml: checkpoint load failed", "error", err)
 		}
 		return nil
@@ -189,8 +190,8 @@ func (r *mlRunner) seedConvictionScores(ctx context.Context, forest *ml.Forest) 
 		slog.Warn("ml: seed current samples failed", "error", err)
 		return
 	}
-	for sym, s := range samples {
-		score := forest.ConvictionScore(s.Features, 0.01)
+	for sym := range samples {
+		score := forest.ConvictionScore(samples[sym].Features, 0.01)
 		r.conviction.Store(sym, score)
 	}
 	slog.Info("ml: conviction seeded from checkpoint", "symbols", len(samples))

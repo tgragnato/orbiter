@@ -78,7 +78,7 @@ func runTUI(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	configSvc, err := bootstrapFn(ctx, db)
 	if err != nil {
@@ -220,7 +220,7 @@ func openPostgres(ctx context.Context, dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 	if err := db.PingContext(ctx); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("failed to ping database with DSN %q: %w", dsn, err)
 	}
 	return db, nil

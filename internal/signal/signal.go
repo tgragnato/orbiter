@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/pkg/broker"
 )
 
 // Type describes the signal intent.
@@ -97,7 +97,7 @@ func NewRebalanceMessage(now time.Time, symbol string, conviction float64, direc
 // NewEntryMessage suggests opening a new satellite position for a symbol not currently held.
 // targetWeight is the suggested allocation as a fraction of total satellite NAV; deltaEUR is
 // the recommended investment amount.
-func NewEntryMessage(now time.Time, symbol string, conviction float64, targetWeight, deltaEUR float64) Message {
+func NewEntryMessage(now time.Time, symbol string, conviction, targetWeight, deltaEUR float64) Message {
 	direction := "long"
 	if conviction < 0 {
 		direction = "short"

@@ -4,13 +4,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/broker"
-	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/eo"
 	"github.com/tgragnato/orbiter/pkg/helper"
 	indicatoradx "github.com/tgragnato/orbiter/pkg/indicator/adx"
 	indicatorrsi "github.com/tgragnato/orbiter/pkg/indicator/rsi"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
@@ -48,7 +48,7 @@ func New(instrument string, candleDuration time.Duration) *RSIADX {
 	}
 }
 
-func (d *RSIADX) OnPosition(openPositions []broker.Position, _ []broker.Position) {
+func (d *RSIADX) OnPosition(openPositions, _ []broker.Position) {
 	d.openPositions = openPositions
 }
 
@@ -102,7 +102,8 @@ func (d *RSIADX) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.
 func (d *RSIADX) checkOpenPositions(closedCandle *ohlc.OHLC, closedCandles []*ohlc.OHLC, openPositions []broker.Position) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
 	var previousCandle = closedCandles[len(closedCandles)-2]
 
-	for _, openPosition := range openPositions {
+	for i := range openPositions {
+		openPosition := openPositions[i]
 		if openPosition.Age(closedCandle.End) > maxAgeOpenPosition &&
 			openPosition.PerformanceAbsolute(closedCandle.Close, closedCandle.Close) > 0 {
 			toClosePositions = append(toClosePositions, openPosition)

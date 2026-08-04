@@ -44,19 +44,19 @@ func syntheticCandles(n int, basePrice float64) []data.Candle {
 	price := basePrice
 	for i := range candles {
 		open := price
-		close := price * (1 + 0.002*float64(i%5-2)) // small oscillation
-		high := math.Max(open, close) * 1.005
-		low := math.Min(open, close) * 0.995
+		closePrice := price * (1 + 0.002*float64(i%5-2)) // small oscillation
+		high := math.Max(open, closePrice) * 1.005
+		low := math.Min(open, closePrice) * 0.995
 		candles[i] = data.Candle{
 			Ticker:        "TEST",
 			Time:          time.Now().AddDate(0, 0, -n+i),
 			Open:          open,
 			High:          high,
 			Low:           low,
-			Close:         close,
-			AdjustedClose: close,
+			Close:         closePrice,
+			AdjustedClose: closePrice,
 		}
-		price = close
+		price = closePrice
 	}
 	return candles
 }

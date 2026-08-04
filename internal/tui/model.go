@@ -393,8 +393,8 @@ func (m Model) refreshCmd() tea.Cmd {
 		if m.txStore != nil {
 			if allTxs, err := m.txStore.ListTransactions(context.Background(), ""); err == nil {
 				txBySymbol = make(map[string][]portfolio.Transaction, len(holdings))
-				for _, tx := range allTxs {
-					txBySymbol[tx.Symbol] = append(txBySymbol[tx.Symbol], tx)
+				for i := range allTxs {
+					txBySymbol[allTxs[i].Symbol] = append(txBySymbol[allTxs[i].Symbol], allTxs[i])
 				}
 			}
 		}
@@ -552,7 +552,8 @@ func (m Model) txPanelView() string {
 	}
 	rows := make([]row, len(txs))
 	var qty, pmc float64
-	for i, tx := range txs {
+	for i := range txs {
+		tx := txs[i]
 		r := row{tx: tx}
 		switch tx.Type {
 		case portfolio.TransactionBuy:
@@ -620,9 +621,3 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

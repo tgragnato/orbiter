@@ -90,8 +90,6 @@ func (o *OHLC) NewPrice(price decimal.Decimal, now time.Time) bool {
 		diffLastReceivedValidPrice := now.Sub(o.lastReceivedPrice)
 		if diffLastReceivedValidPrice.Seconds() > maxGapBetweenTicksInSeconds {
 			o.Gaps = true
-			//fmt.Printf("Gap to last received valid tick is %.2f seconds at %s\n",
-			//	diffLastReceivedValidPrice.Seconds(), o.lastReceivedPrice)
 		}
 	}
 
@@ -229,11 +227,9 @@ func (o *OHLC) ToTicks() []tick.Tick {
 
 	ticks = append(ticks, o.OpenTick())
 	if high.Datetime.After(low.Datetime) {
-		ticks = append(ticks, low)
-		ticks = append(ticks, high)
+		ticks = append(ticks, low, high)
 	} else {
-		ticks = append(ticks, high)
-		ticks = append(ticks, low)
+		ticks = append(ticks, high, low)
 	}
 	ticks = append(ticks, o.CloseTick())
 

@@ -5,11 +5,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/broker"
-	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/helper"
 	"github.com/tgragnato/orbiter/pkg/indicator/sma"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
@@ -47,7 +47,7 @@ func New(instrument string, candleDuration time.Duration) *SMA {
 	}
 }
 
-func (d *SMA) OnPosition(openPositions []broker.Position, _ []broker.Position) {
+func (d *SMA) OnPosition(openPositions, _ []broker.Position) {
 	d.openPositions = openPositions
 }
 
@@ -110,8 +110,8 @@ func (d *SMA) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, t
 	}
 	sma10Price := sma10[sma.Value]
 
-	for _, openPosition := range d.openPositions {
-		if openPosition.BuyDirection != broker.BuyDirectionLong {
+	for i := range d.openPositions {
+		if d.openPositions[i].BuyDirection != broker.BuyDirectionLong {
 			continue
 		}
 		if helper.DecimalToFloat(closedCandle.Close) > sma10Price {
@@ -153,8 +153,8 @@ func (d *SMA) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, 
 	}
 	sma10Price := sma10[sma.Value]
 
-	for _, openPosition := range d.openPositions {
-		if openPosition.BuyDirection != broker.BuyDirectionShort {
+	for i := range d.openPositions {
+		if d.openPositions[i].BuyDirection != broker.BuyDirectionShort {
 			continue
 		}
 		if helper.DecimalToFloat(closedCandle.Close) < sma10Price {

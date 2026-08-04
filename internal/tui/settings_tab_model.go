@@ -212,7 +212,8 @@ func (m SettingsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m SettingsTabModel) moveSettingsFocus(delta int) (SettingsTabModel, tea.Cmd) {
 	m.blurSettingsCurrent()
 	m.focused = ((m.focused+delta)%settingFieldCount + settingFieldCount) % settingFieldCount
-	return m, m.focusSettingsCurrent()
+	cmd := m.focusSettingsCurrent()
+	return m, cmd
 }
 
 func (m *SettingsTabModel) blurSettingsCurrent() {

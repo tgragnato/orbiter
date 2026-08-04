@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/shopspring/decimal"
-	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/pkg/broker"
 )
 
 func TestCent2Pips(t *testing.T) {
@@ -46,14 +46,14 @@ func TestCalcStopLossPriceByPercentage(t *testing.T) {
 	// Long
 	stopPrice := CalcStopLossPriceByPercentage(price, stopLossPercentage, broker.BuyDirectionLong)
 	stopPriceFloat, _ := stopPrice.Float64()
-	if 80 != stopPriceFloat {
+	if stopPriceFloat != 80 {
 		t.Fatalf("expected %v, got %v", 80, stopPriceFloat)
 	}
 
 	// Short
 	stopPrice = CalcStopLossPriceByPercentage(price, stopLossPercentage, broker.BuyDirectionShort)
 	stopPriceFloat, _ = stopPrice.Float64()
-	if 120 != stopPriceFloat {
+	if stopPriceFloat != 120 {
 		t.Fatalf("expected %v, got %v", 120, stopPriceFloat)
 	}
 }
@@ -67,14 +67,14 @@ func TestTargetPriceByPercentage(t *testing.T) {
 	// Long
 	targetPrice := CalcTargetPriceByPercentage(price, targetPercentage, broker.BuyDirectionLong)
 	targetPriceFloat, _ := targetPrice.Float64()
-	if 120 != targetPriceFloat {
+	if targetPriceFloat != 120 {
 		t.Fatalf("expected %v, got %v", 120, targetPriceFloat)
 	}
 
 	// Short
 	targetPrice = CalcTargetPriceByPercentage(price, targetPercentage, broker.BuyDirectionShort)
 	targetPriceFloat, _ = targetPrice.Float64()
-	if 80 != targetPriceFloat {
+	if targetPriceFloat != 80 {
 		t.Fatalf("expected %v, got %v", 80, targetPriceFloat)
 	}
 }
@@ -83,7 +83,7 @@ func TestDecimalToFloat(t *testing.T) {
 	t.Parallel()
 
 	n := decimal.NewFromFloat(10.34)
-	if 10.34 != DecimalToFloat(n) {
+	if DecimalToFloat(n) != 10.34 {
 		t.Fatalf("expected %v, got %v", 10.34, DecimalToFloat(n))
 	}
 }

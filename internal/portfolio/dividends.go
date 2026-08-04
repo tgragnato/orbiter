@@ -24,7 +24,8 @@ func QuantityAtDate(txs []Transaction, date time.Time) float64 {
 	cutoff := date.UTC().Truncate(24 * time.Hour).Add(-time.Nanosecond)
 	qty := 0.0
 	pmc := 0.0
-	for _, tx := range txs {
+	for i := range txs {
+		tx := txs[i]
 		if tx.ExecutedAt.UTC().After(cutoff) {
 			break
 		}

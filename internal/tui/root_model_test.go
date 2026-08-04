@@ -69,7 +69,7 @@ func TestRootModelView(t *testing.T) {
 		t.Fatalf("View() empty, want non-empty")
 	}
 	// Ensure header contains dashboard name
-	if len(view) == 0 {
+	if view == "" {
 		t.Fatalf("View() returned empty string")
 	}
 }

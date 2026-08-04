@@ -29,10 +29,10 @@ func TestStochRSI_Value(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if 100 != rsi20Value[ValueK] {
+	if rsi20Value[ValueK] != 100 {
 		t.Fatalf("expected %v, got %v", 100, rsi20Value[ValueK])
 	}
-	if 100 != rsi20Value[ValueD] {
+	if rsi20Value[ValueD] != 100 {
 		t.Fatalf("expected %v, got %v", 100, rsi20Value[ValueD])
 	}
 }
@@ -58,7 +58,7 @@ func TestStochRSI_Value_Down(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if 0 != rsi20Value[ValueK] {
+	if rsi20Value[ValueK] != 0 {
 		t.Fatalf("expected %v, got %v", 0, rsi20Value[ValueK])
 	}
 }

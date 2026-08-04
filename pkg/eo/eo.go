@@ -84,13 +84,14 @@ func (eo *EnvironmentOverlay) riskLevel() RiskLevel {
 		priceChangeQ3 = helper.GetPercentile(sortedPriceChanges, 75)
 	)
 
-	if lastPriceChange < priceChangeQ1 {
+	switch {
+	case lastPriceChange < priceChangeQ1:
 		return RLow
-	} else if lastPriceChange < priceChangeQ2 {
+	case lastPriceChange < priceChangeQ2:
 		return RModerate
-	} else if lastPriceChange < priceChangeQ3 {
+	case lastPriceChange < priceChangeQ3:
 		return RHigh
-	} else {
+	default:
 		return RExtreme
 	}
 }

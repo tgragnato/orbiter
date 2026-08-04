@@ -134,12 +134,12 @@ func Momentum(series []float64, idx, window int) float64 {
 }
 
 // Clamp restricts v to [min, max].
-func Clamp(v, min, max float64) float64 {
-	if v < min {
-		return min
+func Clamp(v, minVal, maxVal float64) float64 {
+	if v < minVal {
+		return minVal
 	}
-	if v > max {
-		return max
+	if v > maxVal {
+		return maxVal
 	}
 	return v
 }

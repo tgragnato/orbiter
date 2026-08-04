@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/broker"
-	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/circularbuffer"
 	"github.com/tgragnato/orbiter/pkg/helper"
 	"github.com/tgragnato/orbiter/pkg/indicator/sma"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
@@ -83,11 +83,11 @@ func (h *Harami) isHaramiLong(firstCandle, secondCandle *ohlc.OHLC) bool {
 	return false
 }
 
-func (d *Harami) OnPosition(_ []broker.Position, _ []broker.Position) {}
+func (h *Harami) OnPosition(_, _ []broker.Position) {}
 
-func (d *Harami) OnOrder(_ []broker.Order) {}
+func (h *Harami) OnOrder(_ []broker.Order) {}
 
-func (d *Harami) OnTick(_ tick.Tick) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
+func (h *Harami) OnTick(_ tick.Tick) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
 	return
 }
 

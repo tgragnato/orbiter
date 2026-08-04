@@ -79,7 +79,9 @@ func TestParseConfig(t *testing.T) {
 	}
 
 	for _, tt := range tests {
+		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			lookup := func(key string) string {
 				if tt.env == nil {
 					return ""
@@ -149,11 +151,9 @@ func TestRunUsesOpenAndBootstrap(t *testing.T) { //nolint:paralleltest // mutate
 		if gotDB != db {
 			t.Fatalf("bootstrap db mismatch")
 		}
-		return nil, nil
+		return nil, nil //nolint:nilnil
 	}
-	newSignalRTFn = func() signal.Runtime {
-		return signal.NewRuntime()
-	}
+	newSignalRTFn = signal.NewRuntime
 	newStoreFn = func(gotDB *sql.DB) portfolio.HoldingsStore {
 		storeCalls++
 		if gotDB != db {
@@ -226,7 +226,7 @@ func TestRunOpenError(t *testing.T) { //nolint:paralleltest // mutates package-l
 	}
 	bootstrapFn = func(_ context.Context, _ *sql.DB) (*configuration.Service, error) {
 		t.Fatalf("bootstrap should not be called")
-		return nil, nil
+		return nil, nil //nolint:nilnil
 	}
 	newProgramFn = func(model tea.Model, options ...tea.ProgramOption) programRunner {
 		t.Fatalf("program should not be created")
@@ -304,9 +304,9 @@ func TestRunProgramError(t *testing.T) { //nolint:paralleltest // mutates packag
 		return db, nil
 	}
 	bootstrapFn = func(_ context.Context, _ *sql.DB) (*configuration.Service, error) {
-		return nil, nil
+		return nil, nil //nolint:nilnil
 	}
-	newSignalRTFn = func() signal.Runtime { return signal.NewRuntime() }
+	newSignalRTFn = signal.NewRuntime
 	newStoreFn = func(_ *sql.DB) portfolio.HoldingsStore { return &fakeHoldingsStoreForStartup{} }
 	newRootModelFn = func(_ portfolio.HoldingsStore, _ signal.ReadModel, _ tui.MLEngine, _ portfolio.TransactionStore, _ tui.SettingsService, _ tui.LogChannel) tea.Model {
 		return stubTeaModel{}

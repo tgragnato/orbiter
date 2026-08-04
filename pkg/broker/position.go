@@ -2,9 +2,10 @@ package broker
 
 import (
 	"fmt"
-	"github.com/shopspring/decimal"
 	"math"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 type Position struct {
@@ -43,9 +44,6 @@ func MergePositions(positions1, positions2 []Position) []Position {
 func (p *Position) PerformanceAbsolute(bid, ask decimal.Decimal) float64 {
 	var abs decimal.Decimal
 	if p.SellPrice.IsZero() {
-		//if bid.IsZero() || ask.IsZero() {
-		//	log.Panicf("bid/ask must not be empty when position.SellPrice is empty as well: %+v", p)
-		//}
 		switch p.BuyDirection {
 		case BuyDirectionLong:
 			abs = bid.Sub(p.BuyPrice)

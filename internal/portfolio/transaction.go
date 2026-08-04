@@ -45,7 +45,8 @@ type holdingState struct {
 // to persist or discard them.
 func ComputeHoldingStates(txs []Transaction) map[string]holdingState {
 	states := make(map[string]holdingState, len(txs))
-	for _, tx := range txs {
+	for i := range txs {
+		tx := txs[i]
 		s := states[tx.Symbol]
 		switch tx.Type {
 		case TransactionBuy:

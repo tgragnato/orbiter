@@ -4,11 +4,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/broker"
-	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/helper"
 	"github.com/tgragnato/orbiter/pkg/indicator/stochrsi"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
@@ -38,7 +38,7 @@ func New(instrument string) *RSI {
 	}
 }
 
-func (d *RSI) OnPosition(openPositions []broker.Position, _ []broker.Position) {
+func (d *RSI) OnPosition(openPositions, _ []broker.Position) {
 	d.openPositions = openPositions
 }
 

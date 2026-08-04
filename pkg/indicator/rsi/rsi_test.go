@@ -24,7 +24,7 @@ func TestRSI_Value(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if 45.83901773533423 != rsiValue[Value] {
+	if rsiValue[Value] != 45.83901773533423 {
 		t.Fatalf("expected %v, got %v", 45.83901773533423, rsiValue[Value])
 	}
 }
@@ -44,7 +44,7 @@ func TestRSI_Value_Shift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if 69.99999999999888 != rsiValue[Value] {
+	if rsiValue[Value] != 69.99999999999888 {
 		t.Fatalf("expected %v, got %v", 69.99999999999888, rsiValue[Value])
 	}
 
@@ -57,15 +57,15 @@ func TestRSI_Value_Shift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if 68.15212319178684 != rsiValue[Value] {
+	if rsiValue[Value] != 68.15212319178684 {
 		t.Fatalf("expected %v, got %v", 68.15212319178684, rsiValue[Value])
 	}
 }
 
-func randFloats(min, max float64, n int) []float64 {
+func randFloats(minVal, maxVal float64, n int) []float64 {
 	res := make([]float64, n)
 	for i := range res {
-		res[i] = min + rand.Float64()*(max-min)
+		res[i] = minVal + rand.Float64()*(maxVal-minVal)
 	}
 	return res
 }

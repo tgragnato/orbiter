@@ -36,7 +36,11 @@ func RunRestore(ctx context.Context, args []string, lookupEnv func(string) strin
 	if err != nil {
 		return fmt.Errorf("open input file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close input file: %v\n", err)
+		}
+	}()
 
 	var bf File
 	if err := json.NewDecoder(f).Decode(&bf); err != nil {
@@ -50,7 +54,11 @@ func RunRestore(ctx context.Context, args []string, lookupEnv func(string) strin
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close database: %v\n", err)
+		}
+	}()
 
 	store := portfolio.NewPostgresStore(db)
 

@@ -3,7 +3,7 @@ package strategy
 import (
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )

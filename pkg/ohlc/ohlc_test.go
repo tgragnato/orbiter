@@ -18,7 +18,7 @@ func TestOHLC_PerformanceInPercentage(t *testing.T) {
 	}
 
 	perfFloat, _ := o.PerformanceInPercentage().Float64()
-	if -10 != perfFloat {
+	if perfFloat != -10 {
 		t.Fatalf("expected %v, got %v", -10, perfFloat)
 	}
 
@@ -28,7 +28,7 @@ func TestOHLC_PerformanceInPercentage(t *testing.T) {
 		closed: true,
 	}
 	perfFloat, _ = o.PerformanceInPercentage().Float64()
-	if 20 != perfFloat {
+	if perfFloat != 20 {
 		t.Fatalf("expected %v, got %v", 20, perfFloat)
 	}
 
@@ -38,7 +38,7 @@ func TestOHLC_PerformanceInPercentage(t *testing.T) {
 		closed: true,
 	}
 	perfFloat, _ = o.PerformanceInPercentage().Float64()
-	if 100 != perfFloat {
+	if perfFloat != 100 {
 		t.Fatalf("expected %v, got %v", 100, perfFloat)
 	}
 }
@@ -53,7 +53,7 @@ func TestOHLC_PerformanceFromOpenToHighAbsolute(t *testing.T) {
 	}
 
 	perfFloat, _ := o.PerformanceFromOpenToHighAbsolute().Float64()
-	if 50 != perfFloat {
+	if perfFloat != 50 {
 		t.Fatalf("expected %v, got %v", 50, perfFloat)
 	}
 }
@@ -68,7 +68,7 @@ func TestOHLC_PerformanceFromOpenToLowAbsolute(t *testing.T) {
 	}
 
 	perfFloat, _ := o.PerformanceFromOpenToHighAbsolute().Float64()
-	if -50 != perfFloat {
+	if perfFloat != -50 {
 		t.Fatalf("expected %v, got %v", -50, perfFloat)
 	}
 }
@@ -83,7 +83,7 @@ func TestOHLC_ReversionPerformanceFromHighAbsolute(t *testing.T) {
 	}
 
 	perfFloat, _ := o.ReversionPerformanceFromHighAbsolute().Float64()
-	if -50 != perfFloat {
+	if perfFloat != -50 {
 		t.Fatalf("expected %v, got %v", -50, perfFloat)
 	}
 }
@@ -150,7 +150,7 @@ func TestOHLC_Age(t *testing.T) {
 
 	var now = time.Now()
 	var o = OHLC{Start: now}
-	if 1 != o.Age(now.Add(time.Second)).Seconds() {
+	if o.Age(now.Add(time.Second)).Seconds() != 1 {
 		t.Fatalf("expected %v, got %v", 1, o.Age(now.Add(time.Second)).Seconds())
 	}
 }
@@ -159,7 +159,7 @@ func TestOHLC_Validate(t *testing.T) {
 	t.Parallel()
 
 	var o = &OHLC{}
-	if !(o.Validate() != nil) {
+	if o.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 
@@ -173,42 +173,42 @@ func TestOHLC_Validate(t *testing.T) {
 	// open = 0
 	obroken := o
 	obroken.Open = decimal.Decimal{}
-	if !(obroken.Validate() != nil) {
+	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 
 	// low > high
 	obroken = o
 	obroken.Low = obroken.High.Add(price)
-	if !(obroken.Validate() != nil) {
+	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 
 	// close < low
 	obroken = o
 	obroken.Close = obroken.Low.Sub(price)
-	if !(obroken.Validate() != nil) {
+	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 
 	// close > high
 	obroken = o
 	obroken.Close = obroken.High.Add(price)
-	if !(obroken.Validate() != nil) {
+	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 
 	// end < start
 	obroken = o
 	obroken.End = obroken.Start.Add(-time.Minute)
-	if !(obroken.Validate() != nil) {
+	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 
 	// instrument == ""
 	obroken = o
 	obroken.Instrument = ""
-	if !(obroken.Validate() != nil) {
+	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 }
@@ -222,7 +222,7 @@ func TestOHLC_VolatilityInPercentage(t *testing.T) {
 
 	vola := o.VolatilityInPercentage()
 	volaFloat, _ := vola.Float64()
-	if 100 != volaFloat {
+	if volaFloat != 100 {
 		t.Fatalf("expected %v, got %v", 100, volaFloat)
 	}
 }
@@ -434,7 +434,7 @@ func Test__ToTicks(t *testing.T) {
 	}
 
 	ticks := o.ToTicks()
-	if 4 != len(ticks) {
+	if len(ticks) != 4 {
 		t.Fatalf("expected %d, got %d", 4, len(ticks))
 	}
 	if !ticks[0].Datetime.Equal(openTime) {

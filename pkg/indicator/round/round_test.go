@@ -68,7 +68,7 @@ func TestRoundnum_Value(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if 4 != len(rnValue) {
+		if len(rnValue) != 4 {
 			t.Fatalf("expected %d, got %d", 4, len(rnValue))
 		}
 		if tc.lowerRoundNumberWeak != rnValue[LowerRoundNumberWeak] {

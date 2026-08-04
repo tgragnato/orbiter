@@ -187,7 +187,7 @@ func (r *PostgresRepository) RecordCashFlowWithSnapshot(ctx context.Context, por
 		return err
 	}
 
-	if err = tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	return nil
@@ -204,7 +204,7 @@ func (r *PostgresRepository) ListSnapshots(ctx context.Context, portfolioID stri
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := make([]NAVSnapshot, 0)
 	for rows.Next() {

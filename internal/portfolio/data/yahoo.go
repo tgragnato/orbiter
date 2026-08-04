@@ -50,7 +50,7 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, requestURL, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, requestURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 	if err != nil {
 		return nil, fmt.Errorf("yahoo request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -104,7 +104,7 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 		}
 
 		// Normalise candle timestamp to midnight UTC for dividend/split lookup.
-		dateTs := time.Unix(ts, 0).UTC().Truncate(24 * time.Hour).Unix()
+		dateTS := time.Unix(ts, 0).UTC().Truncate(24 * time.Hour).Unix()
 
 		candle := Candle{
 			Ticker:        ticker,
@@ -117,11 +117,11 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 			Volume:        *quote.Volume[i],
 			SplitFactor:   1,
 		}
-		if dividend, ok := dividends[dateTs]; ok {
+		if dividend, ok := dividends[dateTS]; ok {
 			candle.CashDividend = dividend
-			matchedDivDates[dateTs] = true
+			matchedDivDates[dateTS] = true
 		}
-		if splitFactor, ok := splits[dateTs]; ok {
+		if splitFactor, ok := splits[dateTS]; ok {
 			candle.SplitFactor = splitFactor
 		}
 		candles = append(candles, candle)
@@ -131,13 +131,13 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 	// holidays). Yahoo still emits the event but no price candle exists for
 	// that date, so the lookup above never fires. Emit a synthetic candle so
 	// ComputeDividendIncomes does not silently drop these dividends.
-	for divDateTs, amount := range dividends {
-		if matchedDivDates[divDateTs] {
+	for divDateTS, amount := range dividends {
+		if matchedDivDates[divDateTS] {
 			continue
 		}
 		candles = append(candles, Candle{
 			Ticker:       ticker,
-			Time:         time.Unix(divDateTs, 0).UTC(),
+			Time:         time.Unix(divDateTS, 0).UTC(),
 			CashDividend: amount,
 			SplitFactor:  1,
 		})
@@ -170,8 +170,8 @@ func (p *YahooProvider) buildURL(ticker string, from, to time.Time) (string, err
 func parseDividends(raw map[string]yahooDividendEvent) map[int64]float64 {
 	out := make(map[int64]float64, len(raw))
 	for _, event := range raw {
-		dateTs := time.Unix(event.Date, 0).UTC().Truncate(24 * time.Hour).Unix()
-		out[dateTs] = event.Amount
+		dateTS := time.Unix(event.Date, 0).UTC().Truncate(24 * time.Hour).Unix()
+		out[dateTS] = event.Amount
 	}
 	return out
 }
@@ -183,8 +183,8 @@ func parseSplits(raw map[string]yahooSplitEvent) map[int64]float64 {
 		if event.Denominator > 0 {
 			factor = event.Numerator / event.Denominator
 		}
-		dateTs := time.Unix(event.Date, 0).UTC().Truncate(24 * time.Hour).Unix()
-		out[dateTs] = factor
+		dateTS := time.Unix(event.Date, 0).UTC().Truncate(24 * time.Hour).Unix()
+		out[dateTS] = factor
 	}
 	return out
 }

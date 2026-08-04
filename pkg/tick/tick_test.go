@@ -14,7 +14,7 @@ func TestTick_Spread(t *testing.T) {
 	var ask = decimal.NewFromFloat(1.50)
 	var tick = New("EURUSD", time.Now(), bid, ask)
 	var spread, _ = tick.Spread().Float64()
-	if 0.50 != spread {
+	if spread != 0.50 {
 		t.Fatalf("expected %v, got %v", 0.50, spread)
 	}
 }
@@ -26,7 +26,7 @@ func TestTick_SpreadInPercent(t *testing.T) {
 	var ask = decimal.NewFromFloat(1.50)
 	var tick = New("EURUSD", time.Now(), bid, ask)
 	var spread, _ = tick.SpreadInPercent().Float64()
-	if 87.50 != spread {
+	if spread != 87.50 {
 		t.Fatalf("expected %v, got %v", 87.50, spread)
 	}
 }

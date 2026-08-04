@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/broker"
-	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/circularbuffer"
 	"github.com/tgragnato/orbiter/pkg/helper"
 	"github.com/tgragnato/orbiter/pkg/indicator/sma"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
@@ -50,7 +50,7 @@ func New(instrument string, candleDuration time.Duration) *LowCandle {
 	}
 }
 
-func (d *LowCandle) OnPosition(openPositions []broker.Position, _ []broker.Position) {
+func (d *LowCandle) OnPosition(openPositions, _ []broker.Position) {
 	d.openPositions = openPositions
 }
 
@@ -82,7 +82,7 @@ func (d *LowCandle) OnTick(_ tick.Tick) (toOpen, toClose []broker.Order, toClose
 	return
 }
 
-func (d *LowCandle) OnCandle(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, toClose []broker.Order, toClosePositions []broker.Position) {
+func (d *LowCandle) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
 	closedCandle := closedCandles[len(closedCandles)-1]
 	defer d.feedIndicator(closedCandle)
 
@@ -111,8 +111,8 @@ func (d *LowCandle) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Or
 	}
 	smaPrice := smaValue[sma.Value]
 
-	for _, openPosition := range d.openPositions {
-		if openPosition.BuyDirection != broker.BuyDirectionLong {
+	for i := range d.openPositions {
+		if d.openPositions[i].BuyDirection != broker.BuyDirectionLong {
 			continue
 		}
 		previousCandlesHigh, err := d.previousHighs.Max()
@@ -159,8 +159,8 @@ func (d *LowCandle) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 	}
 	smaPrice := smaValue[sma.Value]
 
-	for _, openPosition := range d.openPositions {
-		if openPosition.BuyDirection != broker.BuyDirectionShort {
+	for i := range d.openPositions {
+		if d.openPositions[i].BuyDirection != broker.BuyDirectionShort {
 			continue
 		}
 		previousCandlesLow, err := d.previousLows.Min()
@@ -168,7 +168,7 @@ func (d *LowCandle) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 			return
 		}
 		if helper.DecimalToFloat(closedCandle.Close) < previousCandlesLow {
-			toClose = append(toClose, openPosition)
+			toClose = append(toClose, d.openPositions[i])
 			return
 		}
 	}

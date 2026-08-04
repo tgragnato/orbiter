@@ -64,8 +64,5 @@ func (t *Tick) Validate() error {
 	if t.Ask.LessThan(t.Bid) {
 		return errors.New("ask is less than bid")
 	}
-	//if t.Spread().GreaterThan(maxSpread) {
-	//	return errors.New("spread is too big")
-	//}
 	return nil
 }

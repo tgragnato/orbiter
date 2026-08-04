@@ -147,7 +147,7 @@ func (r *lcg) intn(n int) int {
 	if n <= 0 {
 		return 0
 	}
-	return int(r.next() % uint64(n))
+	return int(r.next() % uint64(n)) // #nosec G115
 }
 
 func bootstrap(samples []Sample, rng *lcg) []Sample {

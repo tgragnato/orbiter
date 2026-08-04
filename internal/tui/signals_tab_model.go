@@ -25,10 +25,6 @@ type mlLogMsg struct {
 	line string
 }
 
-type mlStatusMsg struct {
-	status int32 // mirrors ml.Status* constants
-}
-
 // MLEngine is the subset of the background ML engine surface needed by the TUI.
 type MLEngine interface {
 	// Status returns the current engine status code.
@@ -134,8 +130,8 @@ func (m SignalsTabModel) View() string {
 	if len(m.messages) == 0 {
 		sections = append(sections, m.styles.empty.Render("No queued signals yet."))
 	} else {
-		for _, msg := range m.messages {
-			line := fmt.Sprintf("%s | %-22s | %s", msg.CreatedAt.Format(time.RFC3339), msg.Type, msg.Summary)
+		for i := range m.messages {
+			line := fmt.Sprintf("%s | %-22s | %s", m.messages[i].CreatedAt.Format(time.RFC3339), m.messages[i].Type, m.messages[i].Summary)
 			sections = append(sections, m.styles.line.Render(line))
 		}
 	}

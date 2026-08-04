@@ -84,15 +84,17 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 	now := time.Now().UTC()
 
 	// Core holdings: per-holding PMC floor check.
-	for _, h := range holdings {
-		if !h.TAAEnabled || h.Quantity <= 0 || h.AllocationType != portfolio.AllocationCore {
+	for i := range holdings {
+		if !holdings[i].TAAEnabled || holdings[i].Quantity <= 0 || holdings[i].AllocationType != portfolio.AllocationCore {
 			continue
 		}
-		e.evaluateCore(ctx, h, now)
+		e.evaluateCore(ctx, holdings[i], now)
 	}
 
 	// Satellite holdings: portfolio-level conviction-weighted optimizer.
-	for _, msg := range optimizeSatellite(holdings, e.conviction, e.cfg, now) {
+	msgs := optimizeSatellite(holdings, e.conviction, e.cfg, now)
+	for i := range msgs {
+		msg := msgs[i]
 		if err := e.dispatcher.Dispatch(msg); err != nil {
 			slog.Error("dispatch rebalance signal", "symbol", msg.Instrument, "error", err)
 		} else {
@@ -107,7 +109,9 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 
 	// Entry signals: tracked symbols not yet held with strong conviction.
 	if e.symbols != nil {
-		for _, msg := range evaluateEntries(holdings, e.symbols.Symbols(), e.conviction, e.cfg, now) {
+		entryMsgs := evaluateEntries(holdings, e.symbols.Symbols(), e.conviction, e.cfg, now)
+		for i := range entryMsgs {
+			msg := entryMsgs[i]
 			if err := e.dispatcher.Dispatch(msg); err != nil {
 				slog.Error("dispatch entry signal", "symbol", msg.Instrument, "error", err)
 			} else {

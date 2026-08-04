@@ -2,7 +2,7 @@ package helper
 
 import (
 	"github.com/shopspring/decimal"
-	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/pkg/broker"
 )
 
 // Pips2Cent - Convert pips to cent

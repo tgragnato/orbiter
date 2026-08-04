@@ -17,7 +17,7 @@ func TestPerformanceInPercentage(t *testing.T) {
 		BuyDirection: BuyDirectionLong,
 	}
 	perf := position.PerformanceInPercentage(currentPrice, currentPrice)
-	if 100 != perf {
+	if perf != 100 {
 		t.Fatalf("expected %v, got %v", 100, perf)
 	}
 
@@ -28,7 +28,7 @@ func TestPerformanceInPercentage(t *testing.T) {
 		BuyDirection: BuyDirectionShort,
 	}
 	perf = position.PerformanceInPercentage(currentPrice, currentPrice)
-	if -100 != perf {
+	if perf != -100 {
 		t.Fatalf("expected %v, got %v", -100, perf)
 	}
 
@@ -46,7 +46,7 @@ func TestPerformanceAbsolute(t *testing.T) {
 		Size:         1.00,
 	}
 	perf := position.PerformanceAbsolute(currentPrice, currentPrice)
-	if 1.0 != perf {
+	if perf != 1.0 {
 		t.Fatalf("expected %v, got %v", 1.0, perf)
 	}
 
@@ -57,7 +57,7 @@ func TestPerformanceAbsolute(t *testing.T) {
 		Size:         1.00,
 	}
 	perf = position.PerformanceAbsolute(currentPrice, currentPrice)
-	if -1.0 != perf {
+	if perf != -1.0 {
 		t.Fatalf("expected %v, got %v", -1.0, perf)
 	}
 }

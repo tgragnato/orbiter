@@ -11,14 +11,10 @@ This project incorporates portions of the original "at" codebase
 by Simon Klinkert (https://github.com/sklinkert/at), which are
 licensed under the MIT License. The original MIT-licensed portions
 include the foundational code in:
-  - internal/broker/
-  - internal/trader/
-  - internal/strategy/
   - internal/signal/
   - pkg/
 
-All new packages introduced after the fork (internal/configuration/,
-internal/portfolio/, internal/startup/, internal/tui/) are original
+All new packages introduced after the fork are original
 work by Tommaso Gragnato and are covered exclusively by the AGPL-3.0.
 
 MIT License

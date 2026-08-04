@@ -5,47 +5,13 @@ run:
   allow-parallel-runners: true
 
 linters:
-  enable:
-    # --- Correctness ---
-    - errcheck
-    - govet
-    - ineffassign
-    - staticcheck      # SA* checks: bug-finding, correctness
-    - stylecheck       # ST* checks: Go style conventions
-    - unused
-    - unconvert
-
-    # --- Resource Leak Prevention (critical for PostgreSQL + HTTP paths) ---
-    - bodyclose        # resp.Body must be closed (Yahoo Finance adapter)
-    - sqlclosecheck    # sql.Rows / sql.Stmt must be closed
-    - rowserrcheck     # rows.Err() must be checked after iteration
-    - noctx            # HTTP requests must carry a context.Context
-    - errorlint        # enforce %w wrapping; errors.Is / errors.As
-    - durationcheck    # prevent time.Duration multiplication bugs
-
-    # --- Code Quality ---
-    - gocritic
-    - gosec
-    - revive
-    - nilnil           # ban ambiguous (nil, nil) returns
-    - misspell
-
-    # --- Engineering Standards Enforcement ---
-    - paralleltest     # t.Parallel() required in every test (§Testing)
-    - sloglint         # structured slog calls; no mixed positional/KV args (§Structured Logging)
-    - forbidigo        # ban log.Fatal / os.Exit in library code (§Tooling)
+  enable-all: true
 
   settings:
     staticcheck:
       checks:
         - all
-        - -QF1001   # De Morgan's law — reduces readability in most cases
-        - -QF1003   # if/else-if to switch — team style preference
         - -ST1000   # Package comment not required on every file
-        - -ST1003   # Underscores allowed in test names and generated identifiers
-        # ST1016 enabled: receiver names must be consistent within a type
-        # ST1020/ST1021/ST1022 enabled: exported symbols must have doc comments
-        #   that start with the symbol name (standard Go godoc convention)
 
     gocritic:
       enabled-tags:
@@ -74,6 +40,8 @@ linters:
           msg: "use slog + error returns instead of log.Fatal (§Tooling)"
         - pattern: '^os\.Exit$'
           msg: "use error returns instead of os.Exit in library code (§Tooling)"
+        - pattern: '^panic(f|ln)?$'
+          msg: "use error returns instead of panic in library code (§Tooling)"
 
   exclusions:
     rules:

@@ -7,15 +7,6 @@ import (
 	"github.com/tgragnato/orbiter/internal/signal"
 )
 
-// satelliteResult holds the computed allocation change for one satellite holding.
-type satelliteResult struct {
-	holding       portfolio.Holding
-	conviction    float64
-	currentWeight float64
-	targetWeight  float64
-	deltaEUR      float64
-}
-
 // optimizeSatellite computes conviction-weighted target allocations for all satellite
 // holdings and returns one result per holding that clears the friction gate.
 //

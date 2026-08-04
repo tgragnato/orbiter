@@ -29,10 +29,10 @@ func TestStoch_Value(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if 100 != stoch20Value[ValueK] {
+	if stoch20Value[ValueK] != 100 {
 		t.Fatalf("expected %v, got %v", 100, stoch20Value[ValueK])
 	}
-	if 100 != stoch20Value[ValueD] {
+	if stoch20Value[ValueD] != 100 {
 		t.Fatalf("expected %v, got %v", 100, stoch20Value[ValueD])
 	}
 }
@@ -58,7 +58,7 @@ func TestStoch_Value_Down(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if 0 != stoch20Value[ValueK] {
+	if stoch20Value[ValueK] != 0 {
 		t.Fatalf("expected %v, got %v", 0, stoch20Value[ValueK])
 	}
 }

@@ -5,12 +5,12 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/tgragnato/orbiter/internal/broker"
-	"github.com/tgragnato/orbiter/internal/strategy"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/helper"
 	indicatorrsi "github.com/tgragnato/orbiter/pkg/indicator/rsi"
 	"github.com/tgragnato/orbiter/pkg/indicator/sma"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
@@ -59,7 +59,7 @@ func (d *RSI) GetWarmUpCandleAmount() uint {
 	return rsiSize * 10
 }
 
-func (d *RSI) OnPosition(openPositions []broker.Position, _ []broker.Position) {
+func (d *RSI) OnPosition(openPositions, _ []broker.Position) {
 	d.openPositions = openPositions
 }
 
@@ -76,7 +76,8 @@ func (d *RSI) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Ord
 	d.rsi.Insert(closedCandle)
 	d.sma.Insert(closedCandle)
 
-	for _, openPosition := range d.openPositions {
+	for i := range d.openPositions {
+		openPosition := d.openPositions[i]
 
 		if openPosition.Age(closedCandle.End) > maxAgeOpenPosition &&
 			openPosition.PerformanceAbsolute(closedCandle.Close, closedCandle.Close) > 0 {

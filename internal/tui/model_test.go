@@ -302,7 +302,7 @@ func TestModelTAAToggle(t *testing.T) {
 
 	taaMsg := cmd()
 	updated, cmd = m.Update(taaMsg)
-	m = updated.(Model)
+	_ = updated.(Model)
 	if cmd == nil {
 		t.Fatalf("refresh after taa toggle = nil, want non-nil")
 	}

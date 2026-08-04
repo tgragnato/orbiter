@@ -15,7 +15,7 @@ func TestMergeOrders(t *testing.T) {
 	orders2 := []Order{order2}
 
 	orders := MergeOrders(orders1, orders2)
-	if 2 != len(orders) {
+	if len(orders) != 2 {
 		t.Fatalf("expected %d, got %d", 2, len(orders))
 	}
 }

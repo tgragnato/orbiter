@@ -1,7 +1,7 @@
 package heikinashi
 
 import (
-	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 

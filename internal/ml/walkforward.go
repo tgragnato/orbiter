@@ -87,14 +87,15 @@ func WalkForwardCV(
 		preds := make([]float64, cfg.TestSize)
 		labels := make([]float64, cfg.TestSize)
 		returns := make([]float64, cfg.TestSize)
-		for i, s := range samples[testStart:testEnd] {
-			preds[i] = f.Predict(s.Features)
-			labels[i] = s.Label
+		testSlice := samples[testStart:testEnd]
+		for i := range testSlice {
+			preds[i] = f.Predict(testSlice[i].Features)
+			labels[i] = testSlice[i].Label
 			// Simulated strategy return: sign(prediction) * actual label
 			if preds[i] >= 0 {
-				returns[i] = s.Label
+				returns[i] = testSlice[i].Label
 			} else {
-				returns[i] = -s.Label
+				returns[i] = -testSlice[i].Label
 			}
 		}
 

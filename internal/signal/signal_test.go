@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/tgragnato/orbiter/internal/broker"
+	"github.com/tgragnato/orbiter/pkg/broker"
 )
 
 func TestMessageConstructors(t *testing.T) {

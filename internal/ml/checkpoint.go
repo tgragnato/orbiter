@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -58,7 +59,7 @@ func (c *Checkpoint) Save(ctx context.Context, modelName string, f *Forest, m Me
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if isActive {
 		if _, err := tx.ExecContext(ctx, `UPDATE ml_model_checkpoints SET is_active = false WHERE model_name = $1`, modelName); err != nil {
@@ -103,7 +104,7 @@ func (c *Checkpoint) LoadActive(ctx context.Context, modelName string) (*Forest,
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, modelName).Scan(&data, &createdAt)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, time.Time{}, ErrNoActiveModel
 	}
 	if err != nil {

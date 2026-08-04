@@ -14,20 +14,20 @@ import (
 	"github.com/tgragnato/orbiter/internal/portfolio"
 	"github.com/tgragnato/orbiter/internal/portfolio/data"
 	"github.com/tgragnato/orbiter/internal/portfolio/features"
-	"github.com/tgragnato/orbiter/internal/strategy"
-	stratdoji "github.com/tgragnato/orbiter/internal/strategy/doji"
-	stratengulf "github.com/tgragnato/orbiter/internal/strategy/engulfing"
-	stratha "github.com/tgragnato/orbiter/internal/strategy/HeikinAshi"
-	stratharami "github.com/tgragnato/orbiter/internal/strategy/harami"
-	stratlowcandle "github.com/tgragnato/orbiter/internal/strategy/lowcandle"
-	stratrsi "github.com/tgragnato/orbiter/internal/strategy/rsi"
-	stratrsiadx "github.com/tgragnato/orbiter/internal/strategy/rsiadx"
-	stratscalper "github.com/tgragnato/orbiter/internal/strategy/scalper"
-	stratsma10 "github.com/tgragnato/orbiter/internal/strategy/sma10"
-	stratstochrsi "github.com/tgragnato/orbiter/internal/strategy/stochrsi"
 	"github.com/tgragnato/orbiter/pkg/indicator/round"
 	"github.com/tgragnato/orbiter/pkg/indicator/stoch"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"github.com/tgragnato/orbiter/pkg/strategy"
+	stratha "github.com/tgragnato/orbiter/pkg/strategy/HeikinAshi"
+	stratdoji "github.com/tgragnato/orbiter/pkg/strategy/doji"
+	stratengulf "github.com/tgragnato/orbiter/pkg/strategy/engulfing"
+	stratharami "github.com/tgragnato/orbiter/pkg/strategy/harami"
+	stratlowcandle "github.com/tgragnato/orbiter/pkg/strategy/lowcandle"
+	stratrsi "github.com/tgragnato/orbiter/pkg/strategy/rsi"
+	stratrsiadx "github.com/tgragnato/orbiter/pkg/strategy/rsiadx"
+	stratscalper "github.com/tgragnato/orbiter/pkg/strategy/scalper"
+	stratsma10 "github.com/tgragnato/orbiter/pkg/strategy/sma10"
+	stratstochrsi "github.com/tgragnato/orbiter/pkg/strategy/stochrsi"
 )
 
 const (
@@ -146,28 +146,28 @@ func newScoredStrategies(symbol string) []strategy.ScoredStrategy {
 // preceding row, so it is not itself turned into a sample.
 func samplesFromCandles(symbol string, candles []data.Candle) []ml.Sample {
 	n := len(candles)
-	opens  := make([]float64, n)
-	highs  := make([]float64, n)
-	lows   := make([]float64, n)
+	opens := make([]float64, n)
+	highs := make([]float64, n)
+	lows := make([]float64, n)
 	closes := make([]float64, n)
 	for i, c := range candles {
-		opens[i]  = c.Open
-		highs[i]  = c.High
-		lows[i]   = c.Low
+		opens[i] = c.Open
+		highs[i] = c.High
+		lows[i] = c.Low
 		closes[i] = c.AdjustedClose
 		if closes[i] <= 0 {
 			closes[i] = c.Close
 		}
 	}
 
-	rsiSeries   := talib.Rsi(closes, 14)
-	adxSeries   := talib.Adx(highs, lows, closes, 14)
+	rsiSeries := talib.Rsi(closes, 14)
+	adxSeries := talib.Adx(highs, lows, closes, 14)
 	sma10Series := talib.Sma(closes, 10)
-	stochK, _   := talib.StochRsi(closes, 14, 14, 3, talib.SMA)
-	engulf      := engulfingSignals(opens, closes)
-	harami      := haramiSignals(opens, closes)
-	hammer      := hammerSignals(opens, highs, lows, closes)
-	haSignals   := heikinAshiSignals(opens, highs, lows, closes)
+	stochK, _ := talib.StochRsi(closes, 14, 14, 3, talib.SMA)
+	engulf := engulfingSignals(opens, closes)
+	harami := haramiSignals(opens, closes)
+	hammer := hammerSignals(opens, highs, lows, closes)
+	haSignals := heikinAshiSignals(opens, highs, lows, closes)
 
 	// Convert all candles to *ohlc.OHLC once for strategy consumption.
 	ohlcSlice := make([]*ohlc.OHLC, n)
@@ -212,31 +212,31 @@ func samplesFromCandles(symbol string, candles []data.Candle) []ml.Sample {
 		window := ohlcSlice[winStart : i+1]
 
 		var s ml.Sample
-		s.Features[ml.FeatRSI]       = rsiSeries[i] / 100.0
-		s.Features[ml.FeatStochRSI]  = stochK[i] / 100.0
-		s.Features[ml.FeatRSIADX]    = (rsiSeries[i] / 100.0) * (adxSeries[i] / 100.0)
-		s.Features[ml.FeatSMA10]     = relToSMA(c, sma10Series[i])
+		s.Features[ml.FeatRSI] = rsiSeries[i] / 100.0
+		s.Features[ml.FeatStochRSI] = stochK[i] / 100.0
+		s.Features[ml.FeatRSIADX] = (rsiSeries[i] / 100.0) * (adxSeries[i] / 100.0)
+		s.Features[ml.FeatSMA10] = relToSMA(c, sma10Series[i])
 		s.Features[ml.FeatLowCandle] = hammer[i] / 100.0
 		s.Features[ml.FeatEngulfing] = engulf[i] / 100.0
-		s.Features[ml.FeatHarami]    = harami[i] / 100.0
-		s.Features[ml.FeatHA]        = haSignals[i]
-		s.Features[ml.FeatScalper]   = bodyRatio(opens[i], highs[i], lows[i], c)
-		s.Features[ml.FeatReturn1]   = logRet(closes, i, 1)
-		s.Features[ml.FeatReturn5]   = logRet(closes, i, 5)
-		s.Features[ml.FeatReturn20]  = logRet(closes, i, 20)
-		s.Features[ml.FeatZScore20]  = returnZScore(closes, i, 20)
+		s.Features[ml.FeatHarami] = harami[i] / 100.0
+		s.Features[ml.FeatHA] = haSignals[i]
+		s.Features[ml.FeatScalper] = bodyRatio(opens[i], highs[i], lows[i], c)
+		s.Features[ml.FeatReturn1] = logRet(closes, i, 1)
+		s.Features[ml.FeatReturn5] = logRet(closes, i, 5)
+		s.Features[ml.FeatReturn20] = logRet(closes, i, 20)
+		s.Features[ml.FeatZScore20] = returnZScore(closes, i, 20)
 		// Strategy conviction scores (indices 13–22): each Score() reads the
 		// indicator state already updated by OnWarmUpCandle above, so there
 		// is no lookahead — all scores are based strictly on bars 0..i.
-		s.Features[ml.FeatScoreDoji]     = strats[0].Score(window)
-		s.Features[ml.FeatScoreEngulf]   = strats[1].Score(window)
-		s.Features[ml.FeatScoreHarami]   = strats[2].Score(window)
-		s.Features[ml.FeatScoreHA]       = strats[3].Score(window)
-		s.Features[ml.FeatScoreLowCand]  = strats[4].Score(window)
-		s.Features[ml.FeatScoreRSI]      = strats[5].Score(window)
-		s.Features[ml.FeatScoreRSIADX]   = strats[6].Score(window)
-		s.Features[ml.FeatScoreScalper]  = strats[7].Score(window)
-		s.Features[ml.FeatScoreSMA10]    = strats[8].Score(window)
+		s.Features[ml.FeatScoreDoji] = strats[0].Score(window)
+		s.Features[ml.FeatScoreEngulf] = strats[1].Score(window)
+		s.Features[ml.FeatScoreHarami] = strats[2].Score(window)
+		s.Features[ml.FeatScoreHA] = strats[3].Score(window)
+		s.Features[ml.FeatScoreLowCand] = strats[4].Score(window)
+		s.Features[ml.FeatScoreRSI] = strats[5].Score(window)
+		s.Features[ml.FeatScoreRSIADX] = strats[6].Score(window)
+		s.Features[ml.FeatScoreScalper] = strats[7].Score(window)
+		s.Features[ml.FeatScoreSMA10] = strats[8].Score(window)
 		s.Features[ml.FeatScoreStochRSI] = strats[9].Score(window)
 		// Fast Stochastic %K and %D from pkg/indicator/stoch (indices 23–24).
 		if vals, err := stochInd.Value(); err == nil {
@@ -299,12 +299,12 @@ func returnZScore(closes []float64, i, window int) float64 {
 
 // bodyRatio returns (close - open) / (high - low), a scale-free measure of
 // candle body directionality used as the "scalper" signal.
-func bodyRatio(open, high, low, close float64) float64 {
+func bodyRatio(open, high, low, closePrice float64) float64 {
 	rangeHL := high - low
 	if rangeHL == 0 {
 		return 0
 	}
-	return (close - open) / rangeHL
+	return (closePrice - open) / rangeHL
 }
 
 // hammerSignals returns +1 when bar i is a hammer (small body at top, lower
