@@ -113,7 +113,7 @@ func TestLCG(t *testing.T) {
 	t.Parallel()
 	rng := newLCG(1)
 	seen := make(map[uint64]bool)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		v := rng.next()
 		if seen[v] {
 			t.Logf("collision at iteration %d (value %d)", i, v)

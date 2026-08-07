@@ -38,7 +38,7 @@ func NewForest(nTrees, maxDepth, minSamples, featuresPerSplit int) *Forest {
 // uses seed i so results are reproducible.
 func (f *Forest) Fit(samples []Sample, nTrees int) {
 	f.Trees = make([]*Tree, 0, nTrees)
-	for i := 0; i < nTrees; i++ {
+	for i := range nTrees {
 		rng := newLCG(uint64(i + 1))
 		boot := bootstrap(samples, rng)
 		mask := randomFeatureMask(featureCount, f.nFeatures, rng)

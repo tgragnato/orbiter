@@ -16,7 +16,7 @@ feed.Updater (30 min)
 
 mlRunner (24 h, or on Trigger())
   └─ featurizer.ExtractMLSamples
-       ├─ 3 years of EOD candles per active holding (Yahoo)
+       ├─ 8 years of EOD candles per active holding (Yahoo, ~2016 bars)
        ├─ batch indicators via go-talib          (features 0–12)
        ├─ streaming strategy scores via ScoredStrategy  (features 13–22)
        ├─ incremental pkg/indicator/stoch + round (features 23–25)
@@ -156,14 +156,14 @@ To avoid lookahead bias, the model is validated with **purged walk-forward CV**:
 samples:  [0 ................... TrainSize | Embargo | TestSize | TestSize | ...]
 fold 0:    train[0:1250]          gap[10]   test[1260:1320]
 fold 1:    train[60:1310]         gap[10]   test[1320:1380]
-...  (~11 folds from 8 years of EOD history)
+...  (~11 folds from the 8-year EOD history window, ~2016 bars per symbol)
 ```
 
 Default parameters (set in `startup.go`):
 
 | Parameter | Value | Meaning |
 |-----------|-------|---------|
-| `TrainSize` | 1250 | Samples per training window (~5 years of EOD data, covers multiple market regimes) |
+| `TrainSize` | 1250 | Samples per training window (~5 years of EOD data); the 8-year fetch window (~2016 bars) supports ~11 rolling folds |
 | `TestSize` | 60 | Samples in each test window |
 | `Embargo` | 10 | Samples dropped between train end and test start |
 | `LabelHorizon` | 5 | Forward bars used for the label; purge removes trailing samples whose labels bleed into the test window |

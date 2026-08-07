@@ -45,5 +45,3 @@ type Sample struct {
 	Label    float64 // next-period log-return
 }
 
-// FeatureCount returns the fixed dimension of the feature vector.
-func FeatureCount() int { return featureCount }

@@ -10,7 +10,7 @@ func makeSamples(n int) []Sample {
 	rng := newLCG(42)
 	for i := range samples {
 		v := float64(rng.next()%200) / 100.0 // [0, 2)
-		for fi := 0; fi < featureCount; fi++ {
+		for fi := range featureCount {
 			samples[i].Features[fi] = float64(rng.next()%1000) / 500.0 // [-1, 1) normalised later
 		}
 		samples[i].Features[FeatRSI] = v - 1.0 // [-1, 1)
