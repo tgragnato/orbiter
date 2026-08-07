@@ -21,7 +21,7 @@ func TestHeikinAshi_Name(t *testing.T) {
 }
 
 func getHACandlesLong(amount int) (candles []*ohlc.OHLC) {
-	for i := 0; i < amount; i++ {
+	for range amount {
 		now := time.Now()
 		o := ohlc.New("test", now, time.Minute, false)
 		o.NewPrice(decimal.NewFromFloat(float64(1)), o.Start)
@@ -33,7 +33,7 @@ func getHACandlesLong(amount int) (candles []*ohlc.OHLC) {
 }
 
 func getHACandlesShort(amount int) (candles []*ohlc.OHLC) {
-	for i := 0; i < amount; i++ {
+	for range amount {
 		now := time.Now()
 		o := ohlc.New("test", now, time.Minute, false)
 		o.NewPrice(decimal.NewFromFloat(float64(2)), o.Start)

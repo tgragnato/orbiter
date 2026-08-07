@@ -36,11 +36,6 @@ func (p *Position) Duration() time.Duration {
 	return p.SellTime.Sub(p.BuyTime)
 }
 
-// MergePositions merges two position slices
-func MergePositions(positions1, positions2 []Position) []Position {
-	return append(positions1, positions2...)
-}
-
 func (p *Position) PerformanceAbsolute(bid, ask decimal.Decimal) float64 {
 	var abs decimal.Decimal
 	if p.SellPrice.IsZero() {

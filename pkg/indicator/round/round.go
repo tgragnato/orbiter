@@ -82,6 +82,3 @@ func (rn *Number) Value() (map[string]float64, error) {
 	return m, nil
 }
 
-func (rn *Number) ValueResultKeys() []string {
-	return []string{UpperRoundNumberStrong, UpperRoundNumberWeak, LowerRoundNumberStrong, LowerRoundNumberWeak}
-}

@@ -5,16 +5,6 @@ import (
 	"github.com/tgragnato/orbiter/pkg/broker"
 )
 
-// Pips2Cent - Convert pips to cent
-func Pips2Cent(n decimal.Decimal) decimal.Decimal {
-	return n.Div(decimal.NewFromFloat(10000))
-}
-
-// Cent2Pips - Convert cent to pips
-func Cent2Pips(n decimal.Decimal) decimal.Decimal {
-	return n.Mul(decimal.NewFromFloat(10000))
-}
-
 func FloatToDecimal(n float64) decimal.Decimal {
 	return decimal.NewFromFloat(n)
 }
@@ -48,14 +38,6 @@ func CalcTargetPriceByPercentage(price, percentage decimal.Decimal, orderDirecti
 	default:
 		return decimal.Zero
 	}
-}
-
-func SlippageAbsolute(expectedPrice, realPrice decimal.Decimal) decimal.Decimal {
-	return realPrice.Sub(expectedPrice)
-}
-
-func GetMedian(n []float64) float64 {
-	return GetPercentile(n, 50)
 }
 
 func GetPercentile(n []float64, percentile int) float64 {

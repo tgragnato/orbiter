@@ -31,7 +31,7 @@ func TestADX_Bullish_Trend_Above_35(t *testing.T) {
 	t.Parallel()
 
 	var adx1 = New(14)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		adx1.Insert(generateCandle(float64(i)))
 	}
 

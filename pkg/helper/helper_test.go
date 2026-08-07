@@ -7,36 +7,6 @@ import (
 	"github.com/tgragnato/orbiter/pkg/broker"
 )
 
-func TestCent2Pips(t *testing.T) {
-	t.Parallel()
-
-	if !Cent2Pips(decimal.NewFromFloat(0.001)).Equal(decimal.NewFromFloat(10)) {
-		t.Errorf("Cent2Pips does not work properly")
-	}
-}
-
-func TestPips2Cent(t *testing.T) {
-	t.Parallel()
-
-	if !Pips2Cent(decimal.NewFromFloat(10)).Equal(decimal.NewFromFloat(0.001)) {
-		t.Errorf("Pips2Cent does not work properly")
-	}
-}
-
-func TestPipHelper(t *testing.T) {
-	t.Parallel()
-
-	n := decimal.NewFromFloat(1.00)
-	if n.String() != Pips2Cent(Cent2Pips(n)).String() {
-		t.Fatalf("expected %q, got %q", n.String(), Pips2Cent(Cent2Pips(n)).String())
-	}
-
-	n = decimal.NewFromFloat(1.87)
-	if n.String() != Pips2Cent(Cent2Pips(n)).String() {
-		t.Fatalf("expected %q, got %q", n.String(), Pips2Cent(Cent2Pips(n)).String())
-	}
-}
-
 func TestCalcStopLossPriceByPercentage(t *testing.T) {
 	t.Parallel()
 

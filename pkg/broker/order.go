@@ -25,11 +25,6 @@ func NewMarketOrder(direction BuyDirection, size float64, instrument string, tar
 	return newOrderImpl(OrderTypeMarket, direction, size, instrument, targetPrice, stopLossPrice, decimal.Zero)
 }
 
-// NewLimitOrder creates a new order from given parameters
-func NewLimitOrder(direction BuyDirection, size float64, instrument string, targetPrice, stopLossPrice, limitPrice decimal.Decimal) Order {
-	return newOrderImpl(OrderTypeLimit, direction, size, instrument, targetPrice, stopLossPrice, limitPrice)
-}
-
 func newOrderImpl(orderType OrderType, direction BuyDirection, size float64, instrument string, targetPrice, stopLossPrice, limitPrice decimal.Decimal) Order {
 	return Order{
 		Type:          orderType,
@@ -40,11 +35,6 @@ func newOrderImpl(orderType OrderType, direction BuyDirection, size float64, ins
 		StopLossPrice: stopLossPrice,
 		Limit:         limitPrice,
 	}
-}
-
-// MergeOrders merges two orders
-func MergeOrders(orders1, orders2 []Order) []Order {
-	return append(orders1, orders2...)
 }
 
 // HasTargetPrice checks if the optional target price has been set

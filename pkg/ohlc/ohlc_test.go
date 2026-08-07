@@ -458,7 +458,7 @@ func TestOHLC__Sort(t *testing.T) {
 	var o1 = generateOHLC(now, 1)
 	var o2 = generateOHLC(now.Add(time.Minute), 2)
 	var ohlcList = []OHLC{*o2, *o1}
-	sort.Sort(OHLCList(ohlcList))
+	sort.Slice(ohlcList, func(i, j int) bool { return ohlcList[i].End.Before(ohlcList[j].End) })
 	if !ohlcList[0].End.Equal(o1.End) {
 		t.Fatalf("expected %s, got %s", ohlcList[0].End, o1.End)
 	}

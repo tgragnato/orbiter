@@ -41,7 +41,7 @@ func TestMedianVolatilityInPercentage(t *testing.T) {
 
 	v := New(10, 10)
 	now := time.Now()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		o := ohlc.New("EURUSD", now, time.Minute, false)
 		o.NewPrice(decimal.NewFromFloat(1.0), o.Start)
 		o.NewPrice(decimal.NewFromFloat(float64(i)+1.0), o.Start)
@@ -63,7 +63,7 @@ func TestVolatilityInPercentageQuantile(t *testing.T) {
 
 	v := New(1000, 1000)
 	now := time.Now()
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		o := ohlc.New("EURUSD", now, time.Minute, false)
 		o.NewPrice(decimal.NewFromFloat(1.0), o.Start)
 		o.NewPrice(decimal.NewFromFloat(float64(i)+1.0), o.End)

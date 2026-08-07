@@ -69,6 +69,3 @@ func (v *Stoch) Value() (map[string]float64, error) {
 	return m, err
 }
 
-func (v *Stoch) ValueResultKeys() []string {
-	return []string{ValueK, ValueD}
-}

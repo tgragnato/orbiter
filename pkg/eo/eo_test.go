@@ -13,7 +13,7 @@ func Test_riskLevelHigh(t *testing.T) {
 
 	overlay := New()
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		candle := generateCandle(float64(i))
 		overlay.AddCandle(candle)
 	}

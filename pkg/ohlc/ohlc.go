@@ -251,16 +251,3 @@ func ToHeikinAshi(previous, now *OHLC) *OHLC {
 	return &ha
 }
 
-type OHLCList []OHLC
-
-func (e OHLCList) Len() int {
-	return len(e)
-}
-
-func (e OHLCList) Less(i, j int) bool {
-	return e[i].End.Before(e[j].End)
-}
-
-func (e OHLCList) Swap(i, j int) {
-	e[i], e[j] = e[j], e[i]
-}
