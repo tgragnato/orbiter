@@ -49,12 +49,27 @@ type TWRResult struct {
 	Periods     []TWRPeriodDetails
 }
 
+// TransactionFlow is one cash-flow entry derived from a trade transaction.
+// Used by BackfillTransactionFlows to bulk-populate the cash_flows table.
+type TransactionFlow struct {
+	Type       CashFlowType
+	Amount     float64
+	OccurredAt time.Time
+}
+
 // Repository persists and reads analytics state for the TWR engine.
 type Repository interface {
 	RecordSnapshot(ctx context.Context, portfolioID string, snapshotAt time.Time, nav float64) error
 	RecordCashFlowWithSnapshot(ctx context.Context, portfolioID string, flowType CashFlowType, amount float64, asset string, occurredAt time.Time, navBeforeFlow float64) error
 	ListSnapshots(ctx context.Context, portfolioID string, tr TimeRange) ([]NAVSnapshot, error)
 	SignedCashFlowBetween(ctx context.Context, portfolioID string, from, to time.Time) (float64, error)
+	// LastSnapshotAt returns the most recent snapshot timestamp for a portfolio.
+	// Returns (zero, false, nil) when no snapshots exist yet.
+	LastSnapshotAt(ctx context.Context, portfolioID string) (time.Time, bool, error)
+	// BackfillTransactionFlows atomically replaces all auto-generated cash flows
+	// (asset = 'AUTO') for the portfolio with the supplied set. Idempotent: safe
+	// to call on every startup.
+	BackfillTransactionFlows(ctx context.Context, portfolioID string, flows []TransactionFlow) error
 }
 
 // TWREngine computes time-weighted return and captures snapshot/cash-flow events.
@@ -73,6 +88,20 @@ func (e *TWREngine) RecordNAVSnapshot(ctx context.Context, portfolioID string, s
 		return fmt.Errorf("nav must be > 0")
 	}
 	return e.repo.RecordSnapshot(ctx, portfolioID, snapshotAt, nav)
+}
+
+// LastNAVSnapshotAt returns the timestamp of the most recent NAV snapshot for
+// the portfolio. Returns (zero, false, nil) when the table is empty.
+func (e *TWREngine) LastNAVSnapshotAt(ctx context.Context, portfolioID string) (time.Time, bool, error) {
+	return e.repo.LastSnapshotAt(ctx, portfolioID)
+}
+
+// BackfillTransactionFlows atomically replaces all auto-generated cash flows
+// for the portfolio. Each BUY transaction should become a DEPOSIT and each
+// SELL a WITHDRAWAL so the TWR formula can isolate price returns from capital
+// injections/withdrawals.
+func (e *TWREngine) BackfillTransactionFlows(ctx context.Context, portfolioID string, flows []TransactionFlow) error {
+	return e.repo.BackfillTransactionFlows(ctx, portfolioID, flows)
 }
 
 // RecordCashFlow captures a pre-flow NAV snapshot and persists the cash flow atomically.
@@ -148,12 +177,26 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-// RecordSnapshot inserts an explicit NAV snapshot.
+// RecordSnapshot upserts a NAV snapshot for a portfolio day. The timestamp is
+// truncated to UTC midnight so the partial unique index on
+// (portfolio_id, snapshot_at) WHERE related_cash_flow_id IS NULL (migration v8)
+// enforces at most one regular snapshot per portfolio per day.
+//
+// On conflict the existing row is updated (not skipped) so that each app restart
+// refreshes historical NAVs with the latest Yahoo-adjusted prices. This is
+// required for TWR correctness: cash flows are always recomputed from current
+// adjusted prices (delete-then-insert), and the NAV snapshots they pair against
+// must use the same price basis — otherwise retroactive dividend adjustments
+// create permanent mismatches that manifest as spurious negative TWR in any
+// period containing a purchase.
 func (r *PostgresRepository) RecordSnapshot(ctx context.Context, portfolioID string, snapshotAt time.Time, nav float64) error {
+	dayStart := snapshotAt.UTC().Truncate(24 * time.Hour)
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO nav_snapshots (portfolio_id, snapshot_at, nav)
 		VALUES ($1, $2, $3)
-	`, portfolioID, snapshotAt, nav)
+		ON CONFLICT (portfolio_id, snapshot_at) WHERE related_cash_flow_id IS NULL
+		DO UPDATE SET nav = EXCLUDED.nav
+	`, portfolioID, dayStart, nav)
 	return err
 }
 
@@ -223,6 +266,62 @@ func (r *PostgresRepository) ListSnapshots(ctx context.Context, portfolioID stri
 		return nil, err
 	}
 	return out, nil
+}
+
+// BackfillTransactionFlows atomically replaces all auto-generated cash flows
+// (asset = 'AUTO') for the portfolio with the provided set. It runs inside a
+// single transaction so a mid-run crash leaves the previous state intact.
+func (r *PostgresRepository) BackfillTransactionFlows(ctx context.Context, portfolioID string, flows []TransactionFlow) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err = tx.ExecContext(ctx,
+		`DELETE FROM cash_flows WHERE portfolio_id = $1 AND asset = 'AUTO'`,
+		portfolioID,
+	); err != nil {
+		return err
+	}
+
+	for _, f := range flows {
+		if f.Amount <= 0 {
+			continue
+		}
+		if _, err = tx.ExecContext(ctx, `
+			INSERT INTO cash_flows (portfolio_id, flow_type, amount, asset, occurred_at)
+			VALUES ($1, $2, $3, 'AUTO', $4)
+		`, portfolioID, string(f.Type), f.Amount, f.OccurredAt); err != nil {
+			return err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// LastSnapshotAt returns the most recent snapshot timestamp for a portfolio.
+// Returns (zero, false, nil) when the table is empty.
+func (r *PostgresRepository) LastSnapshotAt(ctx context.Context, portfolioID string) (time.Time, bool, error) {
+	var t sql.NullTime
+	err := r.db.QueryRowContext(ctx,
+		`SELECT MAX(snapshot_at) FROM nav_snapshots WHERE portfolio_id = $1`,
+		portfolioID,
+	).Scan(&t)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if !t.Valid {
+		return time.Time{}, false, nil
+	}
+	return t.Time.UTC(), true, nil
 }
 
 // SignedCashFlowBetween returns deposits as positive and withdrawals as negative in (from, to].

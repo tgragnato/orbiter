@@ -129,10 +129,14 @@ func TestPostgresStoreAddTransactionRecalculatesHolding(t *testing.T) {
 		AddRow(1, "VWCE.MI", "BUY", 10.0, 100.0, 2.0, "SATELLITE", executedAt, executedAt)
 	mock.ExpectQuery("FROM transactions").WithArgs("VWCE.MI").WillReturnRows(txRows)
 
-	// 3. BEGIN
+	// 3. listSplitsForSymbol — no splits recorded for this symbol yet
+	mock.ExpectQuery("FROM stock_splits").WithArgs("VWCE.MI").
+		WillReturnRows(sqlmock.NewRows([]string{"split_date", "factor"}))
+
+	// 4. BEGIN
 	mock.ExpectBegin()
 
-	// 4. Read existing market_price, taa_enabled, allocation_type — returns defaults for new holding
+	// 5. Read existing market_price, taa_enabled, allocation_type — returns defaults for new holding
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("VWCE.MI").
 		WillReturnRows(sqlmock.NewRows([]string{"price", "taa_enabled", "alloc_type"}).AddRow(98.5, true, "SATELLITE"))
 
@@ -192,6 +196,10 @@ func TestPostgresStoreAddTransactionClosesPosition(t *testing.T) {
 		AddRow(2, "VWCE.MI", "SELL", 10.0, 110.0, 0.0, "SATELLITE", executedAt, executedAt)
 	mock.ExpectQuery("FROM transactions").WithArgs("VWCE.MI").WillReturnRows(txRows)
 
+	// listSplitsForSymbol — no splits recorded for this symbol yet
+	mock.ExpectQuery("FROM stock_splits").WithArgs("VWCE.MI").
+		WillReturnRows(sqlmock.NewRows([]string{"split_date", "factor"}))
+
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("VWCE.MI").
 		WillReturnRows(sqlmock.NewRows([]string{"price", "taa_enabled", "alloc_type"}).AddRow(0, true, "SATELLITE"))
@@ -245,6 +253,10 @@ func TestPostgresStoreAddTransactionPartialSellPreservesPMC(t *testing.T) {
 		AddRow(1, "VWCE.MI", "BUY", 10.0, 100.0, 2.0, "SATELLITE", executedAt.Add(-time.Hour), executedAt.Add(-time.Hour)).
 		AddRow(2, "VWCE.MI", "SELL", 4.0, 120.0, 0.0, "SATELLITE", executedAt, executedAt)
 	mock.ExpectQuery("FROM transactions").WithArgs("VWCE.MI").WillReturnRows(txRows)
+
+	// listSplitsForSymbol — no splits recorded for this symbol yet
+	mock.ExpectQuery("FROM stock_splits").WithArgs("VWCE.MI").
+		WillReturnRows(sqlmock.NewRows([]string{"split_date", "factor"}))
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("VWCE.MI").

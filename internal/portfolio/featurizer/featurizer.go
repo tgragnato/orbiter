@@ -205,10 +205,7 @@ func samplesFromCandles(symbol string, candles []data.Candle) []ml.Sample {
 
 		// Build a candle window for strategies that inspect recent bars
 		// directly (scalper needs 10, HeikinAshi needs 3, others ignore it).
-		winStart := i - 99
-		if winStart < 0 {
-			winStart = 0
-		}
+		winStart := max(i-99, 0)
 		window := ohlcSlice[winStart : i+1]
 
 		var s ml.Sample
@@ -281,7 +278,7 @@ func returnZScore(closes []float64, i, window int) float64 {
 		return 0
 	}
 	rets := make([]float64, window)
-	for j := 0; j < window; j++ {
+	for j := range window {
 		idx := i - window + j
 		if closes[idx] <= 0 || closes[idx+1] <= 0 {
 			return 0
@@ -312,7 +309,7 @@ func bodyRatio(open, high, low, closePrice float64) float64 {
 func hammerSignals(opens, highs, lows, closes []float64) []float64 {
 	n := len(closes)
 	out := make([]float64, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		body := math.Abs(closes[i] - opens[i])
 		lowerShadow := math.Min(opens[i], closes[i]) - lows[i]
 		upperShadow := highs[i] - math.Max(opens[i], closes[i])

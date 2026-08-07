@@ -4,10 +4,12 @@ package feed
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/tgragnato/orbiter/internal/portfolio"
+	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
 	"github.com/tgragnato/orbiter/internal/portfolio/data"
 )
 
@@ -32,12 +34,52 @@ type DividendSyncer interface {
 	UpsertDividendIncomes(ctx context.Context, records []portfolio.DividendRecord) error
 }
 
+// NAVLister can list current holdings with their quantities and market prices.
+// *portfolio.PostgresStore satisfies this interface.
+type NAVLister interface {
+	ListHoldings(ctx context.Context) ([]portfolio.Holding, error)
+}
+
+// NAVSnapper persists NAV checkpoints and exposes the last recorded date for
+// idempotent backfill. *analytics.TWREngine satisfies this interface.
+type NAVSnapper interface {
+	RecordNAVSnapshot(ctx context.Context, portfolioID string, snapshotAt time.Time, nav float64) error
+	// LastNAVSnapshotAt returns the most recent snapshot timestamp.
+	// Returns (zero, false, nil) when no snapshots exist yet.
+	LastNAVSnapshotAt(ctx context.Context, portfolioID string) (time.Time, bool, error)
+}
+
+// NAVBackfiller provides the transaction history needed to reconstruct
+// historical daily NAVs. *portfolio.PostgresStore satisfies this interface.
+type NAVBackfiller interface {
+	AllTransactionSymbols(ctx context.Context) ([]string, error)
+	ListTransactions(ctx context.Context, symbol string) ([]portfolio.Transaction, error)
+}
+
+// CashFlowRecorder persists cash flows derived from trade transactions.
+// *analytics.TWREngine satisfies this interface.
+type CashFlowRecorder interface {
+	BackfillTransactionFlows(ctx context.Context, portfolioID string, flows []analytics.TransactionFlow) error
+}
+
+// SplitPersister persists stock split events detected in candle data.
+// *portfolio.PostgresStore satisfies this interface.
+type SplitPersister interface {
+	UpsertSplit(ctx context.Context, symbol string, splitDate time.Time, factor float64) error
+}
+
 // Updater fetches EOD prices from a DataProvider and writes them to the store.
 type Updater struct {
-	store     PriceStore
-	divSyncer DividendSyncer // optional; nil disables dividend sync
-	provider  data.DataProvider
-	interval  time.Duration
+	store            PriceStore
+	divSyncer        DividendSyncer   // optional; nil disables dividend sync
+	navLister        NAVLister        // optional; nil disables NAV snapshotting
+	navSnapper       NAVSnapper       // optional; nil disables NAV snapshotting
+	navBackfiller    NAVBackfiller    // optional; nil disables historical NAV backfill
+	cashFlowRecorder CashFlowRecorder // optional; nil disables cash flow backfill
+	splitPersister   SplitPersister   // optional; nil disables split detection
+	portfolioID      string           // used when navSnapper is set
+	provider         data.DataProvider
+	interval         time.Duration
 }
 
 // New creates a price feed updater without dividend sync.
@@ -53,13 +95,59 @@ func NewWithDividendSync(store PriceStore, divSyncer DividendSyncer, provider da
 	return &Updater{store: store, divSyncer: divSyncer, provider: provider, interval: interval}
 }
 
+// WithNAVSnapshot enables automatic NAV snapshotting after each price refresh.
+// lister reads the current holdings (quantities × market prices), snapper
+// persists the resulting total NAV, and portfolioID identifies the portfolio
+// record. Calling this method on a nil Updater panics.
+func (u *Updater) WithNAVSnapshot(lister NAVLister, snapper NAVSnapper, portfolioID string) *Updater {
+	u.navLister = lister
+	u.navSnapper = snapper
+	u.portfolioID = portfolioID
+	return u
+}
+
+// WithSplitPersister enables automatic split detection and persistence.
+// Each candle whose SplitFactor differs from 1.0 is stored in stock_splits so
+// that ComputeHoldingStates and ComputeDailyNAVs can normalise quantities.
+// Calling this method on a nil Updater panics.
+func (u *Updater) WithSplitPersister(persister SplitPersister) *Updater {
+	u.splitPersister = persister
+	return u
+}
+
+// WithCashFlowRecorder enables automatic cash flow backfill on startup.
+// For each BUY transaction a DEPOSIT is recorded; for each SELL a WITHDRAWAL.
+// This populates cash_flows so the TWR formula can isolate price returns from
+// capital injections. Requires WithNAVBackfill to be configured (it reuses the
+// same transaction list). Calling this method on a nil Updater panics.
+func (u *Updater) WithCashFlowRecorder(recorder CashFlowRecorder) *Updater {
+	u.cashFlowRecorder = recorder
+	return u
+}
+
+// WithNAVBackfill enables one-time historical NAV backfill on startup.
+// backfiller supplies the full transaction history; the backfill is skipped
+// automatically for days already present in nav_snapshots, making it safe
+// to call on every restart. Requires WithNAVSnapshot to also be configured.
+func (u *Updater) WithNAVBackfill(backfiller NAVBackfiller) *Updater {
+	u.navBackfiller = backfiller
+	return u
+}
+
 // Run starts the refresh loop. It fetches prices immediately at startup, then
 // repeats every interval until ctx is cancelled. When a DividendSyncer is
 // configured, a full historical dividend backfill runs asynchronously before
-// the first price refresh.
+// the first price refresh. When a NAVBackfiller is configured alongside a
+// NAVSnapper, a one-time historical NAV backfill also runs asynchronously.
+// Cash flow backfill is merged into backfillNAV so both use the same adjusted
+// close prices from the price map — this keeps deposit amounts consistent with
+// the NAV snapshots and avoids TWR distortions from retroactive price adjustments.
 func (u *Updater) Run(ctx context.Context) {
 	if u.divSyncer != nil {
 		go u.backfillDividends(ctx)
+	}
+	if u.navBackfiller != nil && u.navSnapper != nil {
+		go u.backfillNAV(ctx)
 	}
 
 	u.refresh(ctx)
@@ -124,6 +212,32 @@ func (u *Updater) refresh(ctx context.Context) {
 			u.syncRecentDividends(ctx, sym, candles)
 		}
 	}
+
+	// After all prices are refreshed, record a NAV snapshot so the TWR chart
+	// accumulates data points over time.
+	if u.navLister != nil && u.navSnapper != nil {
+		if err := u.recordNAV(ctx); err != nil {
+			slog.Warn("price feed: NAV snapshot failed", "error", err)
+		}
+	}
+}
+
+// recordNAV computes the total portfolio NAV from current holdings and
+// persists it as a TWR checkpoint.
+func (u *Updater) recordNAV(ctx context.Context) error {
+	holdings, err := u.navLister.ListHoldings(ctx)
+	if err != nil {
+		return fmt.Errorf("list holdings: %w", err)
+	}
+	var totalNAV float64
+	for _, h := range holdings {
+		totalNAV += h.NAV()
+	}
+	if totalNAV <= 0 {
+		slog.Debug("price feed: total NAV is zero, skipping snapshot")
+		return nil
+	}
+	return u.navSnapper.RecordNAVSnapshot(ctx, u.portfolioID, time.Now().UTC(), totalNAV)
 }
 
 // syncRecentDividends processes dividend events found in candles that were
@@ -209,4 +323,173 @@ func (u *Updater) backfillDividends(ctx context.Context) {
 			slog.Info("dividend backfill: done", "symbol", sym, "records", len(records))
 		}
 	}
+}
+
+// backfillNAV reconstructs historical daily NAV snapshots from the full
+// transaction and candle history. It always starts from the first transaction
+// date and covers every day up to (but not including) today, relying on
+// ON CONFLICT DO NOTHING in RecordSnapshot for idempotency. Starting from the
+// first transaction date rather than the last recorded snapshot avoids a race
+// condition where the regular refresh() call inserts today's snapshot before
+// this goroutine runs, which would otherwise cause the backfill to skip all
+// historical data on the very first startup.
+// Runs once asynchronously at startup.
+func (u *Updater) backfillNAV(ctx context.Context) {
+	allTxs, err := u.navBackfiller.ListTransactions(ctx, "")
+	if err != nil {
+		slog.Warn("nav backfill: list transactions", "error", err)
+		return
+	}
+	if len(allTxs) == 0 {
+		return
+	}
+
+	firstTxDate := allTxs[0].ExecutedAt.UTC().Truncate(24 * time.Hour)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+
+	// Nothing historical to backfill if the first trade is today.
+	if !firstTxDate.Before(today) {
+		slog.Debug("nav backfill: first trade is today, nothing to backfill", "portfolio", u.portfolioID)
+		return
+	}
+
+	// Fetch historical candles for every symbol ever traded.
+	symbols, err := u.navBackfiller.AllTransactionSymbols(ctx)
+	if err != nil {
+		slog.Warn("nav backfill: list symbols", "error", err)
+		return
+	}
+
+	// priceMap: symbol → (UTC day) → adjusted-close price.
+	// splitMap: symbol → []SplitEvent (factor != 1.0 candles).
+	priceMap := make(map[string]map[time.Time]float64, len(symbols))
+	splitMap := make(map[string][]portfolio.SplitEvent)
+	for _, sym := range symbols {
+		if ctx.Err() != nil {
+			return
+		}
+		candles, err := u.provider.GetEOD(sym, firstTxDate, today)
+		if err != nil {
+			slog.Warn("nav backfill: fetch candles", "symbol", sym, "error", err)
+			continue
+		}
+		dayMap := make(map[time.Time]float64, len(candles))
+		for _, c := range candles {
+			d := c.Time.UTC().Truncate(24 * time.Hour)
+			price := c.AdjustedClose
+			if price <= 0 {
+				price = c.Close
+			}
+			if price > 0 {
+				dayMap[d] = price
+			}
+			// A SplitFactor != 1.0 (and != 0) signals a split on that day.
+			if c.SplitFactor != 0 && c.SplitFactor != 1.0 {
+				splitMap[sym] = append(splitMap[sym], portfolio.SplitEvent{
+					Date:   d,
+					Factor: c.SplitFactor,
+				})
+				if u.splitPersister != nil {
+					if pErr := u.splitPersister.UpsertSplit(ctx, sym, d, c.SplitFactor); pErr != nil {
+						slog.Warn("nav backfill: persist split", "symbol", sym, "date", d, "error", pErr)
+					}
+				}
+			}
+		}
+		if len(dayMap) > 0 {
+			priceMap[sym] = dayMap
+		}
+	}
+
+	// Reconstruct one NAV point per trading day in [firstTxDate, today).
+	dailyNAVs := portfolio.ComputeDailyNAVs(allTxs, priceMap, splitMap, firstTxDate, today)
+	if len(dailyNAVs) == 0 {
+		slog.Debug("nav backfill: no data points to record", "portfolio", u.portfolioID)
+		return
+	}
+
+	recorded := 0
+	for _, dn := range dailyNAVs {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := u.navSnapper.RecordNAVSnapshot(ctx, u.portfolioID, dn.Date, dn.NAV); err != nil {
+			slog.Warn("nav backfill: record snapshot", "date", dn.Date, "error", err)
+		} else {
+			recorded++
+		}
+	}
+	slog.Info("nav backfill: done", "portfolio", u.portfolioID, "snapshots", recorded)
+
+	// Cash flows are computed here (not in a separate goroutine) so they use the
+	// same priceMap already fetched above. This is critical for TWR correctness:
+	// if deposit amounts used the actual transaction price while NAV snapshots use
+	// the adjusted close price, any subsequent dividend payments would cause the
+	// deposit to be larger than the NAV increase it caused, producing artificial
+	// negative TWR in periods around each purchase.
+	if u.cashFlowRecorder != nil {
+		flows := buildAdjustedFlows(allTxs, priceMap)
+		if err := u.cashFlowRecorder.BackfillTransactionFlows(ctx, u.portfolioID, flows); err != nil {
+			slog.Error("nav backfill: cash flow persist failed", "error", err)
+		} else {
+			slog.Info("nav backfill: cash flows recorded", "portfolio", u.portfolioID, "count", len(flows))
+		}
+	}
+}
+
+// buildAdjustedFlows derives per-transaction cash flows using adjusted close
+// prices from priceMap. This keeps deposit/withdrawal amounts consistent with
+// the NAV snapshots (which also use adjusted prices), preventing TWR distortions
+// caused by retroactive dividend adjustments.
+//
+//   - BUY  → DEPOSIT   (amount = qty × adjPrice + fee)
+//   - SELL → WITHDRAWAL (amount = qty × adjPrice − fee, skipped when ≤ 0)
+//
+// occurred_at is midnight UTC of the transaction day so each flow falls inside
+// the correct daily sub-period used by CalculateTWR.
+func buildAdjustedFlows(txs []portfolio.Transaction, priceMap map[string]map[time.Time]float64) []analytics.TransactionFlow {
+	flows := make([]analytics.TransactionFlow, 0, len(txs))
+	for _, tx := range txs {
+		day := tx.ExecutedAt.UTC().Truncate(24 * time.Hour)
+		adjPrice := lookupAdjustedPrice(priceMap[tx.Symbol], day, tx.Price)
+
+		switch tx.Type {
+		case portfolio.TransactionBuy:
+			flows = append(flows, analytics.TransactionFlow{
+				Type:       analytics.CashFlowDeposit,
+				Amount:     tx.Quantity*adjPrice + tx.Fee,
+				OccurredAt: day,
+			})
+		case portfolio.TransactionSell:
+			amount := tx.Quantity*adjPrice - tx.Fee
+			if amount <= 0 {
+				continue
+			}
+			flows = append(flows, analytics.TransactionFlow{
+				Type:       analytics.CashFlowWithdrawal,
+				Amount:     amount,
+				OccurredAt: day,
+			})
+		}
+	}
+	return flows
+}
+
+// lookupAdjustedPrice returns the adjusted close price for a symbol on the given
+// UTC day. It first tries the exact day, then searches up to 3 days forward and
+// backward (to cover weekends and exchange holidays), and finally falls back to
+// the actual transaction price so the flow is always recorded.
+func lookupAdjustedPrice(dayMap map[time.Time]float64, day time.Time, fallback float64) float64 {
+	if p, ok := dayMap[day]; ok {
+		return p
+	}
+	for i := 1; i <= 3; i++ {
+		if p, ok := dayMap[day.Add(time.Duration(i)*24*time.Hour)]; ok {
+			return p
+		}
+		if p, ok := dayMap[day.Add(-time.Duration(i)*24*time.Hour)]; ok {
+			return p
+		}
+	}
+	return fallback
 }

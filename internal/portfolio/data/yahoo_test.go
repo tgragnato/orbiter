@@ -8,6 +8,12 @@ import (
 	"time"
 )
 
+func newYahooProviderWithBaseURL(client *http.Client, baseURL string) *YahooProvider {
+	provider := NewYahooProvider(client)
+	provider.baseURL = strings.TrimRight(baseURL, "/")
+	return provider
+}
+
 func TestYahooProviderGetEODParsesAdjustedCloseDividendsAndSplits(t *testing.T) {
 	t.Parallel()
 

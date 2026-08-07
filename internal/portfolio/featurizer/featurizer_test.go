@@ -204,8 +204,9 @@ func TestExtractMLSamplesFeatureCount(t *testing.T) {
 	if err != nil || len(samples) == 0 {
 		t.Fatalf("expected samples, got err=%v len=%d", err, len(samples))
 	}
-	if len(samples[0].Features) != ml.FeatureCount() {
-		t.Fatalf("feature count = %d, want %d", len(samples[0].Features), ml.FeatureCount())
+	const wantFeatures = 26 // featureCount in internal/ml/sample.go
+	if len(samples[0].Features) != wantFeatures {
+		t.Fatalf("feature count = %d, want %d", len(samples[0].Features), wantFeatures)
 	}
 }
 

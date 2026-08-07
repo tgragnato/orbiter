@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -19,12 +20,22 @@ type HoldingsStore interface {
 
 // PostgresStore persists holdings in PostgreSQL.
 type PostgresStore struct {
-	db *sql.DB
+	db          *sql.DB
+	portfolioID string // optional; enables live cash-flow recording after AddTransaction
 }
 
 // NewPostgresStore creates a holdings store bound to PostgreSQL.
 func NewPostgresStore(db *sql.DB) *PostgresStore {
 	return &PostgresStore{db: db}
+}
+
+// WithPortfolioID enables immediate cash-flow recording after AddTransaction.
+// When set, each new BUY/SELL appends an asset='AUTO' row to cash_flows using
+// tx.Price so TWR stays approximately correct within the current session.
+// The next startup's backfill replaces these rows with adjusted-close prices.
+func (s *PostgresStore) WithPortfolioID(portfolioID string) *PostgresStore {
+	s.portfolioID = portfolioID
+	return s
 }
 
 // ListHoldings returns all holdings for the unified table view.
@@ -112,7 +123,7 @@ func (s *PostgresStore) TotalRealizedPnL(ctx context.Context) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	states := ComputeHoldingStates(txs)
+	states := ComputeHoldingStates(txs, nil)
 	total := 0.0
 	for _, st := range states {
 		total += st.RealizedPnL
@@ -130,6 +141,9 @@ func parseAllocationType(value string) AllocationType {
 
 // AddTransaction inserts a trade record and immediately recalculates only the
 // affected symbol's holding quantity and PMC from its full transaction history.
+// When WithPortfolioID has been set, it also appends a cash_flows row so TWR
+// stays approximately correct within the current session without waiting for the
+// next startup backfill.
 func (s *PostgresStore) AddTransaction(ctx context.Context, tx Transaction) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO transactions
@@ -140,7 +154,47 @@ func (s *PostgresStore) AddTransaction(ctx context.Context, tx Transaction) erro
 	if err != nil {
 		return fmt.Errorf("insert transaction: %w", err)
 	}
-	return s.recalculateSymbol(ctx, tx.Symbol)
+	if err := s.recalculateSymbol(ctx, tx.Symbol); err != nil {
+		return err
+	}
+	if s.portfolioID != "" {
+		if err := s.recordLiveFlow(ctx, tx); err != nil {
+			// Non-fatal: TWR will be corrected on next startup backfill.
+			slog.Warn("portfolio: live cash-flow record failed", "symbol", tx.Symbol, "error", err)
+		}
+	}
+	return nil
+}
+
+// recordLiveFlow inserts a single cash-flow row for a transaction executed in
+// the current session. It uses tx.Price (not Yahoo AdjustedClose) because the
+// adjusted price for today's candle is not yet available. The next startup
+// backfill will replace all asset='AUTO' rows with adjusted-price equivalents,
+// so this is only an intra-session approximation.
+func (s *PostgresStore) recordLiveFlow(ctx context.Context, tx Transaction) error {
+	var flowType string
+	var amount float64
+	day := tx.ExecutedAt.UTC().Truncate(24 * time.Hour)
+
+	switch tx.Type {
+	case TransactionBuy:
+		flowType = "DEPOSIT"
+		amount = tx.Quantity*tx.Price + tx.Fee
+	case TransactionSell:
+		flowType = "WITHDRAWAL"
+		amount = tx.Quantity*tx.Price - tx.Fee
+		if amount <= 0 {
+			return nil
+		}
+	default:
+		return nil
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO cash_flows (portfolio_id, flow_type, amount, asset, occurred_at)
+		VALUES ($1, $2, $3, 'AUTO', $4)
+	`, s.portfolioID, flowType, amount, day)
+	return err
 }
 
 // UpdateTransaction overwrites a trade record identified by tx.ID and
@@ -200,7 +254,12 @@ func (s *PostgresStore) recalculateSymbol(ctx context.Context, symbol string) er
 		return err
 	}
 
-	states := ComputeHoldingStates(txs)
+	splits, err := s.listSplitsForSymbol(ctx, symbol)
+	if err != nil {
+		return fmt.Errorf("list splits for %s: %w", symbol, err)
+	}
+	splitMap := map[string][]SplitEvent{symbol: splits}
+	states := ComputeHoldingStates(txs, splitMap)
 	state := states[symbol]
 
 	dbTx, err := s.db.BeginTx(ctx, nil)
@@ -332,7 +391,11 @@ func (s *PostgresStore) RecalculateHoldings(ctx context.Context) error {
 		return nil
 	}
 
-	states := ComputeHoldingStates(txs)
+	splitMap, err := s.listAllSplits(ctx)
+	if err != nil {
+		return fmt.Errorf("list all splits: %w", err)
+	}
+	states := ComputeHoldingStates(txs, splitMap)
 
 	dbTx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -503,6 +566,68 @@ func (s *PostgresStore) DeleteDividendIncomesBySymbol(ctx context.Context, symbo
 		`DELETE FROM dividend_income_records WHERE symbol = $1`, symbol)
 	if err != nil {
 		return fmt.Errorf("delete dividend incomes for %s: %w", symbol, err)
+	}
+	return nil
+}
+
+// listSplitsForSymbol returns all recorded split events for one symbol, ordered
+// by split_date ASC. Returns an empty slice (not nil) when none exist.
+func (s *PostgresStore) listSplitsForSymbol(ctx context.Context, symbol string) ([]SplitEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT split_date, factor FROM stock_splits WHERE symbol = $1 ORDER BY split_date ASC`,
+		symbol,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list splits for %s: %w", symbol, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	splits := make([]SplitEvent, 0)
+	for rows.Next() {
+		var ev SplitEvent
+		if err := rows.Scan(&ev.Date, &ev.Factor); err != nil {
+			return nil, fmt.Errorf("scan split event: %w", err)
+		}
+		ev.Date = ev.Date.UTC()
+		splits = append(splits, ev)
+	}
+	return splits, rows.Err()
+}
+
+// listAllSplits returns every recorded split event keyed by symbol. Used by
+// RecalculateHoldings to normalise the full transaction set in one pass.
+func (s *PostgresStore) listAllSplits(ctx context.Context) (map[string][]SplitEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT symbol, split_date, factor FROM stock_splits ORDER BY symbol, split_date ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list all splits: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[string][]SplitEvent)
+	for rows.Next() {
+		var sym string
+		var ev SplitEvent
+		if err := rows.Scan(&sym, &ev.Date, &ev.Factor); err != nil {
+			return nil, fmt.Errorf("scan split row: %w", err)
+		}
+		ev.Date = ev.Date.UTC()
+		out[sym] = append(out[sym], ev)
+	}
+	return out, rows.Err()
+}
+
+// UpsertSplit persists a split event for the given symbol. It is idempotent:
+// re-inserting the same (symbol, split_date) with the same factor is a no-op.
+func (s *PostgresStore) UpsertSplit(ctx context.Context, symbol string, splitDate time.Time, factor float64) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO stock_splits (symbol, split_date, factor)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (symbol, split_date) DO UPDATE SET factor = EXCLUDED.factor
+	`, symbol, splitDate.UTC().Truncate(24*time.Hour), factor)
+	if err != nil {
+		return fmt.Errorf("upsert split %s %s: %w", symbol, splitDate.Format("2006-01-02"), err)
 	}
 	return nil
 }

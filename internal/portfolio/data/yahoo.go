@@ -29,12 +29,6 @@ func NewYahooProvider(client *http.Client) *YahooProvider {
 	return &YahooProvider{client: client, baseURL: defaultYahooBaseURL}
 }
 
-func newYahooProviderWithBaseURL(client *http.Client, baseURL string) *YahooProvider {
-	provider := NewYahooProvider(client)
-	provider.baseURL = strings.TrimRight(baseURL, "/")
-	return provider
-}
-
 // GetEOD returns daily candles including adjusted close and corporate action fields.
 func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, error) {
 	ticker = strings.TrimSpace(ticker)

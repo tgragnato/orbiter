@@ -14,7 +14,7 @@ func TestComputeHoldingStatesSingleBuy(t *testing.T) {
 		{Symbol: "VWCE.MI", Type: TransactionBuy, Quantity: 10, Price: 100, Fee: 2,
 			AllocationType: AllocationCore, ExecutedAt: txBase},
 	}
-	states := ComputeHoldingStates(txs)
+	states := ComputeHoldingStates(txs, nil)
 	s := states["VWCE.MI"]
 	if s.Quantity != 10 {
 		t.Fatalf("qty = %f, want 10", s.Quantity)
@@ -36,7 +36,7 @@ func TestComputeHoldingStatesAccumulateBuys(t *testing.T) {
 		{Symbol: "X", Type: TransactionBuy, Quantity: 5, Price: 110, Fee: 0,
 			AllocationType: AllocationSatellite, ExecutedAt: txBase.Add(time.Hour)},
 	}
-	states := ComputeHoldingStates(txs)
+	states := ComputeHoldingStates(txs, nil)
 	s := states["X"]
 	if s.Quantity != 15 {
 		t.Fatalf("qty = %f, want 15", s.Quantity)
@@ -56,7 +56,7 @@ func TestComputeHoldingStatesPartialSell(t *testing.T) {
 		{Symbol: "X", Type: TransactionSell, Quantity: 4, Price: 120, Fee: 0,
 			AllocationType: AllocationSatellite, ExecutedAt: txBase.Add(time.Hour)},
 	}
-	states := ComputeHoldingStates(txs)
+	states := ComputeHoldingStates(txs, nil)
 	s := states["X"]
 	if s.Quantity != 6 {
 		t.Fatalf("qty = %f, want 6", s.Quantity)
@@ -75,7 +75,7 @@ func TestComputeHoldingStatesFullSellResetsState(t *testing.T) {
 		{Symbol: "X", Type: TransactionSell, Quantity: 10, Price: 120, Fee: 0,
 			AllocationType: AllocationSatellite, ExecutedAt: txBase.Add(time.Hour)},
 	}
-	states := ComputeHoldingStates(txs)
+	states := ComputeHoldingStates(txs, nil)
 	s := states["X"]
 	if s.Quantity != 0 {
 		t.Fatalf("qty = %f, want 0 after full close", s.Quantity)
@@ -96,7 +96,7 @@ func TestComputeHoldingStatesReopenAfterClose(t *testing.T) {
 		{Symbol: "X", Type: TransactionBuy, Quantity: 5, Price: 130, Fee: 2,
 			AllocationType: AllocationCore, ExecutedAt: txBase.Add(2 * time.Hour)},
 	}
-	states := ComputeHoldingStates(txs)
+	states := ComputeHoldingStates(txs, nil)
 	s := states["X"]
 	if s.Quantity != 5 {
 		t.Fatalf("qty = %f, want 5", s.Quantity)
@@ -118,7 +118,7 @@ func TestComputeHoldingStatesMultipleSymbols(t *testing.T) {
 		{Symbol: "B", Type: TransactionBuy, Quantity: 3, Price: 200, Fee: 0,
 			AllocationType: AllocationSatellite, ExecutedAt: txBase},
 	}
-	states := ComputeHoldingStates(txs)
+	states := ComputeHoldingStates(txs, nil)
 	if len(states) != 2 {
 		t.Fatalf("states len = %d, want 2", len(states))
 	}
@@ -139,7 +139,7 @@ func TestComputeHoldingStatesOversellClampsToZero(t *testing.T) {
 		{Symbol: "X", Type: TransactionSell, Quantity: 10, Price: 110, Fee: 0,
 			AllocationType: AllocationSatellite, ExecutedAt: txBase.Add(time.Hour)},
 	}
-	states := ComputeHoldingStates(txs)
+	states := ComputeHoldingStates(txs, nil)
 	s := states["X"]
 	if s.Quantity != 0 {
 		t.Fatalf("qty = %f, want 0 after oversell", s.Quantity)
@@ -151,7 +151,7 @@ func TestComputeHoldingStatesOversellClampsToZero(t *testing.T) {
 
 func TestComputeHoldingStatesEmptyInput(t *testing.T) {
 	t.Parallel()
-	states := ComputeHoldingStates(nil)
+	states := ComputeHoldingStates(nil, nil)
 	if len(states) != 0 {
 		t.Fatalf("states len = %d, want 0", len(states))
 	}

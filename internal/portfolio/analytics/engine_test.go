@@ -73,6 +73,23 @@ func (f *fakeRepository) SignedCashFlowBetween(_ context.Context, _ string, from
 	return f.cashFlows[key], nil
 }
 
+func (f *fakeRepository) BackfillTransactionFlows(_ context.Context, _ string, _ []TransactionFlow) error {
+	return nil
+}
+
+func (f *fakeRepository) LastSnapshotAt(_ context.Context, _ string) (time.Time, bool, error) {
+	if len(f.snapshots) == 0 {
+		return time.Time{}, false, nil
+	}
+	last := f.snapshots[0].SnapshotAt
+	for _, s := range f.snapshots[1:] {
+		if s.SnapshotAt.After(last) {
+			last = s.SnapshotAt
+		}
+	}
+	return last, true, nil
+}
+
 func TestCalculateTWRPACStyleFlows(t *testing.T) {
 	t.Parallel()
 
