@@ -148,6 +148,9 @@ func (m SettingsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		// Settings renders plain text; terminal dimensions are not needed.
+		return m, nil
 	case settingsActivateMsg:
 		m.focused = settingFieldCoreRatio
 		cmd := m.coreInput.Focus()

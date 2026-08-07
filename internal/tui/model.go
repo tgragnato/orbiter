@@ -203,6 +203,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.WindowSizeMsg:
 			m.width = msg.Width
 			m.height = msg.Height
+			m.table.SetWidth(max(40, msg.Width-4))
+			m.table.SetHeight(max(3, msg.Height-24))
 			return m, nil
 
 		default:

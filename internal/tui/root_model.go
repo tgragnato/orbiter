@@ -27,6 +27,8 @@ type RootModel struct {
 	transactionsTab TransactionsTabModel
 	activeTab       int
 	quitting        bool
+	width           int
+	height          int
 
 	tabStyle stylesRoot
 }
@@ -126,6 +128,56 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(txChangedMsg); ok {
 		m.holdingsTab.loading = true
 		return m, m.holdingsTab.refreshCmd()
+	}
+
+	// WindowSizeMsg must reach every tab, not just the active one. Off-screen tabs
+	// would otherwise keep stale (or zero) dimensions and appear broken when the
+	// user navigates to them. The chrome (tab bar + help line) occupies 2 rows;
+	// the remaining height is forwarded as the content area to each sub-model.
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width = size.Width
+		m.height = size.Height
+		const chromeLines = 2
+		contentH := size.Height - chromeLines
+		if contentH < 0 {
+			contentH = 0
+		}
+		tabMsg := tea.WindowSizeMsg{Width: size.Width, Height: contentH}
+		var cmds []tea.Cmd
+		var cmd tea.Cmd
+		var updated tea.Model
+
+		updated, cmd = m.holdingsTab.Update(tabMsg)
+		if h, ok := updated.(Model); ok {
+			m.holdingsTab = h
+		}
+		cmds = append(cmds, cmd)
+
+		updated, cmd = m.signalsTab.Update(tabMsg)
+		if h, ok := updated.(SignalsTabModel); ok {
+			m.signalsTab = h
+		}
+		cmds = append(cmds, cmd)
+
+		updated, cmd = m.settingsTab.Update(tabMsg)
+		if h, ok := updated.(SettingsTabModel); ok {
+			m.settingsTab = h
+		}
+		cmds = append(cmds, cmd)
+
+		updated, cmd = m.logsTab.Update(tabMsg)
+		if h, ok := updated.(LogsTabModel); ok {
+			m.logsTab = h
+		}
+		cmds = append(cmds, cmd)
+
+		updated, cmd = m.transactionsTab.Update(tabMsg)
+		if h, ok := updated.(TransactionsTabModel); ok {
+			m.transactionsTab = h
+		}
+		cmds = append(cmds, cmd)
+
+		return m, tea.Batch(cmds...)
 	}
 
 	switch m.activeTab {

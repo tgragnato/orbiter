@@ -91,6 +91,9 @@ func (m SignalsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		// The signals tab renders plain text; terminal dimensions are not needed.
+		return m, nil
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "p":
