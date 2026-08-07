@@ -125,7 +125,7 @@ func TestSettingsTabCostBasisCycle(t *testing.T) {
 
 	m := NewSettingsTabModel(nil)
 	// Navigate to cost basis field.
-	for i := 0; i < settingFieldCostBasis; i++ {
+	for range settingFieldCostBasis {
 		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 		m = updated.(SettingsTabModel)
 	}

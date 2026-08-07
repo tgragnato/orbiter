@@ -97,16 +97,6 @@ type styles struct {
 	satelliteBad lipgloss.Style
 }
 
-// NewModel builds a holdings table model.
-func NewModel(store portfolio.HoldingsStore) Model {
-	return NewModelWithMetrics(store, defaultPortfolioID)
-}
-
-// NewModelWithMetrics builds a holdings model with an explicit portfolio ID.
-func NewModelWithMetrics(store portfolio.HoldingsStore, portfolioID string) Model {
-	return newModelCore(store, nil, portfolioID)
-}
-
 // NewModelWithAll builds a holdings model with all optional dependencies,
 // including a TransactionStore that enables the 'a: add trade' keybinding.
 func NewModelWithAll(store portfolio.HoldingsStore, txStore portfolio.TransactionStore, portfolioID string) Model {

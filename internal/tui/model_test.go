@@ -63,7 +63,7 @@ func (s *fakeHoldingsStore) TotalRealizedPnL(context.Context) (float64, error) {
 func TestModelInitReturnsBatchCmd(t *testing.T) {
 	t.Parallel()
 
-	model := NewModel(&fakeHoldingsStore{})
+	model := NewModelWithAll(&fakeHoldingsStore{}, nil, defaultPortfolioID)
 	if cmd := model.Init(); cmd == nil {
 		t.Fatalf("Init() cmd = nil, want non-nil")
 	}
@@ -77,7 +77,7 @@ func TestModelRefreshLoadsRowsAndSummary(t *testing.T) {
 		{ID: 2, Symbol: "ZPRV.DE", Quantity: 1, MarketPrice: 50, AllocationType: portfolio.AllocationSatellite},
 	}}
 
-	m := NewModel(store)
+	m := NewModelWithAll(store, nil, defaultPortfolioID)
 	msg := m.refreshCmd()()
 	updated, _ := m.Update(msg)
 	model := updated.(Model)
@@ -107,7 +107,7 @@ func TestModelToggleFlowUpdatesAllocationAndSummary(t *testing.T) {
 		realizedPnL: 80,
 	}
 
-	m := NewModelWithMetrics(store, "MAIN")
+	m := NewModelWithAll(store, nil, "MAIN")
 	updated, _ := m.Update(m.refreshCmd()())
 	m = updated.(Model)
 
@@ -153,7 +153,7 @@ func TestModelToggleError(t *testing.T) {
 		holdings:  []portfolio.Holding{{ID: 10, Symbol: "AAA", Quantity: 1, MarketPrice: 10, AllocationType: portfolio.AllocationCore}},
 		toggleErr: errors.New("toggle failed"),
 	}
-	m := NewModel(store)
+	m := NewModelWithAll(store, nil, defaultPortfolioID)
 	updated, _ := m.Update(m.refreshCmd()())
 	m = updated.(Model)
 
@@ -173,7 +173,7 @@ func TestModelToggleError(t *testing.T) {
 func TestModelWindowResizeAndQuit(t *testing.T) {
 	t.Parallel()
 
-	m := NewModel(&fakeHoldingsStore{})
+	m := NewModelWithAll(&fakeHoldingsStore{}, nil, defaultPortfolioID)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = updated.(Model)
 	if m.table.Width() != 96 {
@@ -204,7 +204,7 @@ func TestModelRefreshError(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeHoldingsStore{listErr: errors.New("load fail")}
-	m := NewModel(store)
+	m := NewModelWithAll(store, nil, defaultPortfolioID)
 	updated, _ := m.Update(m.refreshCmd()())
 	m = updated.(Model)
 	if m.loadError == nil {
@@ -215,7 +215,7 @@ func TestModelRefreshError(t *testing.T) {
 func TestUpdateWithTickSchedulesRefreshWhenIdle(t *testing.T) {
 	t.Parallel()
 
-	m := NewModel(&fakeHoldingsStore{})
+	m := NewModelWithAll(&fakeHoldingsStore{}, nil, defaultPortfolioID)
 	m.loading = false
 	updated, cmd := m.Update(tickMsg(time.Now()))
 	m = updated.(Model)
@@ -237,7 +237,7 @@ func TestModelSummaryIncludesUnrealizedAndRealizedPnL(t *testing.T) {
 		},
 		realizedPnL: 45.67,
 	}
-	m := NewModelWithMetrics(store, "MAIN")
+	m := NewModelWithAll(store, nil, "MAIN")
 	updated, _ := m.Update(m.refreshCmd()())
 	m = updated.(Model)
 
@@ -268,7 +268,7 @@ func TestMaxHelper(t *testing.T) {
 func TestToggleCmdNilStore(t *testing.T) {
 	t.Parallel()
 
-	m := NewModel(nil)
+	m := NewModelWithAll(nil, nil, defaultPortfolioID)
 	msg := m.toggleCmd(42)()
 	toggled, ok := msg.(toggledMsg)
 	if !ok {
@@ -290,7 +290,7 @@ func TestModelTAAToggle(t *testing.T) {
 			{ID: 1, Symbol: "VWCE.DE", Quantity: 2, MarketPrice: 100, AllocationType: portfolio.AllocationCore, TAAEnabled: true},
 		},
 	}
-	m := NewModel(store)
+	m := NewModelWithAll(store, nil, defaultPortfolioID)
 	updated, _ := m.Update(m.refreshCmd()())
 	m = updated.(Model)
 
@@ -319,7 +319,7 @@ func TestModelTAAToggleError(t *testing.T) {
 		holdings:     []portfolio.Holding{{ID: 1, Symbol: "AAA", Quantity: 1, MarketPrice: 10, AllocationType: portfolio.AllocationCore, TAAEnabled: true}},
 		taaToggleErr: errors.New("taa toggle failed"),
 	}
-	m := NewModel(store)
+	m := NewModelWithAll(store, nil, defaultPortfolioID)
 	updated, _ := m.Update(m.refreshCmd()())
 	m = updated.(Model)
 
@@ -340,7 +340,7 @@ func TestModelClosedHoldingRendered(t *testing.T) {
 		{ID: 1, Symbol: "OPEN", Quantity: 2, MarketPrice: 100, AllocationType: portfolio.AllocationCore, TAAEnabled: true},
 		{ID: 2, Symbol: "CLOSED", Quantity: 0, MarketPrice: 80, AllocationType: portfolio.AllocationSatellite, TAAEnabled: false},
 	}}
-	m := NewModel(store)
+	m := NewModelWithAll(store, nil, defaultPortfolioID)
 	updated, _ := m.Update(m.refreshCmd()())
 	m = updated.(Model)
 

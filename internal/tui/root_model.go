@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tgragnato/orbiter/internal/portfolio"
+	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
 	innersignal "github.com/tgragnato/orbiter/internal/signal"
 )
 
@@ -15,7 +16,8 @@ const (
 	tabSettings
 	tabLogs
 	tabTransactions
-	tabCount = 5
+	tabAnalytics
+	tabCount = 6
 )
 
 // RootModel hosts Tab 1 (holdings), Tab 2 (signals), Tab 3 (settings), Tab 4 (logs), and Tab 5 (transactions).
@@ -25,6 +27,7 @@ type RootModel struct {
 	settingsTab     SettingsTabModel
 	logsTab         LogsTabModel
 	transactionsTab TransactionsTabModel
+	analyticsTab    AnalyticsTabModel
 	activeTab       int
 	quitting        bool
 	width           int
@@ -39,11 +42,6 @@ type stylesRoot struct {
 	help        lipgloss.Style
 }
 
-// NewRootModel builds the root TUI model without analytics or settings.
-func NewRootModel(store portfolio.HoldingsStore, readModel innersignal.ReadModel) RootModel {
-	return NewRootModelWithMetrics(store, readModel, defaultPortfolioID, nil, nil, nil, nil)
-}
-
 // NewRootModelWithMetrics builds the root model with optional configuration and log channel.
 func NewRootModelWithMetrics(
 	store portfolio.HoldingsStore,
@@ -53,6 +51,7 @@ func NewRootModelWithMetrics(
 	txStore portfolio.TransactionStore,
 	configSvc SettingsService,
 	logCh LogChannel,
+	twrEngine *analytics.TWREngine,
 ) RootModel {
 	// Upgrade txStore to a TransactionEditor if the underlying implementation supports it.
 	var txEditor TransactionEditor
@@ -65,6 +64,7 @@ func NewRootModelWithMetrics(
 		settingsTab:     NewSettingsTabModel(configSvc),
 		logsTab:         NewLogsTabModel(logCh),
 		transactionsTab: NewTransactionsTabModel(txEditor),
+		analyticsTab:    NewAnalyticsTabModel(twrEngine, portfolioID),
 		activeTab:       tabHoldings,
 		tabStyle: stylesRoot{
 			activeTab:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33")),
@@ -138,10 +138,7 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = size.Width
 		m.height = size.Height
 		const chromeLines = 2
-		contentH := size.Height - chromeLines
-		if contentH < 0 {
-			contentH = 0
-		}
+		contentH := max(size.Height-chromeLines, 0)
 		tabMsg := tea.WindowSizeMsg{Width: size.Width, Height: contentH}
 		var cmds []tea.Cmd
 		var cmd tea.Cmd
@@ -174,6 +171,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		updated, cmd = m.transactionsTab.Update(tabMsg)
 		if h, ok := updated.(TransactionsTabModel); ok {
 			m.transactionsTab = h
+		}
+		cmds = append(cmds, cmd)
+
+		updated, cmd = m.analyticsTab.Update(tabMsg)
+		if h, ok := updated.(AnalyticsTabModel); ok {
+			m.analyticsTab = h
 		}
 		cmds = append(cmds, cmd)
 
@@ -211,6 +214,12 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.transactionsTab = next
 		}
 		return m, cmd
+	case tabAnalytics:
+		updated, cmd := m.analyticsTab.Update(msg)
+		if next, ok := updated.(AnalyticsTabModel); ok {
+			m.analyticsTab = next
+		}
+		return m, cmd
 	}
 	return m, nil
 }
@@ -227,6 +236,8 @@ func (m RootModel) initActiveTab() tea.Cmd {
 		return nil
 	case tabTransactions:
 		return m.transactionsTab.Init()
+	case tabAnalytics:
+		return m.analyticsTab.Init()
 	}
 	return nil
 }
@@ -245,6 +256,7 @@ func (m RootModel) View() string {
 		{"3: Settings", tabSettings},
 		{"4: Logs", tabLogs},
 		{"5: Transactions", tabTransactions},
+		{"6: Analytics", tabAnalytics},
 	}
 
 	tabParts := make([]string, len(tabDefs))
@@ -256,7 +268,7 @@ func (m RootModel) View() string {
 			tabParts[i] = m.tabStyle.inactiveTab.Render(label)
 		}
 	}
-	header := tabParts[0] + "  " + tabParts[1] + "  " + tabParts[2] + "  " + tabParts[3] + "  " + tabParts[4]
+	header := tabParts[0] + "  " + tabParts[1] + "  " + tabParts[2] + "  " + tabParts[3] + "  " + tabParts[4] + "  " + tabParts[5]
 	help := m.tabStyle.help.Render("tab/l: next · shift+tab/h: prev · q: quit")
 
 	var body string
@@ -269,6 +281,8 @@ func (m RootModel) View() string {
 		body = m.logsTab.View()
 	case tabTransactions:
 		body = m.transactionsTab.View()
+	case tabAnalytics:
+		body = m.analyticsTab.View()
 	default:
 		body = m.holdingsTab.View()
 	}

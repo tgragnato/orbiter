@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/tgragnato/orbiter/internal/configuration"
 	"github.com/tgragnato/orbiter/internal/portfolio"
+	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
 	"github.com/tgragnato/orbiter/internal/signal"
 	"github.com/tgragnato/orbiter/internal/tui"
 )
@@ -79,7 +80,6 @@ func TestParseConfig(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			lookup := func(key string) string {
@@ -161,7 +161,7 @@ func TestRunUsesOpenAndBootstrap(t *testing.T) { //nolint:paralleltest // mutate
 		}
 		return &fakeHoldingsStoreForStartup{}
 	}
-	newRootModelFn = func(store portfolio.HoldingsStore, readModel signal.ReadModel, _ tui.MLEngine, _ portfolio.TransactionStore, _ tui.SettingsService, _ tui.LogChannel) tea.Model {
+	newRootModelFn = func(store portfolio.HoldingsStore, readModel signal.ReadModel, _ tui.MLEngine, _ portfolio.TransactionStore, _ tui.SettingsService, _ tui.LogChannel, _ *analytics.TWREngine) tea.Model {
 		rootCalls++
 		if store == nil {
 			t.Fatalf("store = nil")
@@ -308,7 +308,7 @@ func TestRunProgramError(t *testing.T) { //nolint:paralleltest // mutates packag
 	}
 	newSignalRTFn = signal.NewRuntime
 	newStoreFn = func(_ *sql.DB) portfolio.HoldingsStore { return &fakeHoldingsStoreForStartup{} }
-	newRootModelFn = func(_ portfolio.HoldingsStore, _ signal.ReadModel, _ tui.MLEngine, _ portfolio.TransactionStore, _ tui.SettingsService, _ tui.LogChannel) tea.Model {
+	newRootModelFn = func(store portfolio.HoldingsStore, readModel signal.ReadModel, mlEngine tui.MLEngine, txStore portfolio.TransactionStore, configSvc tui.SettingsService, logCh tui.LogChannel, twrEngine *analytics.TWREngine) tea.Model {
 		return stubTeaModel{}
 	}
 	newProgramFn = func(model tea.Model, options ...tea.ProgramOption) programRunner {

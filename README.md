@@ -9,6 +9,7 @@ This repository has been refactored away from direct broker automation into a ke
 - Tab 3: Live settings editor backed by PostgreSQL
 - Tab 4: Structured log viewer (slog stream)
 - Tab 5: Transaction ledger with add/edit support
+- Tab 6: Portfolio analytics (cumulative TWR, drawdown, and rolling Sortino charts)
 - Runtime configuration: database-driven, loaded from PostgreSQL
 
 ## Project Overview
@@ -19,12 +20,13 @@ The runtime architecture is:
 
 1. Start with a PostgreSQL DSN only.
 2. Run schema migrations and bootstrap settings from the database.
-3. Launch a Bubble Tea root model composed of five tabs:
+3. Launch a Bubble Tea root model composed of six tabs:
    1. Holdings — unified Core + Satellite view
    2. Signals — TAA signal queue with ML confidence scores
    3. Settings — live PostgreSQL-backed configuration editor
    4. Logs — structured slog stream
    5. Transactions — ledger with add/edit support
+   6. Analytics — cumulative TWR, drawdown from peak, and rolling Sortino charts
 
 This keeps startup deterministic and centralizes operational configuration in PostgreSQL instead of CLI flag sprawl.
 
@@ -92,6 +94,15 @@ Settings seeded and validated include:
 - Full transaction ledger with keyboard-driven add and edit forms
 - Mutations in this tab trigger an automatic refresh of the holdings tab
 
+### Analytics TUI (Tab 6)
+
+- ASCII charts rendered with `asciigraph`
+- **Cumulative TWR (%)**: geometric chain of all sub-period returns since inception
+- **Drawdown from Peak (%)**: rolling maximum drawdown at each NAV snapshot
+- **Rolling Sortino Ratio**: accumulated over the full return history (MAR = 0, downside deviation only)
+- Summary stat bar: total TWR, CAGR, max drawdown, and current Sortino score
+- `r` key reloads data from PostgreSQL without restarting the application
+
 ### ML Engine
 
 - Random forest regressor trained on 26-feature EOD sample vectors
@@ -155,7 +166,8 @@ main.go
                  ├─ Tab 2: Signals      (signal.ReadModel, ml.Engine)
                  ├─ Tab 3: Settings     (configuration.Service)
                  ├─ Tab 4: Logs         (slog → TUIHandler → LogChannel)
-                 └─ Tab 5: Transactions (TransactionEditor)
+                 ├─ Tab 5: Transactions (TransactionEditor)
+                 └─ Tab 6: Analytics    (analytics.TWREngine → TWR / drawdown / Sortino charts)
 ```
 
 ## Getting Started

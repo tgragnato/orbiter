@@ -123,10 +123,7 @@ func (m LogsTabModel) View() string {
 	visible := m.visibleLines()
 	total := len(m.entries)
 	end := total - m.offset
-	start := end - visible
-	if start < 0 {
-		start = 0
-	}
+	start := max(end-visible, 0)
 	slice := m.entries[start:end]
 
 	lines := make([]string, 0, len(slice)+1)

@@ -18,9 +18,10 @@ import (
 	"github.com/tgragnato/orbiter/internal/configuration"
 	"github.com/tgragnato/orbiter/internal/ml"
 	"github.com/tgragnato/orbiter/internal/portfolio"
+	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
 	"github.com/tgragnato/orbiter/internal/portfolio/data"
-	"github.com/tgragnato/orbiter/internal/portfolio/feed"
 	"github.com/tgragnato/orbiter/internal/portfolio/featurizer"
+	"github.com/tgragnato/orbiter/internal/portfolio/feed"
 	"github.com/tgragnato/orbiter/internal/signal"
 	"github.com/tgragnato/orbiter/internal/signal/taa"
 	signals "github.com/tgragnato/orbiter/internal/tui"
@@ -29,7 +30,6 @@ import (
 type config struct {
 	dsn string
 }
-
 
 var (
 	openPostgresFn = openPostgres
@@ -43,8 +43,9 @@ var (
 		txStore portfolio.TransactionStore,
 		configSvc signals.SettingsService,
 		logCh signals.LogChannel,
+		twrEngine *analytics.TWREngine,
 	) tea.Model {
-		return signals.NewRootModelWithMetrics(store, readModel, "MAIN", mlEngine, txStore, configSvc, logCh)
+		return signals.NewRootModelWithMetrics(store, readModel, "MAIN", mlEngine, txStore, configSvc, logCh, twrEngine)
 	}
 	newProgramFn = func(model tea.Model, options ...tea.ProgramOption) programRunner {
 		return tea.NewProgram(model, options...)
@@ -164,14 +165,33 @@ func runTUI(ctx context.Context, args []string) error {
 		}
 	}()
 
+	analyticsRepo := analytics.NewPostgresRepository(db)
+	twrEngine := analytics.NewTWREngine(analyticsRepo)
+
+	// Enable live cash-flow recording so TWR stays correct within the current
+	// session after AddTransaction, without waiting for the next startup backfill.
+	if ps, ok := store.(*portfolio.PostgresStore); ok {
+		ps.WithPortfolioID("MAIN")
+	}
+
 	// Price feed: refresh EOD quotes every 30 minutes and sync dividend income when
 	// the store supports the DividendSyncer interface (no-op otherwise).
+	// After each refresh a NAV snapshot is recorded so the TWR chart accumulates
+	// data points over time.
 	if priceStore != nil {
 		var priceFeed *feed.Updater
 		if ds, ok := store.(feed.DividendSyncer); ok {
 			priceFeed = feed.NewWithDividendSync(priceStore, ds, yahooProvider, 30*time.Minute)
 		} else {
 			priceFeed = feed.New(priceStore, yahooProvider, 30*time.Minute)
+		}
+		priceFeed.WithNAVSnapshot(store, twrEngine, "MAIN")
+		if bf, ok := store.(feed.NAVBackfiller); ok {
+			priceFeed.WithNAVBackfill(bf)
+			priceFeed.WithCashFlowRecorder(twrEngine)
+		}
+		if sp, ok := store.(feed.SplitPersister); ok {
+			priceFeed.WithSplitPersister(sp)
 		}
 		go priceFeed.Run(ctx)
 	}
@@ -181,7 +201,7 @@ func runTUI(ctx context.Context, args []string) error {
 	if configSvc != nil {
 		settingsSvc = configSvc
 	}
-	rootModel := newRootModelFn(store, signalRuntime.ReadModel, runner, txStore, settingsSvc, logCh)
+	rootModel := newRootModelFn(store, signalRuntime.ReadModel, runner, txStore, settingsSvc, logCh, twrEngine)
 	program := newProgramFn(rootModel, tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("tui runtime failed: %w", err)

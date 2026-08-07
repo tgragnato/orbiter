@@ -14,7 +14,7 @@ func TestSignalsTabRefreshAndView(t *testing.T) {
 	rm := fakeSignalReadModel{
 		messages: []signal.Message{{Type: signal.TypeBuy, Summary: "Buy EURUSD", CreatedAt: time.Unix(1000, 0).UTC()}},
 	}
-	model := NewSignalsTabModel(rm)
+	model := NewSignalsTabModelWithML(rm, nil)
 
 	updated, _ := model.Update(model.refreshCmd()())
 	model = updated.(SignalsTabModel)
@@ -30,7 +30,7 @@ func TestSignalsTabRefreshAndView(t *testing.T) {
 func TestSignalsTabTickCmd(t *testing.T) {
 	t.Parallel()
 
-	model := NewSignalsTabModel(fakeSignalReadModel{})
+	model := NewSignalsTabModelWithML(fakeSignalReadModel{}, nil)
 	updated, cmd := model.Update(signalsTickMsg(time.Now()))
 	_ = updated.(SignalsTabModel)
 	if cmd == nil {
@@ -47,7 +47,7 @@ func TestSignalsTabTickCmd(t *testing.T) {
 func TestSignalsTabQuitStopsCommands(t *testing.T) {
 	t.Parallel()
 
-	model := NewSignalsTabModel(fakeSignalReadModel{})
+	model := NewSignalsTabModelWithML(fakeSignalReadModel{}, nil)
 	model.quit = true
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 	_ = updated.(SignalsTabModel)
@@ -59,7 +59,7 @@ func TestSignalsTabQuitStopsCommands(t *testing.T) {
 func TestSignalsTabQuitView(t *testing.T) {
 	t.Parallel()
 
-	model := NewSignalsTabModel(fakeSignalReadModel{})
+	model := NewSignalsTabModelWithML(fakeSignalReadModel{}, nil)
 	model.quit = true
 	if got := model.View(); got != "" {
 		t.Fatalf("View() while quit = %q, want empty", got)
@@ -69,7 +69,7 @@ func TestSignalsTabQuitView(t *testing.T) {
 func TestSignalsTabNilReadModelRefreshCmd(t *testing.T) {
 	t.Parallel()
 
-	model := NewSignalsTabModel(nil)
+	model := NewSignalsTabModelWithML(nil, nil)
 	msg := model.refreshCmd()()
 	sm, ok := msg.(signalsMsg)
 	if !ok {
@@ -89,7 +89,7 @@ func TestSignalsTabViewWithMessages(t *testing.T) {
 			{Type: signal.TypeSell, Summary: "Sell ZPRV", CreatedAt: time.Unix(2000, 0).UTC()},
 		},
 	}
-	model := NewSignalsTabModel(rm)
+	model := NewSignalsTabModelWithML(rm, nil)
 	updated, _ := model.Update(model.refreshCmd()())
 	model = updated.(SignalsTabModel)
 

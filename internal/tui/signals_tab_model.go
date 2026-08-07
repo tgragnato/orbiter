@@ -60,11 +60,6 @@ type signalStyles struct {
 	mlTitle lipgloss.Style
 }
 
-// NewSignalsTabModel creates the Tab 2 signal queue model.
-func NewSignalsTabModel(readModel innersignal.ReadModel) SignalsTabModel {
-	return NewSignalsTabModelWithML(readModel, nil)
-}
-
 // NewSignalsTabModelWithML creates the Tab 2 model with optional ML status.
 func NewSignalsTabModelWithML(readModel innersignal.ReadModel, ml MLEngine) SignalsTabModel {
 	return SignalsTabModel{
