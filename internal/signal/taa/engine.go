@@ -171,8 +171,3 @@ func (NullPMCReader) PMC(_ context.Context, _ string) (float64, error) {
 	return 0, fmt.Errorf("no PMC reader configured")
 }
 
-// ConstantConviction returns the same conviction score for every symbol.
-// Useful for testing and for wiring before the ML engine has trained.
-type ConstantConviction struct{ V float64 }
-
-func (c ConstantConviction) Conviction(_ string) float64 { return c.V }

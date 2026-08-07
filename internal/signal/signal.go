@@ -11,18 +11,14 @@ import (
 type Type string
 
 const (
-	// TypeBuy requests opening a new position.
+	// TypeBuy suggests opening a new satellite position not currently held.
 	TypeBuy Type = "BUY"
-	// TypeSell requests closing an open position.
+	// TypeSell suggests closing an existing satellite position entirely.
 	TypeSell Type = "SELL"
-	// TypeCancelOrder requests canceling an open order.
-	TypeCancelOrder Type = "CANCEL_ORDER"
 	// TypeRebalance requests applying a target allocation change.
 	TypeRebalance Type = "REBALANCE"
 	// TypeCorePMCFloorAlert fires when a Core holding price falls to or below PMC.
 	TypeCorePMCFloorAlert Type = "CORE_PMC_FLOOR_ALERT"
-	// TypeEntry suggests opening a new satellite position not currently held.
-	TypeEntry Type = "ENTRY"
 )
 
 // Message is an execution intent emitted by trader/strategy and consumed by UI.
@@ -44,43 +40,6 @@ type Dispatcher interface {
 	Dispatch(message Message) error
 }
 
-// NewBuyMessage builds a buy signal from an order.
-func NewBuyMessage(now time.Time, order broker.Order) Message {
-	copyOrder := order
-	return Message{
-		Type:       TypeBuy,
-		CreatedAt:  now,
-		Instrument: order.Instrument,
-		Summary:    fmt.Sprintf("Buy %s %.2f", order.Direction, order.Size),
-		Order:      &copyOrder,
-	}
-}
-
-// NewSellMessage builds a sell signal from a position.
-func NewSellMessage(now time.Time, position broker.Position) Message {
-	copyPosition := position
-	return Message{
-		Type:       TypeSell,
-		CreatedAt:  now,
-		Instrument: position.Instrument,
-		Summary:    fmt.Sprintf("Sell %s %.2f", position.BuyDirection, position.Size),
-		Position:   &copyPosition,
-	}
-}
-
-// NewCancelOrderMessage builds an order cancellation signal.
-func NewCancelOrderMessage(now time.Time, order broker.Order) Message {
-	copyOrder := order
-	return Message{
-		Type:       TypeCancelOrder,
-		CreatedAt:  now,
-		Instrument: order.Instrument,
-		Summary:    fmt.Sprintf("Cancel order %s", order.ID),
-		OrderID:    order.ID,
-		Order:      &copyOrder,
-	}
-}
-
 // NewRebalanceMessage builds a tactical rebalance signal for a Satellite holding.
 func NewRebalanceMessage(now time.Time, symbol string, conviction float64, direction string, currentWeight, targetWeight, deltaEUR float64) Message {
 	return Message{
@@ -94,21 +53,40 @@ func NewRebalanceMessage(now time.Time, symbol string, conviction float64, direc
 	}
 }
 
-// NewEntryMessage suggests opening a new satellite position for a symbol not currently held.
+// NewBuyMessage suggests opening a new satellite position for a symbol not currently held.
 // targetWeight is the suggested allocation as a fraction of total satellite NAV; deltaEUR is
 // the recommended investment amount.
-func NewEntryMessage(now time.Time, symbol string, conviction, targetWeight, deltaEUR float64) Message {
+func NewBuyMessage(now time.Time, symbol string, conviction, targetWeight, deltaEUR float64) Message {
 	direction := "long"
 	if conviction < 0 {
 		direction = "short"
 	}
 	return Message{
-		Type:         TypeEntry,
+		Type:         TypeBuy,
 		CreatedAt:    now,
 		Instrument:   symbol,
 		Summary:      fmt.Sprintf("Entry %s %s target %.1f%% (Δ%.0f€, conviction %.2f)", symbol, direction, targetWeight*100, deltaEUR, conviction),
 		TargetWeight: targetWeight,
 		DeltaEUR:     deltaEUR,
+	}
+}
+
+// NewSellMessage suggests closing an existing satellite position entirely.
+// currentWeight is the holding's current allocation as a fraction of total satellite NAV;
+// deltaEUR is the recovered amount (negative: selling reduces exposure).
+func NewSellMessage(now time.Time, symbol string, conviction, currentWeight, deltaEUR float64) Message {
+	direction := "long"
+	if conviction < 0 {
+		direction = "short"
+	}
+	return Message{
+		Type:          TypeSell,
+		CreatedAt:     now,
+		Instrument:    symbol,
+		Summary:       fmt.Sprintf("Exit %s %s from %.1f%% (Δ%.0f€, conviction %.2f)", symbol, direction, currentWeight*100, deltaEUR, conviction),
+		CurrentWeight: currentWeight,
+		TargetWeight:  0,
+		DeltaEUR:      deltaEUR,
 	}
 }
 

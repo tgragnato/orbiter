@@ -52,7 +52,7 @@ func TestEvaluateEntriesEmitsForUnownedHighConviction(t *testing.T) {
 	if msgs[0].Instrument != "B" {
 		t.Errorf("expected entry signal for B, got %q", msgs[0].Instrument)
 	}
-	if msgs[0].Type != signal.TypeEntry {
+	if msgs[0].Type != signal.TypeBuy {
 		t.Errorf("expected TypeEntry, got %q", msgs[0].Type)
 	}
 }
@@ -106,7 +106,7 @@ func TestEvaluateEntriesNegativeConvictionEmitsEntry(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 entry signal for short direction, got %d", len(msgs))
 	}
-	if msgs[0].Type != signal.TypeEntry {
+	if msgs[0].Type != signal.TypeBuy {
 		t.Errorf("expected TypeEntry, got %q", msgs[0].Type)
 	}
 }
@@ -128,7 +128,7 @@ func TestEvaluateEntriesEngineIntegration(t *testing.T) {
 
 	var entries []signal.Message
 	for _, m := range dispatch.dispatched {
-		if m.Type == signal.TypeEntry {
+		if m.Type == signal.TypeBuy {
 			entries = append(entries, m)
 		}
 	}

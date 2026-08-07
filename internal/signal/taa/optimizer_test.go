@@ -150,22 +150,28 @@ func TestOptimizerNegativeConvictionReducesToZeroWeight(t *testing.T) {
 	}
 }
 
-func TestOptimizerAllNegativeConvictionFallsBackToEqualWeight(t *testing.T) {
+func TestOptimizerAllNegativeConvictionEmitsExits(t *testing.T) {
 	t.Parallel()
-	// All conviction=-1 → total raw = 0 → fall back to equal weight
+	// All conviction=-1 → rawWeight=0 for both → both emitted as TypeSell
 	holdings := []portfolio.Holding{
 		{Symbol: "A", Quantity: 10, MarketPrice: 100, AllocationType: portfolio.AllocationSatellite, TAAEnabled: true},
 		{Symbol: "B", Quantity: 10, MarketPrice: 100, AllocationType: portfolio.AllocationSatellite, TAAEnabled: true},
 	}
 	msgs := optimizeSatellite(holdings, perSymbolConviction{"A": -1.0, "B": -1.0}, Config{Buffer: 0.01}, testNow)
 
-	// Both pass friction (abs(1) > 0.01) and get equal weight (0.5 each)
+	// Both pass friction (abs(-1)=1 > 0.01) and are emitted as exit signals.
 	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages (fallback equal weight), got %d", len(msgs))
+		t.Fatalf("expected 2 exit messages, got %d", len(msgs))
 	}
 	for _, m := range msgs {
-		if math.Abs(m.TargetWeight-0.5) > 1e-9 {
-			t.Errorf("%s: target weight = %.4f, want 0.5 (equal fallback)", m.Instrument, m.TargetWeight)
+		if m.Type != signal.TypeSell {
+			t.Errorf("%s: expected TypeSell, got %q", m.Instrument, m.Type)
+		}
+		if m.TargetWeight != 0 {
+			t.Errorf("%s: target weight = %.4f, want 0 (full exit)", m.Instrument, m.TargetWeight)
+		}
+		if m.DeltaEUR >= 0 {
+			t.Errorf("%s: deltaEUR = %.2f, want negative (selling)", m.Instrument, m.DeltaEUR)
 		}
 	}
 }

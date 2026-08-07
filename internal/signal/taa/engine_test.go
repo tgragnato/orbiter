@@ -171,14 +171,6 @@ func TestNullPMCReader(t *testing.T) {
 	}
 }
 
-func TestConstantConviction(t *testing.T) {
-	t.Parallel()
-	c := ConstantConviction{V: 0.5}
-	if c.Conviction("anything") != 0.5 {
-		t.Error("ConstantConviction should return constant value")
-	}
-}
-
 func TestAbsHelper(t *testing.T) {
 	t.Parallel()
 	if abs(-0.5) != 0.5 {

@@ -19,6 +19,8 @@ import (
 //
 // Normalized: targetWeight[i] = rawWeight[i] / Σ rawWeights
 //
+// Holdings with conviction = -1 (rawWeight = 0) are emitted as TypeSell signals.
+// All other holdings are normalized among themselves and emitted as TypeRebalance signals.
 // A holding is included in the output only when abs(conviction) exceeds the
 // per-holding friction threshold, which accounts for broker fees, capital-gains
 // tax, and the configured safety buffer.
@@ -55,28 +57,21 @@ func optimizeSatellite(
 		return nil
 	}
 
-	// Normalize raw weights to target allocations.
-	totalRaw := 0.0
-	for _, c := range candidates {
-		totalRaw += c.rawWeight
-	}
-
-	// If every conviction is -1 the raw total is 0; fall back to equal weight.
-	if totalRaw == 0 {
-		for i := range candidates {
-			candidates[i].rawWeight = 1
-		}
-		totalRaw = float64(len(candidates))
-	}
-
-	// Build results and apply per-holding friction gate.
-	var msgs []signal.Message
+	// Separate candidates into exits (rawWeight=0, conviction=-1) and keeps.
+	// Exits are emitted as TypeSell; keeps are normalized and emitted as TypeRebalance.
+	var exits, keeps []candidate
 	for _, cand := range candidates {
-		targetWeight := cand.rawWeight / totalRaw
-		currentWeight := cand.h.NAV() / totalNAV
-		deltaEUR := (targetWeight - currentWeight) * totalNAV
+		if cand.rawWeight == 0 {
+			exits = append(exits, cand)
+		} else {
+			keeps = append(keeps, cand)
+		}
+	}
 
-		// Friction: round-trip fee + tax on gains + safety buffer.
+	var msgs []signal.Message
+
+	// Emit exit signals for holdings with conviction = -1.
+	for _, cand := range exits {
 		feeRate := cfg.BrokerFeePercent
 		if cfg.MaxBrokerFeeEUR > 0 {
 			posValue := cand.h.Quantity * cand.h.MarketPrice
@@ -87,25 +82,53 @@ func optimizeSatellite(
 			}
 		}
 		friction := feeRate*(1+cfg.TaxRate) + cfg.Buffer
-
 		if abs(cand.conviction) <= friction {
 			continue
 		}
+		currentWeight := cand.h.NAV() / totalNAV
+		deltaEUR := -currentWeight * totalNAV
+		msgs = append(msgs, signal.NewSellMessage(now, cand.h.Symbol, cand.conviction, currentWeight, deltaEUR))
+	}
 
-		direction := "increase"
-		if cand.conviction < 0 {
-			direction = "decrease"
+	// Normalize keeps and emit rebalance signals.
+	if len(keeps) > 0 {
+		totalRaw := 0.0
+		for _, c := range keeps {
+			totalRaw += c.rawWeight
 		}
+		for _, cand := range keeps {
+			targetWeight := cand.rawWeight / totalRaw
+			currentWeight := cand.h.NAV() / totalNAV
+			deltaEUR := (targetWeight - currentWeight) * totalNAV
 
-		msgs = append(msgs, signal.NewRebalanceMessage(
-			now,
-			cand.h.Symbol,
-			cand.conviction,
-			direction,
-			currentWeight,
-			targetWeight,
-			deltaEUR,
-		))
+			feeRate := cfg.BrokerFeePercent
+			if cfg.MaxBrokerFeeEUR > 0 {
+				posValue := cand.h.Quantity * cand.h.MarketPrice
+				if posValue > 0 {
+					if capped := cfg.MaxBrokerFeeEUR / posValue; capped < feeRate {
+						feeRate = capped
+					}
+				}
+			}
+			friction := feeRate*(1+cfg.TaxRate) + cfg.Buffer
+			if abs(cand.conviction) <= friction {
+				continue
+			}
+
+			direction := "increase"
+			if cand.conviction < 0 {
+				direction = "decrease"
+			}
+			msgs = append(msgs, signal.NewRebalanceMessage(
+				now,
+				cand.h.Symbol,
+				cand.conviction,
+				direction,
+				currentWeight,
+				targetWeight,
+				deltaEUR,
+			))
+		}
 	}
 
 	return msgs

@@ -21,7 +21,7 @@ type SymbolProvider interface {
 // current weight = 0%). This gives a portfolio-consistent target: if you were to
 // open this position, it should represent X% of your satellite NAV.
 //
-// Only symbols with abs(conviction) > friction are emitted as TypeEntry signals.
+// Only symbols with abs(conviction) > friction are emitted as TypeBuy signals.
 func evaluateEntries(
 	holdings []portfolio.Holding,
 	tracked []string,
@@ -122,7 +122,7 @@ func evaluateEntries(
 		targetWeight := cand.rawWeight / totalRaw
 		deltaEUR := targetWeight * totalSatelliteNAV
 
-		msgs = append(msgs, signal.NewEntryMessage(now, cand.symbol, cand.conviction, targetWeight, deltaEUR))
+		msgs = append(msgs, signal.NewBuyMessage(now, cand.symbol, cand.conviction, targetWeight, deltaEUR))
 	}
 
 	return msgs
