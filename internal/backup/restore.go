@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/tgragnato/orbiter/internal/configuration"
 	"github.com/tgragnato/orbiter/internal/portfolio"
 )
 
@@ -59,6 +60,10 @@ func RunRestore(ctx context.Context, args []string, lookupEnv func(string) strin
 			fmt.Fprintf(os.Stderr, "close database: %v\n", err)
 		}
 	}()
+
+	if err := configuration.RunMigrations(ctx, db); err != nil {
+		return fmt.Errorf("run migrations: %w", err)
+	}
 
 	store := portfolio.NewPostgresStore(db)
 
