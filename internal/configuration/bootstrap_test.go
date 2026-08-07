@@ -28,18 +28,6 @@ func TestRunMigrationsSkipsAppliedVersion(t *testing.T) {
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(1).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(2).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(3).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(4).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(5).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(6).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(7).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 
 	if err := RunMigrations(context.Background(), db); err != nil {
 		t.Fatalf("RunMigrations() error = %v", err)
@@ -96,49 +84,7 @@ func TestBootstrap(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectBegin()
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS app_settings").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`)).WithArgs(1, "create_app_settings").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(2).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectBegin()
-	mock.ExpectExec("CREATE TABLE IF NOT EXISTS holdings").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`)).WithArgs(2, "create_holdings_and_allocation_type").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(3).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectBegin()
-	mock.ExpectExec("CREATE TABLE IF NOT EXISTS corporate_actions").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`)).WithArgs(3, "create_corporate_actions_and_accounting_tables").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(4).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectBegin()
-	mock.ExpectExec("CREATE TABLE IF NOT EXISTS cash_flows").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`)).WithArgs(4, "create_twr_analytics_tables").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(5).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectBegin()
-	mock.ExpectExec("CREATE TABLE IF NOT EXISTS ml_model_checkpoints").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`)).WithArgs(5, "create_ml_model_checkpoints").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(6).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectBegin()
-	mock.ExpectExec("ALTER TABLE holdings ADD COLUMN IF NOT EXISTS pmc").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`)).WithArgs(6, "add_transactions_and_pmc").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectCommit()
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`)).WithArgs(7).
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectBegin()
-	mock.ExpectExec("ALTER TABLE holdings ADD COLUMN IF NOT EXISTS taa_enabled").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`)).WithArgs(7, "add_taa_enabled_to_holdings").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`)).WithArgs(1, "initial_schema").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM app_settings`)).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
