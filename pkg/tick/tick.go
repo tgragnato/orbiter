@@ -52,6 +52,9 @@ func (t *Tick) Price() decimal.Decimal {
 }
 
 func (t *Tick) Validate() error {
+	if t.Instrument == "" {
+		return errors.New("empty instrument")
+	}
 	if t.Datetime.IsZero() {
 		return errors.New("empty datetime")
 	}
