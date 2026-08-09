@@ -83,7 +83,7 @@ func (mr *scalper) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broke
 
 	newOrder, err := mr.createOrder(closedCandle, buyDirection, 1)
 	if err != nil {
-		slog.Error("createOrder() failed", "error", err)
+		mr.clog.Error("createOrder() failed", "error", err)
 		return
 	}
 	toOpen = append(toOpen, newOrder)
@@ -159,4 +159,34 @@ func (mr *scalper) Name() string {
 
 func (mr *scalper) String() string {
 	return mr.Name()
+}
+
+// Score returns a continuous conviction in [-1.0, +1.0] based on the number of
+// prior candles that are in the opposite direction of the last candle.
+// The score is calculated as (number of opposite candles / 9.0) * sign.
+func (mr *scalper) Score(closedCandles []*ohlc.OHLC) float64 {
+	total := len(closedCandles)
+	if total <= 1 {
+		return 0
+	}
+
+	last := closedCandles[total-1]
+	lastDir := getBuyDirection(last)
+	oppositeCount := 0
+
+	// Check all prior candles
+	for i := 0; i < total-1; i++ {
+		if getBuyDirection(closedCandles[i]) != lastDir {
+			oppositeCount++
+		}
+	}
+
+	// Calculate continuous score: (opposite count / total-1) * sign
+	score := float64(oppositeCount) / float64(total-1)
+	if lastDir == broker.BuyDirectionLong {
+		// Last candle long, opposite candles are short -> buy signal (positive score)
+		return score
+	}
+	// Last candle short, opposite candles are long -> sell signal (negative score)
+	return -score
 }

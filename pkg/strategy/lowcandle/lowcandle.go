@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/circularbuffer"
 	"github.com/tgragnato/orbiter/pkg/helper"
@@ -219,4 +220,51 @@ func (d *LowCandle) Name() string {
 func (d *LowCandle) String() string {
 	return fmt.Sprintf("%s: Long=%t, Short=%t Target=%.2f%% StopLoss=%.2f%% SMA%d", d.Name(),
 		strategyLongEnabled, strategyShortEnabled, targetInPercent, stopLossInPercent, smaCandles)
+}
+
+// Score returns a continuous conviction in [-1.0, +1.0] based on the current candle's
+// position relative to the historical range (previous lows/highs).
+// A score of +1.0 indicates a strong buy breakout (close significantly below previous lows).
+// A score of -1.0 indicates a strong sell breakout (close significantly above previous highs).
+// A score of 0 indicates the close is within the historical range.
+func (d *LowCandle) Score(closedCandles []*ohlc.OHLC) float64 {
+	if len(closedCandles) == 0 {
+		return 0
+	}
+	closePrice := closedCandles[len(closedCandles)-1].Close
+
+	prevLowFloat, errL := d.previousLows.Min()
+	prevHighFloat, errH := d.previousHighs.Max()
+
+	if errL != nil || errH != nil {
+		return 0
+	}
+
+	// Convert float64 to decimal.Decimal for consistent arithmetic
+	prevLow := decimal.NewFromFloat(prevLowFloat)
+	prevHigh := decimal.NewFromFloat(prevHighFloat)
+
+	// We need a normalization factor. Let's use the total historical range.
+	totalRange := prevHigh.Sub(prevLow)
+
+	if totalRange.Sign() == 0 {
+		return 0
+	}
+
+	// Normalize the distance.
+	// If close < prevLow, score = (prevLow - close) / totalRange (positive)
+	if closePrice.LessThan(prevLow) {
+		scoreDecimal := prevLow.Sub(closePrice).Div(totalRange)
+		score, _ := scoreDecimal.Float64()
+		return score
+	}
+
+	// If close > prevHigh, score = (close - prevHigh) / totalRange (negative)
+	if closePrice.GreaterThan(prevHigh) {
+		scoreDecimal := closePrice.Sub(prevHigh).Div(totalRange)
+		score, _ := scoreDecimal.Float64()
+		return -score
+	}
+
+	return 0
 }

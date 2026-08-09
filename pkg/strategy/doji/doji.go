@@ -42,7 +42,9 @@ func New(instrument string) *Doji {
 	}
 }
 
-func (d *Doji) OnWarmUpCandle(_ *ohlc.OHLC) {}
+func (d *Doji) OnWarmUpCandle(closedCandle *ohlc.OHLC) {
+	d.previousCandle = closedCandle
+}
 
 func (d *Doji) OnPosition(openPositions, _ []broker.Position) {
 	d.openPositions = openPositions
@@ -160,4 +162,51 @@ func (d *Doji) Name() string {
 
 func (d *Doji) String() string {
 	return ""
+}
+
+// Score returns a continuous conviction in [-1.0, +1.0] based on the proximity of the current
+// candle to the DOJI candle's range. If the current candle is a DOJI, the score is 0.
+// If the current candle breaks the range, the score is 1.0 (buy) or -1.0 (sell).
+func (d *Doji) Score(_ []*ohlc.OHLC) float64 {
+	if isDOJI(d.previousCandle) {
+		return 0
+	}
+
+	// Check if the current tick/candle breaks the range
+	// Since Score is called on closed candles, we check the last closed candle
+	lastCandle := d.previousCandle
+	if lastCandle == nil {
+		return 0
+	}
+
+	// Calculate the distance from the DOJI range
+	// If the close is above the high, it's positive (buy).
+	// If the close is below the low, it's negative (sell).
+
+	// We use a sensitivity factor to determine how quickly the score reaches 1.0 or -1.0.
+	// A value of 100 pips (0.0010) is used as a normalization factor for the "strength" of the breakout.
+	sensitivity := decimal.NewFromFloat(0.0010)
+
+	score := decimal.NewFromFloat(0)
+
+	if lastCandle.Close.GreaterThan(lastCandle.High) {
+		// Distance above high
+		dist := lastCandle.Close.Sub(lastCandle.High)
+		// Normalize: score = dist / sensitivity, clamped to 1.0
+		score = dist.Div(sensitivity)
+		if score.GreaterThan(decimal.NewFromFloat(1.0)) {
+			score = decimal.NewFromFloat(1.0)
+		}
+	} else if lastCandle.Close.LessThan(lastCandle.Low) {
+		// Distance below low
+		dist := lastCandle.Low.Sub(lastCandle.Close)
+		// Normalize: score = - (dist / sensitivity), clamped to -1.0
+		score = score.Sub(dist.Div(sensitivity))
+		if score.LessThan(decimal.NewFromFloat(-1.0)) {
+			score = decimal.NewFromFloat(-1.0)
+		}
+	}
+
+	s, _ := score.Float64()
+	return s
 }

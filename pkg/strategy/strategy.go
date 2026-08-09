@@ -49,18 +49,13 @@ type Strategy interface {
 
 	// String describes strategy parameters (stop-loss, target, etc.).
 	String() string
-}
 
-// ScoredStrategy extends Strategy with a continuous conviction score used by the
-// ML ensemble. Score reads from the current indicator state (populated by the most
-// recent OnCandle/OnWarmUpCandle call) without mutating it.
-//
-// Return range: [-1.0, +1.0]
-//
-//	+1.0 = maximum buy/long conviction
-//	 0.0 = neutral / no signal
-//	-1.0 = maximum sell/short conviction
-type ScoredStrategy interface {
-	Strategy
-	Score(candles []*ohlc.OHLC) float64
+	// Score returns a continuous conviction score used by the ML ensemble.
+	// Score reads from the current indicator state (populated by the most recent OnCandle/OnWarmUpCandle call) without mutating it.
+	// Return range: [-1.0, +1.0]
+	//
+	//	+1.0 = maximum buy/long conviction
+	//	 0.0 = neutral / no signal
+	//	-1.0 = maximum sell/short conviction
+	Score(window []*ohlc.OHLC) float64
 }

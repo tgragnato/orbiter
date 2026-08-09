@@ -124,9 +124,9 @@ func candleToOHLC(c data.Candle, symbol string) *ohlc.OHLC {
 
 // newScoredStrategies instantiates one of each ScoredStrategy implementation.
 // All use 24 h as the candle duration (EOD data).
-func newScoredStrategies(symbol string) []strategy.ScoredStrategy {
+func newScoredStrategies(symbol string) []strategy.Strategy {
 	dur := 24 * time.Hour
-	return []strategy.ScoredStrategy{
+	return []strategy.Strategy{
 		stratdoji.New(symbol),
 		stratengulf.New(symbol, dur),
 		stratharami.New(symbol, dur),

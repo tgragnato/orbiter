@@ -24,6 +24,7 @@ const (
 	ohlcPeriod        = time.Minute * 60
 	upperThreshold    = 90
 	lowerThreshold    = 10
+	middleThreshold   = (upperThreshold + lowerThreshold) / 2
 	targetInPercent   = 4.0
 	stopLossInPercent = 0.5
 )
@@ -54,13 +55,18 @@ func (d *RSI) GetCandleDuration() time.Duration {
 	return ohlcPeriod
 }
 
-func (d *RSI) OnWarmUpCandle(_ *ohlc.OHLC) {}
+func (d *RSI) OnWarmUpCandle(closedCandle *ohlc.OHLC) {
+	d.rsi.Insert(closedCandle)
+}
 
 func (d *RSI) GetWarmUpCandleAmount() uint {
-	return 1
+	return 99
 }
 
 func (d *RSI) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
+	if len(closedCandles) == 0 {
+		return
+	}
 	closedCandle := closedCandles[len(closedCandles)-1]
 
 	d.rsi.Insert(closedCandle)
@@ -112,4 +118,28 @@ func (d *RSI) Name() string {
 
 func (d *RSI) String() string {
 	return d.Name()
+}
+
+// Score returns a directional conviction in [-1.0, +1.0] from the average of
+// the StochRSI K and D lines. Above upperThreshold → -1.0; below lowerThreshold
+// → +1.0. Interpolated linearly in between.
+func (d *RSI) Score(_ []*ohlc.OHLC) float64 {
+	rsiValueMap, err := d.rsi.Value()
+	if err != nil {
+		return 0
+	}
+	k := rsiValueMap[stochrsi.ValueK]
+	dv := rsiValueMap[stochrsi.ValueD]
+	avg := (k + dv) / 2.0
+
+	switch {
+	case avg >= upperThreshold:
+		return -1.0
+	case avg <= lowerThreshold:
+		return 1.0
+	case avg < middleThreshold:
+		return (middleThreshold - avg) / (middleThreshold - lowerThreshold)
+	default:
+		return -(avg - middleThreshold) / (upperThreshold - middleThreshold)
+	}
 }

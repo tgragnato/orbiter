@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/circularbuffer"
 	"github.com/tgragnato/orbiter/pkg/helper"
@@ -155,4 +156,55 @@ func (h *Harami) Name() string {
 
 func (h *Harami) String() string {
 	return fmt.Sprintf("%s: Target=%.2f StopLoss=%.2f", h.Name(), targetInPercent, stopLossInPercent)
+}
+
+// Score returns a continuous conviction in [-1.0, +1.0] based on the strength of the Harami pattern.
+// A score of +1.0 indicates a strong bullish Harami (large previous candle, small current candle body).
+// A score of -1.0 indicates a strong bearish Harami (large previous candle, small current candle body).
+// A score of 0 indicates no Harami pattern is present.
+func (h *Harami) Score(closedCandles []*ohlc.OHLC) float64 {
+	if len(closedCandles) < 2 {
+		return 0
+	}
+	second := closedCandles[len(closedCandles)-2]
+	first := closedCandles[len(closedCandles)-1]
+
+	// Calculate the relative size of the current candle body compared to the previous candle body.
+	prevBody := second.Close.Sub(second.Open).Abs()
+	currentBody := first.Close.Sub(first.Open).Abs()
+
+	if prevBody.Sign() == 0 {
+		return 0
+	}
+
+	// Calculate the ratio of the current body size to the previous body size.
+	// A smaller ratio means a stronger Harami signal.
+	ratio := currentBody.Div(prevBody)
+
+	// Define thresholds using decimal.Decimal for consistent comparison
+	minRatio := decimal.NewFromFloat(0.1)
+	maxRatio := decimal.NewFromFloat(1.0)
+
+	// Linear interpolation between 0 and 1: (maxRatio - ratio) / (maxRatio - minRatio)
+	numerator := maxRatio.Sub(ratio)
+	denominator := maxRatio.Sub(minRatio)
+	scoreDecimal := numerator.Div(denominator)
+	score, _ := scoreDecimal.Float64()
+
+	// Apply direction based on the candle type
+	if first.Close.GreaterThan(first.Open) {
+		// Bullish Harami
+		if score > 1.0 {
+			return 1.0
+		}
+		return score
+	} else if first.Close.LessThan(first.Open) {
+		// Bearish Harami
+		if score > 1.0 {
+			return -1.0
+		}
+		return -score
+	}
+
+	return 0
 }

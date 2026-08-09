@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/helper"
 	"github.com/tgragnato/orbiter/pkg/indicator/sma"
@@ -274,4 +275,60 @@ func (d *Engulfing) Name() string {
 func (d *Engulfing) String() string {
 	return fmt.Sprintf("%s: Long=%t, Short=%t Target=%.2f%% StopLoss=%.2f%% SMA%d", d.Name(),
 		strategyLongEnabled, strategyShortEnabled, targetInPercent, stopLossInPercent, smaCandles)
+}
+
+// Score returns a continuous conviction in [-1.0, +1.0] based on the strength of the engulfing pattern.
+// A score of +1.0 indicates a strong bearish engulfing (large previous candle, small current candle body).
+// A score of -1.0 indicates a strong bullish engulfing (small previous candle, large current candle body).
+// A score of 0 indicates no engulfing pattern is present.
+func (d *Engulfing) Score(closedCandles []*ohlc.OHLC) float64 {
+	if len(closedCandles) < 2 {
+		return 0
+	}
+	second := closedCandles[len(closedCandles)-2]
+	first := closedCandles[len(closedCandles)-1]
+
+	// Calculate the body sizes using decimal.Decimal
+	prevBody := second.Close.Sub(second.Open).Abs()
+	currentBody := first.Close.Sub(first.Open).Abs()
+
+	if prevBody.Sign() == 0 {
+		return 0
+	}
+
+	// Calculate the ratio of the current body size to the previous body size.
+	ratio := currentBody.Div(prevBody)
+
+	// Define thresholds for strong/weak engulfing.
+	// A ratio significantly greater than 1.0 indicates a strong engulfing.
+	minRatio := decimal.NewFromFloat(0.5) // Weak engulfing
+	maxRatio := decimal.NewFromFloat(2.0) // Strong engulfing
+
+	// Map the ratio to a continuous score between 0 and 1 (strength of engulfing).
+	// If ratio is <= minRatio, score is 1.0 (strongest signal).
+	// If ratio is >= maxRatio, score is 0 (weakest signal).
+	var score float64
+	if ratio.LessThanOrEqual(minRatio) {
+		score = 1.0
+	} else if ratio.GreaterThanOrEqual(maxRatio) {
+		score = 0.0
+	} else {
+		// Linear interpolation between 0 and 1: (maxRatio - ratio) / (maxRatio - minRatio)
+		numerator := maxRatio.Sub(ratio)
+		denominator := maxRatio.Sub(minRatio)
+		scoreDecimal := numerator.Div(denominator)
+		score, _ = scoreDecimal.Float64()
+	}
+
+	// Apply direction based on the type of engulfing
+	if d.isBearishEngulfingCandle(closedCandles) {
+		// Bearish engulfing (counter-trend long): positive score
+		return score
+	}
+	if d.isBullishEngulfingCandle(closedCandles) {
+		// Bullish engulfing (counter-trend short): negative score
+		return -score
+	}
+
+	return 0
 }

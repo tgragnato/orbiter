@@ -2,8 +2,9 @@ package broker
 
 import (
 	"fmt"
-	"github.com/shopspring/decimal"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 // Order is a request to open a new position

@@ -52,10 +52,14 @@ func (ha *HeikinAshi) GetWarmUpCandleAmount() uint {
 	return 1
 }
 
-func (ha *HeikinAshi) OnWarmUpCandle(_ *ohlc.OHLC) {}
+func (ha *HeikinAshi) OnWarmUpCandle(closedCandle *ohlc.OHLC) {
+	ha.volaTracker.AddOHLC(closedCandle)
+	ha.sma.Insert(closedCandle)
+	ha.candlesReceived = true
+}
 
 func (ha *HeikinAshi) OnPosition(_, _ []broker.Position) {}
-func (ha *HeikinAshi) OnOrder(_ []broker.Order)                            {}
+func (ha *HeikinAshi) OnOrder(_ []broker.Order)          {}
 
 func (ha *HeikinAshi) OnTick(currentTick tick.Tick) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
 	ha.currentTick = currentTick
@@ -265,4 +269,44 @@ func (ha *HeikinAshi) Name() string {
 
 func (ha *HeikinAshi) String() string {
 	return strategy.NameHeikinAshi
+}
+
+// Score returns a continuous conviction in [-1.0, +1.0] based on the momentum
+// of the last two Heikin-Ashi candles.
+// The score is calculated based on the relative position of the current candle's
+// close compared to the previous candle's close, normalized by the total range.
+func (ha *HeikinAshi) Score(closedCandles []*ohlc.OHLC) float64 {
+	if len(closedCandles) < 2 {
+		return 0
+	}
+	haNow := ohlc.ToHeikinAshi(closedCandles[len(closedCandles)-2], closedCandles[len(closedCandles)-1])
+	haPrev := ohlc.ToHeikinAshi(closedCandles[len(closedCandles)-3], closedCandles[len(closedCandles)-2])
+
+	// Calculate the total range of the two candles
+	rangePrev := haPrev.High.Sub(haPrev.Low)
+	rangeNow := haNow.High.Sub(haNow.Low)
+	totalRange := rangePrev.Add(rangeNow)
+
+	if totalRange.Sign() == 0 {
+		return 0
+	}
+
+	// Calculate the difference between the current and previous close
+	diff := haNow.Close.Sub(haPrev.Close)
+
+	// Calculate the normalized position of the current close within the combined range
+	// Score = diff / totalRange
+	scoreDecimal := diff.Div(totalRange)
+
+	// Convert the decimal score to float64 and clamp it to [-1.0, +1.0]
+	score, _ := scoreDecimal.Float64()
+
+	if score > 1.0 {
+		return 1.0
+	}
+	if score < -1.0 {
+		return -1.0
+	}
+
+	return score
 }
