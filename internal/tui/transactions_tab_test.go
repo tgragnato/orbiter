@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +69,7 @@ func (f *fakeTransactionEditor) DeleteTransaction(_ context.Context, id int64) e
 }
 
 // TransactionStore methods required by the interface.
-func (f *fakeTransactionEditor) RecalculateHoldings(_ context.Context) error  { return nil }
+func (f *fakeTransactionEditor) RecalculateHoldings(_ context.Context) error { return nil }
 func (f *fakeTransactionEditor) UpdateMarketPrice(_ context.Context, _ string, _ float64) error {
 	return nil
 }
@@ -706,7 +705,7 @@ func TestTransactionsTabKeyDOnTxRowEntersConfirmMode(t *testing.T) {
 	if mu.pendingDelID != 5 {
 		t.Errorf("pendingDelID = %d, want 5", mu.pendingDelID)
 	}
-	if !strings.Contains(mu.status, fmt.Sprintf("%s", tx.Symbol)) {
+	if !strings.Contains(mu.status, tx.Symbol) {
 		t.Errorf("status = %q, want to mention symbol %q", mu.status, tx.Symbol)
 	}
 }
