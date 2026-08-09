@@ -276,7 +276,7 @@ func (ha *HeikinAshi) String() string {
 // The score is calculated based on the relative position of the current candle's
 // close compared to the previous candle's close, normalized by the total range.
 func (ha *HeikinAshi) Score(closedCandles []*ohlc.OHLC) float64 {
-	if len(closedCandles) < 2 {
+	if len(closedCandles) < 3 {
 		return 0
 	}
 	haNow := ohlc.ToHeikinAshi(closedCandles[len(closedCandles)-2], closedCandles[len(closedCandles)-1])
