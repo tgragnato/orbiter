@@ -3,8 +3,6 @@ package signal
 import (
 	"fmt"
 	"time"
-
-	"github.com/tgragnato/orbiter/pkg/broker"
 )
 
 // Type describes the signal intent.
@@ -28,8 +26,6 @@ type Message struct {
 	Instrument    string
 	Summary       string
 	OrderID       string
-	Order         *broker.Order
-	Position      *broker.Position
 	TargetWeight  float64 // target allocation as fraction of total satellite NAV [0,1]
 	CurrentWeight float64 // current allocation as fraction of total satellite NAV [0,1]
 	DeltaEUR      float64 // positive = buy, negative = sell
