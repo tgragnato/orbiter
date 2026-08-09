@@ -20,6 +20,20 @@ func TestDoji_Name(t *testing.T) {
 	}
 }
 
+func TestDoji_OnWarmUpCandle(t *testing.T) {
+	t.Parallel()
+
+	d := New("test")
+	c := ohlc.New("test", time.Now(), time.Minute*60, false)
+	c.NewPrice(decimal.NewFromFloat(100), c.Start)
+	c.ForceClose()
+
+	d.OnWarmUpCandle(c)
+	if d.previousCandle != c {
+		t.Errorf("expected previousCandle to be updated by OnWarmUpCandle")
+	}
+}
+
 func TestDoji_OnTick_Long(t *testing.T) {
 	t.Parallel()
 
@@ -70,4 +84,86 @@ func TestDoji_OnTick_Short(t *testing.T) {
 	if toOpen[0].Direction != broker.BuyDirectionShort {
 		t.Fatalf("expected BuyDirectionShort, got %v", toOpen[0].Direction)
 	}
+}
+
+func TestDoji_Score(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Nil Previous Candle", func(t *testing.T) {
+		d := New("test")
+		got := d.Score(nil)
+		if got != 0.0 {
+			t.Errorf("Score() = %v, want 0.0 when previousCandle is nil", got)
+		}
+	})
+
+	t.Run("DOJI Candle Active", func(t *testing.T) {
+		d := New("test")
+		c := ohlc.New("test", time.Now(), time.Minute*60, false)
+		c.NewPrice(decimal.NewFromFloat(100), c.Start)
+		c.NewPrice(decimal.NewFromFloat(100.01), c.Start)
+		c.ForceClose()
+
+		d.OnWarmUpCandle(c)
+
+		got := d.Score(nil)
+		if got != 0.0 {
+			t.Errorf("Score() = %v, want 0.0 when previousCandle is DOJI", got)
+		}
+	})
+
+	t.Run("Non-DOJI Normal Range", func(t *testing.T) {
+		d := New("test")
+		c := ohlc.New("test", time.Now(), time.Minute*60, false)
+		c.NewPrice(decimal.NewFromFloat(100), c.Start)
+		c.NewPrice(decimal.NewFromFloat(105), c.Start) // 5% performance, not DOJI
+		c.ForceClose()
+
+		d.OnWarmUpCandle(c)
+
+		got := d.Score(nil)
+		if got != 0.0 {
+			t.Errorf("Score() = %v, want 0.0 when close is within range", got)
+		}
+	})
+
+	t.Run("Close Above High Breakout", func(t *testing.T) {
+		d := New("test")
+		c := &ohlc.OHLC{
+			Open:  decimal.NewFromFloat(100.0),
+			High:  decimal.NewFromFloat(102.0),
+			Low:   decimal.NewFromFloat(99.0),
+			Close: decimal.NewFromFloat(103.0), // Close > High
+			Start: time.Now(),
+			End:   time.Now().Add(time.Hour),
+		}
+		c.ForceClose()
+
+		d.OnWarmUpCandle(c)
+
+		got := d.Score(nil)
+		if got <= 0.0 {
+			t.Errorf("Score() = %v, want > 0.0 when Close > High", got)
+		}
+	})
+
+	t.Run("Close Below Low Breakout", func(t *testing.T) {
+		d := New("test")
+		c := &ohlc.OHLC{
+			Open:  decimal.NewFromFloat(100.0),
+			High:  decimal.NewFromFloat(101.0),
+			Low:   decimal.NewFromFloat(98.0),
+			Close: decimal.NewFromFloat(97.0), // Close < Low
+			Start: time.Now(),
+			End:   time.Now().Add(time.Hour),
+		}
+		c.ForceClose()
+
+		d.OnWarmUpCandle(c)
+
+		got := d.Score(nil)
+		if got >= 0.0 {
+			t.Errorf("Score() = %v, want < 0.0 when Close < Low", got)
+		}
+	})
 }
