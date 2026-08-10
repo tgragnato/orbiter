@@ -33,6 +33,10 @@ func (f *fakePriceStore) UpdateMarketPrice(_ context.Context, symbol string, pri
 	return nil
 }
 
+func (f *fakePriceStore) UpdateHoldingCurrency(_ context.Context, _, _ string) error {
+	return nil
+}
+
 type fakeProvider struct {
 	candles map[string][]data.Candle
 	err     error

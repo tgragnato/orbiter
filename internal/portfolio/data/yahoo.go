@@ -110,6 +110,7 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 			AdjustedClose: *adjClose.AdjClose[i],
 			Volume:        *quote.Volume[i],
 			SplitFactor:   1,
+			Currency:      strings.ToUpper(strings.TrimSpace(result.Meta.Currency)),
 		}
 		if dividend, ok := dividends[dateTS]; ok {
 			candle.CashDividend = dividend
@@ -134,6 +135,7 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 			Time:         time.Unix(divDateTS, 0).UTC(),
 			CashDividend: amount,
 			SplitFactor:  1,
+			Currency:     strings.ToUpper(strings.TrimSpace(result.Meta.Currency)),
 		})
 	}
 
@@ -193,9 +195,14 @@ type yahooChartResponse struct {
 }
 
 type yahooResult struct {
+	Meta       yahooMeta    `json:"meta"`
 	Timestamp  []int64      `json:"timestamp"`
 	Indicators yahooMetrics `json:"indicators"`
 	Events     yahooEvents  `json:"events"`
+}
+
+type yahooMeta struct {
+	Currency string `json:"currency"`
 }
 
 type yahooMetrics struct {

@@ -22,8 +22,7 @@ func (v *SMA) Insert(o *ohlc.OHLC) {
 		return
 	}
 
-	closePrice, _ := o.Close.Float64()
-	v.cb.Insert(closePrice)
+	v.cb.Insert(o.Close)
 }
 
 func (v *SMA) Value() (map[string]float64, error) {

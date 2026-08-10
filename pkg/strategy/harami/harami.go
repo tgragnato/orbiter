@@ -3,9 +3,9 @@ package harami
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/circularbuffer"
 	"github.com/tgragnato/orbiter/pkg/helper"
@@ -56,8 +56,8 @@ func (h *Harami) OnWarmUpCandle(closedCandle *ohlc.OHLC) {
 }
 
 func (h *Harami) feedIndicator(closedCandle *ohlc.OHLC) {
-	var high = helper.DecimalToFloat(closedCandle.High)
-	var low = helper.DecimalToFloat(closedCandle.Low)
+	var high = closedCandle.High
+	var low = closedCandle.Low
 	h.sma.Insert(closedCandle)
 	h.previousLows.Insert(low)
 	h.previousHighs.Insert(high)
@@ -68,17 +68,17 @@ func (h *Harami) GetCandleDuration() time.Duration {
 }
 
 func (h *Harami) isBearishCandle(candle *ohlc.OHLC) bool {
-	return candle.Close.LessThan(candle.Open)
+	return candle.Close < candle.Open
 }
 
 func (h *Harami) isBullishCandle(candle *ohlc.OHLC) bool {
-	return candle.Close.GreaterThan(candle.Open)
+	return candle.Close > candle.Open
 }
 
 func (h *Harami) isHaramiLong(firstCandle, secondCandle *ohlc.OHLC) bool {
 	if h.isBearishCandle(firstCandle) && h.isBullishCandle(secondCandle) &&
-		secondCandle.High.LessThan(firstCandle.Open) &&
-		secondCandle.Low.GreaterThan(firstCandle.Close) {
+		secondCandle.High < firstCandle.Open &&
+		secondCandle.Low > firstCandle.Close {
 		return true
 	}
 	return false
@@ -94,7 +94,7 @@ func (h *Harami) OnTick(_ tick.Tick) (toOpen, toClose []broker.Order, toClosePos
 
 func (h *Harami) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
 	var closedCandle = closedCandles[len(closedCandles)-1]
-	var closePrice = helper.DecimalToFloat(closedCandle.Close)
+	var closePrice = closedCandle.Close
 
 	defer h.feedIndicator(closedCandle)
 
@@ -115,7 +115,7 @@ func (h *Harami) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.
 		if err != nil {
 			return
 		}
-		if helper.DecimalToFloat(closedCandle.Close) > previousCandlesHigh {
+		if closedCandle.Close > previousCandlesHigh {
 			toClosePositions = h.openPositions
 			return
 		}
@@ -135,8 +135,8 @@ func (h *Harami) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.
 
 func (h *Harami) prepareOrder(closedCandle *ohlc.OHLC, direction broker.BuyDirection, size float64) broker.Order {
 	var (
-		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(targetInPercent), direction)
-		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(stopLossInPercent), direction)
+		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, targetInPercent, direction)
+		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, stopLossInPercent, direction)
 	)
 
 	h.clog.Debug("Prepare new order",
@@ -170,35 +170,34 @@ func (h *Harami) Score(closedCandles []*ohlc.OHLC) float64 {
 	first := closedCandles[len(closedCandles)-1]
 
 	// Calculate the relative size of the current candle body compared to the previous candle body.
-	prevBody := second.Close.Sub(second.Open).Abs()
-	currentBody := first.Close.Sub(first.Open).Abs()
+	prevBody := math.Abs(second.Close - second.Open)
+	currentBody := math.Abs(first.Close - first.Open)
 
-	if prevBody.Sign() == 0 {
+	if prevBody == 0 {
 		return 0
 	}
 
 	// Calculate the ratio of the current body size to the previous body size.
 	// A smaller ratio means a stronger Harami signal.
-	ratio := currentBody.Div(prevBody)
+	ratio := currentBody / prevBody
 
-	// Define thresholds using decimal.Decimal for consistent comparison
-	minRatio := decimal.NewFromFloat(0.1)
-	maxRatio := decimal.NewFromFloat(1.0)
+	// Define thresholds using float64 for consistent comparison
+	minRatio := 0.1
+	maxRatio := 1.0
 
 	// Linear interpolation between 0 and 1: (maxRatio - ratio) / (maxRatio - minRatio)
-	numerator := maxRatio.Sub(ratio)
-	denominator := maxRatio.Sub(minRatio)
-	scoreDecimal := numerator.Div(denominator)
-	score, _ := scoreDecimal.Float64()
+	numerator := maxRatio - ratio
+	denominator := maxRatio - minRatio
+	score := numerator / denominator
 
 	// Apply direction based on the candle type
-	if first.Close.GreaterThan(first.Open) {
+	if first.Close > first.Open {
 		// Bullish Harami
 		if score > 1.0 {
 			return 1.0
 		}
 		return score
-	} else if first.Close.LessThan(first.Open) {
+	} else if first.Close < first.Open {
 		// Bearish Harami
 		if score > 1.0 {
 			return -1.0

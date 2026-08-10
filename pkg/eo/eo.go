@@ -60,10 +60,9 @@ func New() *EnvironmentOverlay {
 }
 
 func (eo *EnvironmentOverlay) AddCandle(candle *ohlc.OHLC) {
-	closePrice, _ := candle.Close.Float64()
-	eo.candles.push(closePrice)
+	eo.candles.push(candle.Close)
 
-	perfPercent, _ := candle.PerformanceInPercentage().Float64()
+	perfPercent := candle.PerformanceFromOpenToHighAbsolute()
 	eo.priceChangesPercent.push(perfPercent)
 }
 

@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
@@ -30,10 +29,10 @@ func generateTestCandles(count int, startPrice float64, step float64) []*ohlc.OH
 		}
 
 		c := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(open),
-			High:  decimal.NewFromFloat(high),
-			Low:   decimal.NewFromFloat(low),
-			Close: decimal.NewFromFloat(close),
+			Open:  open,
+			High:  high,
+			Low:   low,
+			Close: close,
 			Start: start.Add(time.Duration(i) * time.Hour),
 			End:   start.Add(time.Duration(i+1) * time.Hour),
 		}
@@ -56,7 +55,7 @@ func TestRSI_OnTick_NoOrders(t *testing.T) {
 	t.Parallel()
 
 	r := New("test", time.Minute*60)
-	currentTick := tick.New("test", time.Now(), decimal.NewFromFloat(100), decimal.NewFromFloat(100))
+	currentTick := tick.New("test", time.Now(), 100, 100)
 
 	toOpen, _, _ := r.OnTick(currentTick)
 	if len(toOpen) != 0 {

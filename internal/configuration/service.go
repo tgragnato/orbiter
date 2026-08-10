@@ -150,6 +150,31 @@ func (s *Service) SetYahooCredentials(ctx context.Context, value YahooCredential
 	return setTyped(ctx, s.repo, KeyYahooCredentials, defaultSettings[KeyYahooCredentials].scope, defaultSettings[KeyYahooCredentials].description, value)
 }
 
+// GetBaseCurrency returns the ISO 4217 code used as the portfolio base currency.
+// Falls back to "EUR" if the setting is absent.
+func (s *Service) GetBaseCurrency(ctx context.Context) (string, error) {
+	setting, err := getTyped[PortfolioBaseCurrencySetting](ctx, s.repo, KeyPortfolioBaseCurrency)
+	if err != nil {
+		return "EUR", nil //nolint:nilerr // missing setting is non-fatal; default is EUR
+	}
+	if setting.Currency == "" {
+		return "EUR", nil
+	}
+	return setting.Currency, nil
+}
+
+// SetBaseCurrency updates the portfolio base currency.
+func (s *Service) SetBaseCurrency(ctx context.Context, currency string) error {
+	if len(currency) != 3 {
+		return fmt.Errorf("%w: base currency must be a 3-letter ISO 4217 code, got %q", ErrInvalidSetting, currency)
+	}
+	return setTyped(ctx, s.repo, KeyPortfolioBaseCurrency,
+		defaultSettings[KeyPortfolioBaseCurrency].scope,
+		defaultSettings[KeyPortfolioBaseCurrency].description,
+		PortfolioBaseCurrencySetting{Currency: currency},
+	)
+}
+
 func getTyped[T any](ctx context.Context, repo Repository, key string) (T, error) {
 	setting, err := repo.Get(ctx, key)
 	if err != nil {

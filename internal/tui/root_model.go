@@ -52,6 +52,7 @@ func NewRootModelWithMetrics(
 	configSvc SettingsService,
 	logCh LogChannel,
 	twrEngine *analytics.TWREngine,
+	baseCurrency string,
 ) RootModel {
 	// Upgrade txStore to a TransactionEditor if the underlying implementation supports it.
 	var txEditor TransactionEditor
@@ -59,7 +60,7 @@ func NewRootModelWithMetrics(
 		txEditor = te
 	}
 	return RootModel{
-		holdingsTab:     NewModelWithAll(store, txStore, portfolioID),
+		holdingsTab:     NewModelWithAll(store, txStore, portfolioID).WithBaseCurrency(baseCurrency),
 		signalsTab:      NewSignalsTabModelWithML(readModel, ml),
 		settingsTab:     NewSettingsTabModel(configSvc),
 		logsTab:         NewLogsTabModel(logCh),

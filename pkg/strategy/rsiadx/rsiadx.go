@@ -26,13 +26,12 @@ type RSIADX struct {
 }
 
 const (
-	orderPricePrecision = 1
-	adxThreshold        = 35
-	adxCandles          = 10
-	rsiCandles          = 2
-	targetInPercent     = 5.0
-	stopLossInPercent   = 2.5
-	maxAgeOpenPosition  = time.Hour * 2
+	adxThreshold       = 35
+	adxCandles         = 10
+	rsiCandles         = 2
+	targetInPercent    = 5.0
+	stopLossInPercent  = 2.5
+	maxAgeOpenPosition = time.Hour * 2
 )
 
 func New(instrument string, candleDuration time.Duration) *RSIADX {
@@ -112,11 +111,11 @@ func (d *RSIADX) checkOpenPositions(closedCandle *ohlc.OHLC, closedCandles []*oh
 
 		switch openPosition.BuyDirection {
 		case broker.BuyDirectionLong:
-			if closedCandle.Close.GreaterThan(previousCandle.High) {
+			if closedCandle.Close > previousCandle.High {
 				toClosePositions = append(toClosePositions, openPosition)
 			}
 		case broker.BuyDirectionShort:
-			if closedCandle.Close.LessThan(previousCandle.Low) {
+			if closedCandle.Close < previousCandle.Low {
 				toClosePositions = append(toClosePositions, openPosition)
 			}
 		}
@@ -163,8 +162,8 @@ func (d *RSIADX) getADX() (adxValue float64, err error) {
 
 func (d *RSIADX) prepareOrder(closedCandle *ohlc.OHLC, direction broker.BuyDirection, size float64) broker.Order {
 	var (
-		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(targetInPercent), direction).Round(orderPricePrecision)
-		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(stopLossInPercent), direction).Round(orderPricePrecision)
+		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, targetInPercent, direction)
+		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, stopLossInPercent, direction)
 	)
 
 	d.clog.Debug("Prepare new order",

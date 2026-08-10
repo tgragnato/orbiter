@@ -3,9 +3,8 @@ package tick
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
-
-	"github.com/shopspring/decimal"
 )
 
 type Tick struct {
@@ -14,40 +13,40 @@ type Tick struct {
 	ID         uint
 	Datetime   time.Time
 	Instrument string
-	Bid        decimal.Decimal
-	Ask        decimal.Decimal
-	price      decimal.Decimal
+	Bid        float64
+	Ask        float64
+	price      float64
 }
 
-// var maxSpread = decimal.NewFromFloat(0.00025) // 2.5 pips
-var dec2 = decimal.NewFromFloat(2)
+// var maxSpread = 0.00025) // 2.5 pips
+const dec2 = 2.0
 
-func New(instrument string, datetime time.Time, bid, ask decimal.Decimal) Tick {
+func New(instrument string, datetime time.Time, bid, ask float64) Tick {
 	return Tick{
 		0,
 		datetime,
 		instrument,
 		bid,
 		ask,
-		bid.Add(ask).Div(dec2),
+		(bid + ask) / dec2,
 	}
 }
 
-func (t *Tick) Spread() decimal.Decimal {
-	return t.Ask.Sub(t.Bid).Abs()
+func (t *Tick) Spread() float64 {
+	return math.Abs(t.Ask - t.Bid)
 }
 
-func (t *Tick) SpreadInPercent() decimal.Decimal {
-	var n = t.Ask.Sub(t.Bid).Div(t.Bid)
-	return n.Mul(decimal.NewFromFloat(100)).Abs()
+func (t *Tick) SpreadInPercent() float64 {
+	var n = (t.Ask - t.Bid) / t.Bid
+	return math.Round(math.Abs(n*100)*1e10) / 1e10
 }
 
 func (t *Tick) String() string {
-	return fmt.Sprintf("{Datetime=%s Bid=%s Ask=%s}",
-		t.Datetime.String(), t.Bid.String(), t.Ask.String())
+	return fmt.Sprintf("{Datetime=%s Bid=%g Ask=%g}",
+		t.Datetime.String(), t.Bid, t.Ask)
 }
 
-func (t *Tick) Price() decimal.Decimal {
+func (t *Tick) Price() float64 {
 	return t.price
 }
 
@@ -58,13 +57,13 @@ func (t *Tick) Validate() error {
 	if t.Datetime.IsZero() {
 		return errors.New("empty datetime")
 	}
-	if t.Bid.IsZero() {
+	if t.Bid == 0 {
 		return errors.New("empty bid")
 	}
-	if t.Ask.IsZero() {
+	if t.Ask == 0 {
 		return errors.New("empty ask")
 	}
-	if t.Ask.LessThan(t.Bid) {
+	if t.Ask < t.Bid {
 		return errors.New("ask is less than bid")
 	}
 	return nil

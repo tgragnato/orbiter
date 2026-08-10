@@ -41,7 +41,7 @@ func (s *PostgresStore) WithPortfolioID(portfolioID string) *PostgresStore {
 // ListHoldings returns all holdings for the unified table view.
 func (s *PostgresStore) ListHoldings(ctx context.Context) ([]Holding, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, symbol, quantity, market_price, pmc, allocation_type, taa_enabled
+		SELECT id, symbol, quantity, market_price, pmc, allocation_type, taa_enabled, currency
 		FROM holdings
 		ORDER BY symbol, id
 	`)
@@ -54,7 +54,7 @@ func (s *PostgresStore) ListHoldings(ctx context.Context) ([]Holding, error) {
 	for rows.Next() {
 		var h Holding
 		var allocation string
-		if err := rows.Scan(&h.ID, &h.Symbol, &h.Quantity, &h.MarketPrice, &h.PMC, &allocation, &h.TAAEnabled); err != nil {
+		if err := rows.Scan(&h.ID, &h.Symbol, &h.Quantity, &h.MarketPrice, &h.PMC, &allocation, &h.TAAEnabled, &h.Currency); err != nil {
 			return nil, err
 		}
 		h.AllocationType = parseAllocationType(allocation)
@@ -147,10 +147,10 @@ func parseAllocationType(value string) AllocationType {
 func (s *PostgresStore) AddTransaction(ctx context.Context, tx Transaction) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO transactions
-			(symbol, transaction_type, quantity, price, fee, allocation_type, executed_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+			(symbol, transaction_type, quantity, price, fee, allocation_type, currency, executed_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, tx.Symbol, string(tx.Type), tx.Quantity, tx.Price, tx.Fee,
-		string(tx.AllocationType), tx.ExecutedAt)
+		string(tx.AllocationType), tx.Currency, tx.ExecutedAt)
 	if err != nil {
 		return fmt.Errorf("insert transaction: %w", err)
 	}
@@ -191,9 +191,9 @@ func (s *PostgresStore) recordLiveFlow(ctx context.Context, tx Transaction) erro
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO cash_flows (portfolio_id, flow_type, amount, asset, occurred_at)
-		VALUES ($1, $2, $3, 'AUTO', $4)
-	`, s.portfolioID, flowType, amount, day)
+		INSERT INTO cash_flows (portfolio_id, flow_type, amount, asset, currency, occurred_at)
+		VALUES ($1, $2, $3, 'AUTO', $4, $5)
+	`, s.portfolioID, flowType, amount, tx.Currency, day)
 	return err
 }
 
@@ -270,11 +270,11 @@ func (s *PostgresStore) recalculateSymbol(ctx context.Context, symbol string) er
 
 	oldTAAEnabled := true
 	var oldPrice float64
-	var oldAllocType string
+	var oldAllocType, oldCurrency string
 	_ = dbTx.QueryRowContext(ctx,
-		`SELECT COALESCE(market_price, 0), COALESCE(taa_enabled, true), COALESCE(allocation_type, 'SATELLITE') FROM holdings WHERE symbol = $1 LIMIT 1`,
+		`SELECT COALESCE(market_price, 0), COALESCE(taa_enabled, true), COALESCE(allocation_type, 'SATELLITE'), COALESCE(currency, 'EUR') FROM holdings WHERE symbol = $1 LIMIT 1`,
 		symbol,
-	).Scan(&oldPrice, &oldTAAEnabled, &oldAllocType)
+	).Scan(&oldPrice, &oldTAAEnabled, &oldAllocType, &oldCurrency)
 
 	// If ComputeHoldingStates produced no allocation type (e.g. all SELLs), fall back to the
 	// previously stored type so the DB NOT NULL constraint is satisfied.
@@ -282,19 +282,27 @@ func (s *PostgresStore) recalculateSymbol(ctx context.Context, symbol string) er
 	if allocType == "" {
 		allocType = oldAllocType
 	}
+	// Preserve currency from state replay if available; otherwise keep DB value.
+	currency := state.Currency
+	if currency == "" {
+		currency = oldCurrency
+	}
+	if currency == "" {
+		currency = "EUR"
+	}
 
 	if _, err := dbTx.ExecContext(ctx, `DELETE FROM holdings WHERE symbol = $1`, symbol); err != nil {
 		return fmt.Errorf("delete holdings for %s: %w", symbol, err)
 	}
 
 	// Always re-insert: active positions get real qty/PMC; closed positions get
-	// qty=0 and pmc=0 but preserve taa_enabled and allocation_type for history.
+	// qty=0 and pmc=0 but preserve taa_enabled, allocation_type, and currency for history.
 	if _, err := dbTx.ExecContext(ctx, `
 		INSERT INTO holdings
-			(symbol, quantity, market_price, pmc, allocation_type, taa_enabled, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+			(symbol, quantity, market_price, pmc, allocation_type, taa_enabled, currency, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, symbol, state.Quantity, oldPrice, state.PMC,
-		allocType, oldTAAEnabled, time.Now().UTC(),
+		allocType, oldTAAEnabled, currency, time.Now().UTC(),
 	); err != nil {
 		return fmt.Errorf("insert holding for %s: %w", symbol, err)
 	}
@@ -346,7 +354,7 @@ func (s *PostgresStore) cleanupStaleDividendRecords(ctx context.Context, symbol 
 func (s *PostgresStore) ListTransactions(ctx context.Context, symbol string) ([]Transaction, error) {
 	query := `
 		SELECT id, symbol, transaction_type, quantity, price, fee,
-		       allocation_type, executed_at, created_at
+		       allocation_type, currency, executed_at, created_at
 		FROM transactions
 	`
 	var args []any
@@ -368,7 +376,7 @@ func (s *PostgresStore) ListTransactions(ctx context.Context, symbol string) ([]
 		var txType, allocType string
 		if err := rows.Scan(
 			&t.ID, &t.Symbol, &txType, &t.Quantity, &t.Price, &t.Fee,
-			&allocType, &t.ExecutedAt, &t.CreatedAt,
+			&allocType, &t.Currency, &t.ExecutedAt, &t.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan transaction: %w", err)
 		}
@@ -406,10 +414,19 @@ func (s *PostgresStore) RecalculateHoldings(ctx context.Context) error {
 	for symbol, state := range states {
 		oldTAAEnabled := true
 		var oldPrice float64
+		var oldCurrency string
 		_ = dbTx.QueryRowContext(ctx,
-			`SELECT COALESCE(market_price, 0), COALESCE(taa_enabled, true) FROM holdings WHERE symbol = $1 LIMIT 1`,
+			`SELECT COALESCE(market_price, 0), COALESCE(taa_enabled, true), COALESCE(currency, 'EUR') FROM holdings WHERE symbol = $1 LIMIT 1`,
 			symbol,
-		).Scan(&oldPrice, &oldTAAEnabled)
+		).Scan(&oldPrice, &oldTAAEnabled, &oldCurrency)
+
+		currency := state.Currency
+		if currency == "" {
+			currency = oldCurrency
+		}
+		if currency == "" {
+			currency = "EUR"
+		}
 
 		if _, err := dbTx.ExecContext(ctx,
 			`DELETE FROM holdings WHERE symbol = $1`, symbol,
@@ -419,10 +436,10 @@ func (s *PostgresStore) RecalculateHoldings(ctx context.Context) error {
 
 		if _, err := dbTx.ExecContext(ctx, `
 			INSERT INTO holdings
-				(symbol, quantity, market_price, pmc, allocation_type, taa_enabled, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
+				(symbol, quantity, market_price, pmc, allocation_type, taa_enabled, currency, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		`, symbol, state.Quantity, oldPrice, state.PMC,
-			string(state.AllocationType), oldTAAEnabled, time.Now().UTC(),
+			string(state.AllocationType), oldTAAEnabled, currency, time.Now().UTC(),
 		); err != nil {
 			return fmt.Errorf("insert holding for %s: %w", symbol, err)
 		}
@@ -459,15 +476,20 @@ func (s *PostgresStore) FirstTransactionDate(ctx context.Context, symbol string)
 // that a re-run with updated quantities always reflects the current position.
 func (s *PostgresStore) UpsertDividendIncomes(ctx context.Context, records []DividendRecord) error {
 	for _, r := range records {
+		currency := r.Currency
+		if currency == "" {
+			currency = "EUR"
+		}
 		_, err := s.db.ExecContext(ctx, `
 			INSERT INTO dividend_income_records
-				(symbol, ex_date, quantity, cash_dividend_per_share, income_amount)
-			VALUES ($1, $2, $3, $4, $5)
+				(symbol, ex_date, quantity, cash_dividend_per_share, income_amount, currency)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			ON CONFLICT (symbol, ex_date) DO UPDATE SET
-				quantity               = EXCLUDED.quantity,
+				quantity                = EXCLUDED.quantity,
 				cash_dividend_per_share = EXCLUDED.cash_dividend_per_share,
-				income_amount          = EXCLUDED.income_amount
-		`, r.Symbol, r.ExDate, r.Quantity, r.CashDividendPerShare, r.IncomeAmount)
+				income_amount           = EXCLUDED.income_amount,
+				currency                = EXCLUDED.currency
+		`, r.Symbol, r.ExDate, r.Quantity, r.CashDividendPerShare, r.IncomeAmount, currency)
 		if err != nil {
 			return fmt.Errorf("upsert dividend income %s %s: %w", r.Symbol, r.ExDate.Format("2006-01-02"), err)
 		}
@@ -494,7 +516,7 @@ func (s *PostgresStore) TotalDividendIncome(ctx context.Context) (float64, error
 // so no filtering by current holdings quantity is needed.
 func (s *PostgresStore) ListDividendIncome(ctx context.Context) ([]DividendRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT symbol, ex_date, quantity, cash_dividend_per_share, income_amount
+		SELECT symbol, ex_date, quantity, cash_dividend_per_share, income_amount, currency
 		FROM dividend_income_records
 		ORDER BY ex_date DESC
 	`)
@@ -506,7 +528,7 @@ func (s *PostgresStore) ListDividendIncome(ctx context.Context) ([]DividendRecor
 	var records []DividendRecord
 	for rows.Next() {
 		var r DividendRecord
-		if err := rows.Scan(&r.Symbol, &r.ExDate, &r.Quantity, &r.CashDividendPerShare, &r.IncomeAmount); err != nil {
+		if err := rows.Scan(&r.Symbol, &r.ExDate, &r.Quantity, &r.CashDividendPerShare, &r.IncomeAmount, &r.Currency); err != nil {
 			return nil, fmt.Errorf("scan dividend income: %w", err)
 		}
 		records = append(records, r)
@@ -628,6 +650,23 @@ func (s *PostgresStore) UpsertSplit(ctx context.Context, symbol string, splitDat
 	`, symbol, splitDate.UTC().Truncate(24*time.Hour), factor)
 	if err != nil {
 		return fmt.Errorf("upsert split %s %s: %w", symbol, splitDate.Format("2006-01-02"), err)
+	}
+	return nil
+}
+
+// UpdateHoldingCurrency sets the ISO 4217 currency for the holding identified
+// by symbol. Called by the feed updater after each price fetch to persist the
+// currency parsed from the data provider's response.
+func (s *PostgresStore) UpdateHoldingCurrency(ctx context.Context, symbol, currency string) error {
+	if currency == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE holdings SET currency = $1, updated_at = NOW() WHERE symbol = $2`,
+		currency, symbol,
+	)
+	if err != nil {
+		return fmt.Errorf("update holding currency %s: %w", symbol, err)
 	}
 	return nil
 }

@@ -1,42 +1,32 @@
 package helper
 
 import (
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 )
 
-func FloatToDecimal(n float64) decimal.Decimal {
-	return decimal.NewFromFloat(n)
-}
-
-func DecimalToFloat(n decimal.Decimal) float64 {
-	f, _ := n.Float64()
-	return f
-}
-
-func CalcStopLossPriceByPercentage(price, percentage decimal.Decimal, orderDirection broker.BuyDirection) decimal.Decimal {
-	percentFrom := price.Div(decimal.NewFromFloat(100)).Mul(percentage)
+func CalcStopLossPriceByPercentage(price, percentage float64, orderDirection broker.BuyDirection) float64 {
+	percentFrom := price / 100 * percentage
 
 	switch orderDirection {
 	case broker.BuyDirectionLong:
-		return price.Sub(percentFrom).Round(6)
+		return price - percentFrom
 	case broker.BuyDirectionShort:
-		return price.Add(percentFrom).Round(6)
+		return price + percentFrom
 	default:
-		return decimal.Zero
+		return 0
 	}
 }
 
-func CalcTargetPriceByPercentage(price, percentage decimal.Decimal, orderDirection broker.BuyDirection) decimal.Decimal {
-	percentFrom := price.Div(decimal.NewFromFloat(100)).Mul(percentage)
+func CalcTargetPriceByPercentage(price, percentage float64, orderDirection broker.BuyDirection) float64 {
+	percentFrom := price / 100 * percentage
 
 	switch orderDirection {
 	case broker.BuyDirectionLong:
-		return price.Add(percentFrom).Round(6)
+		return price + percentFrom
 	case broker.BuyDirectionShort:
-		return price.Sub(percentFrom).Round(6)
+		return price - percentFrom
 	default:
-		return decimal.Zero
+		return 0
 	}
 }
 

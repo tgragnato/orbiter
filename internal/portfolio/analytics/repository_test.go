@@ -236,7 +236,7 @@ func TestPostgresRepositorySignedCashFlowBetween(t *testing.T) {
 	}
 }
 
-func TestPostgresRepositorySignedCashFlowBetweenNullResult(t *testing.T) {
+func TestPostgresRepositorySignedCashFlowBetweenZeroResult(t *testing.T) {
 	t.Parallel()
 
 	db, mock, err := sqlmock.New()
@@ -249,9 +249,10 @@ func TestPostgresRepositorySignedCashFlowBetweenNullResult(t *testing.T) {
 	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
 
+	// COALESCE(SUM(...), 0) always returns 0 when there are no cash flows — never NULL.
 	mock.ExpectQuery("FROM cash_flows").
 		WithArgs("MAIN", from, to).
-		WillReturnRows(sqlmock.NewRows([]string{"total"}).AddRow(nil))
+		WillReturnRows(sqlmock.NewRows([]string{"total"}).AddRow(0.0))
 
 	total, err := repo.SignedCashFlowBetween(context.Background(), "MAIN", from, to)
 	if err != nil {

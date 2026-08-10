@@ -4,40 +4,38 @@ import (
 	"sort"
 	"testing"
 	"time"
-
-	"github.com/shopspring/decimal"
 )
 
 func TestOHLC_PerformanceInPercentage(t *testing.T) {
 	t.Parallel()
 
 	var o = OHLC{
-		Open:   decimal.NewFromFloat(100),
-		Close:  decimal.NewFromFloat(90),
+		Open:   100,
+		Close:  90,
 		closed: true,
 	}
 
-	perfFloat, _ := o.PerformanceInPercentage().Float64()
+	perfFloat := o.PerformanceInPercentage()
 	if perfFloat != -10 {
 		t.Fatalf("expected %v, got %v", -10, perfFloat)
 	}
 
 	o = OHLC{
-		Open:   decimal.NewFromFloat(100),
-		Close:  decimal.NewFromFloat(120),
+		Open:   100,
+		Close:  120,
 		closed: true,
 	}
-	perfFloat, _ = o.PerformanceInPercentage().Float64()
+	perfFloat = o.PerformanceInPercentage()
 	if perfFloat != 20 {
 		t.Fatalf("expected %v, got %v", 20, perfFloat)
 	}
 
 	o = OHLC{
-		Open:   decimal.NewFromFloat(50),
-		Close:  decimal.NewFromFloat(100),
+		Open:   50,
+		Close:  100,
 		closed: true,
 	}
-	perfFloat, _ = o.PerformanceInPercentage().Float64()
+	perfFloat = o.PerformanceInPercentage()
 	if perfFloat != 100 {
 		t.Fatalf("expected %v, got %v", 100, perfFloat)
 	}
@@ -47,12 +45,12 @@ func TestOHLC_PerformanceFromOpenToHighAbsolute(t *testing.T) {
 	t.Parallel()
 
 	var o = OHLC{
-		Open:   decimal.NewFromFloat(100),
-		High:   decimal.NewFromFloat(150),
+		Open:   100,
+		High:   150,
 		closed: true,
 	}
 
-	perfFloat, _ := o.PerformanceFromOpenToHighAbsolute().Float64()
+	perfFloat := o.PerformanceFromOpenToHighAbsolute()
 	if perfFloat != 50 {
 		t.Fatalf("expected %v, got %v", 50, perfFloat)
 	}
@@ -62,12 +60,12 @@ func TestOHLC_PerformanceFromOpenToLowAbsolute(t *testing.T) {
 	t.Parallel()
 
 	var o = OHLC{
-		Open:   decimal.NewFromFloat(100),
-		High:   decimal.NewFromFloat(50),
+		Open:   100,
+		High:   50,
 		closed: true,
 	}
 
-	perfFloat, _ := o.PerformanceFromOpenToHighAbsolute().Float64()
+	perfFloat := o.PerformanceFromOpenToHighAbsolute()
 	if perfFloat != -50 {
 		t.Fatalf("expected %v, got %v", -50, perfFloat)
 	}
@@ -77,12 +75,12 @@ func TestOHLC_ReversionPerformanceFromHighAbsolute(t *testing.T) {
 	t.Parallel()
 
 	var o = OHLC{
-		High:   decimal.NewFromFloat(100),
-		Close:  decimal.NewFromFloat(50),
+		High:   100,
+		Close:  50,
 		closed: true,
 	}
 
-	perfFloat, _ := o.ReversionPerformanceFromHighAbsolute().Float64()
+	perfFloat := o.ReversionPerformanceFromHighAbsolute()
 	if perfFloat != -50 {
 		t.Fatalf("expected %v, got %v", -50, perfFloat)
 	}
@@ -139,7 +137,7 @@ func TestOHLC_String(t *testing.T) {
 	}
 
 	o = New("abc", time.Now(), time.Second, false)
-	o.NewPrice(decimal.NewFromFloat(1), time.Now())
+	o.NewPrice(1, time.Now())
 	if o.String() == "" {
 		t.Fatalf("expected true")
 	}
@@ -164,36 +162,35 @@ func TestOHLC_Validate(t *testing.T) {
 	}
 
 	o = New("abc", time.Now(), time.Second, false)
-	price := decimal.NewFromFloat(1)
-	o.NewPrice(price, time.Now())
+	o.NewPrice(1, time.Now())
 	if o.Validate() != nil {
 		t.Fatalf("unexpected error: %v", o.Validate())
 	}
 
 	// open = 0
 	obroken := o
-	obroken.Open = decimal.Decimal{}
+	obroken.Open = 0
 	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 
 	// low > high
 	obroken = o
-	obroken.Low = obroken.High.Add(price)
+	obroken.Low = obroken.High + 1
 	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 
 	// close < low
 	obroken = o
-	obroken.Close = obroken.Low.Sub(price)
+	obroken.Close = obroken.Low - 1
 	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
 
 	// close > high
 	obroken = o
-	obroken.Close = obroken.High.Add(price)
+	obroken.Close = obroken.High + 1
 	if obroken.Validate() == nil {
 		t.Fatalf("expected true")
 	}
@@ -217,13 +214,12 @@ func TestOHLC_VolatilityInPercentage(t *testing.T) {
 	t.Parallel()
 
 	var o = New("abc", time.Now(), time.Second, false)
-	o.NewPrice(decimal.NewFromFloat(1), time.Now())
-	o.NewPrice(decimal.NewFromFloat(2), time.Now())
+	o.NewPrice(1, time.Now())
+	o.NewPrice(2, time.Now())
 
 	vola := o.VolatilityInPercentage()
-	volaFloat, _ := vola.Float64()
-	if volaFloat != 100 {
-		t.Fatalf("expected %v, got %v", 100, volaFloat)
+	if vola != 100 {
+		t.Fatalf("expected %v, got %v", 100, vola)
 	}
 }
 
@@ -234,7 +230,7 @@ func TestOHLC_NewPrice(t *testing.T) {
 	now := time.Now()
 
 	// open
-	price := decimal.NewFromFloat(1)
+	price := 1.0
 	o.NewPrice(price, now)
 	assertDecimal(t, price, o.Open)
 	if !(o.priceDataSeen) {
@@ -242,12 +238,12 @@ func TestOHLC_NewPrice(t *testing.T) {
 	}
 
 	// high
-	price = decimal.NewFromFloat(2)
+	price = 2
 	o.NewPrice(price, now)
 	assertDecimal(t, price, o.High)
 
 	// low
-	price = decimal.NewFromFloat(0.5)
+	price = 0.5
 	closePrice := price
 	o.NewPrice(price, now)
 	assertDecimal(t, price, o.Low)
@@ -255,7 +251,7 @@ func TestOHLC_NewPrice(t *testing.T) {
 
 	// close
 	now = o.End
-	price = decimal.NewFromFloat(1.2)
+	price = 1.2
 	considered := o.NewPrice(price, now)
 	if considered {
 		t.Fatalf("expected false")
@@ -274,7 +270,7 @@ func TestOHLC_NewPrice(t *testing.T) {
 
 	// after end
 	now = o.End.Add(time.Second)
-	price = decimal.NewFromFloat(1.3)
+	price = 1.3
 	considered = o.NewPrice(price, now)
 	if considered {
 		t.Fatalf("expected false")
@@ -287,23 +283,20 @@ func TestOHLC_NewPrice_with_Gaps(t *testing.T) {
 	var o = New("abc", time.Now(), time.Hour, false)
 	now := time.Now()
 
-	price := decimal.NewFromFloat(1)
-	o.NewPrice(price, now)
+	o.NewPrice(1, now)
 	if o.HasGaps() {
 		t.Fatalf("expected false")
 	}
 
-	o.NewPrice(price, now.Add(maxGapBetweenTicksInSeconds).Add(time.Minute))
+	o.NewPrice(1, now.Add(maxGapBetweenTicksInSeconds).Add(time.Minute))
 	if !o.HasGaps() {
 		t.Fatalf("expected true")
 	}
 }
 
-func assertDecimal(t *testing.T, want, got decimal.Decimal) {
-	wantFloat, _ := want.Float64()
-	gotFloat, _ := got.Float64()
-	if wantFloat != gotFloat {
-		t.Fatalf("expected %v, got %v", wantFloat, gotFloat)
+func assertDecimal(t *testing.T, want, got float64) {
+	if want != got {
+		t.Fatalf("expected %v, got %v", want, got)
 	}
 }
 
@@ -342,24 +335,19 @@ func Test__smoothCandleStart(t *testing.T) {
 func Test__hightime(t *testing.T) {
 	t.Parallel()
 
-	var one = decimal.NewFromFloat(1)
 	var o = New("abc", time.Now(), time.Hour, false)
 	now := time.Now()
 
 	// Price: 1
-	price := one
-	o.NewPrice(price, now)
+	o.NewPrice(1, now)
 
 	// Price: 2 -> our high
-	price = price.Add(one)
 	now = now.Add(time.Minute)
 	highTime := now
-	o.NewPrice(price, now)
+	o.NewPrice(2, now)
 
 	// Price: 1
-	price = price.Sub(one)
-	now = now.Add(time.Minute)
-	o.NewPrice(price, now)
+	o.NewPrice(1, now)
 	if !highTime.Equal(o.HighTime) {
 		t.Fatalf("expected %s, got %s", highTime, o.HighTime)
 	}
@@ -368,24 +356,20 @@ func Test__hightime(t *testing.T) {
 func Test__lowtime(t *testing.T) {
 	t.Parallel()
 
-	var one = decimal.NewFromFloat(1)
 	var o = New("abc", time.Now(), time.Hour, false)
 	now := time.Now()
 
 	// Price: 1
-	price := one
-	o.NewPrice(price, now)
+	o.NewPrice(1, now)
 
 	// Price: 0 -> our low
-	price = decimal.Zero
 	now = now.Add(time.Minute)
 	lowTime := now
-	o.NewPrice(price, now)
+	o.NewPrice(0, now)
 
 	// Price: 1
-	price = one
 	now = now.Add(time.Minute)
-	o.NewPrice(price, now)
+	o.NewPrice(1, now)
 	if !lowTime.Equal(o.LowTime) {
 		t.Fatalf("expected %s, got %s", lowTime, o.LowTime)
 	}
@@ -394,31 +378,26 @@ func Test__lowtime(t *testing.T) {
 func Test__ToTicks(t *testing.T) {
 	t.Parallel()
 
-	var one = decimal.NewFromFloat(1)
 	now := time.Now()
 	var o = New("abc", now, time.Hour, false)
 
 	// open
-	price := one
 	openTime := now
-	o.NewPrice(price, now)
+	o.NewPrice(1, now)
 
 	// low
-	price = decimal.Zero
 	now = now.Add(time.Minute)
 	lowTime := now
-	o.NewPrice(price, now)
+	o.NewPrice(0, now)
 
 	// high
-	price = decimal.NewFromFloat(5)
 	now = now.Add(time.Minute)
 	highTime := now
-	o.NewPrice(price, now)
+	o.NewPrice(5, now)
 
-	price = decimal.NewFromFloat(3)
 	now = now.Add(time.Minute)
 	closeTime := now
-	o.NewPrice(price, now)
+	o.NewPrice(3, now)
 	o.ForceClose()
 	if !lowTime.Equal(o.LowTime) {
 		t.Fatalf("expected %s, got %s", lowTime, o.LowTime)
@@ -469,7 +448,7 @@ func TestOHLC__Sort(t *testing.T) {
 
 func generateOHLC(when time.Time, price float64) *OHLC {
 	var o = New("abc", when, time.Hour, false)
-	priceDec := decimal.NewFromFloat(price)
+	priceDec := price
 	o.NewPrice(priceDec, when)
 	o.ForceClose()
 	return o

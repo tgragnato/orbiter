@@ -11,12 +11,16 @@ import (
 	"github.com/tgragnato/orbiter/internal/portfolio"
 	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
 	"github.com/tgragnato/orbiter/internal/portfolio/data"
+	"github.com/tgragnato/orbiter/internal/portfolio/fx"
 )
 
 // PriceStore is the subset of portfolio.TransactionStore needed by the updater.
 type PriceStore interface {
 	ActiveSymbols(ctx context.Context) ([]string, error)
 	UpdateMarketPrice(ctx context.Context, symbol string, price float64) error
+	// UpdateHoldingCurrency persists the ISO 4217 currency discovered from the
+	// data provider's response. Called once per symbol per refresh cycle.
+	UpdateHoldingCurrency(ctx context.Context, symbol, currency string) error
 }
 
 // DividendSyncer is the persistence interface needed to sync dividend income.
@@ -77,6 +81,8 @@ type Updater struct {
 	navBackfiller    NAVBackfiller    // optional; nil disables historical NAV backfill
 	cashFlowRecorder CashFlowRecorder // optional; nil disables cash flow backfill
 	splitPersister   SplitPersister   // optional; nil disables split detection
+	fxService        *fx.Service      // optional; nil disables FX conversion in NAV aggregation
+	baseCurrency     string           // ISO 4217 portfolio base currency (default "EUR")
 	portfolioID      string           // used when navSnapper is set
 	provider         data.DataProvider
 	interval         time.Duration
@@ -122,6 +128,16 @@ func (u *Updater) WithSplitPersister(persister SplitPersister) *Updater {
 // same transaction list). Calling this method on a nil Updater panics.
 func (u *Updater) WithCashFlowRecorder(recorder CashFlowRecorder) *Updater {
 	u.cashFlowRecorder = recorder
+	return u
+}
+
+// WithFXService enables multi-currency NAV aggregation. When set, each
+// holding's NAV is converted to baseCurrency before being summed. baseCurrency
+// must be a valid ISO 4217 code (e.g. "EUR"). Calling this method on a nil
+// Updater panics.
+func (u *Updater) WithFXService(svc *fx.Service, baseCurrency string) *Updater {
+	u.fxService = svc
+	u.baseCurrency = baseCurrency
 	return u
 }
 
@@ -180,6 +196,11 @@ func (u *Updater) refresh(ctx context.Context) {
 	// even around weekends and public holidays.
 	from := now.AddDate(0, 0, -5)
 
+	// currenciesFound collects unique (currency, baseCurrency) pairs encountered
+	// during this refresh so FX rates can be synced in one pass afterwards.
+	type fxPair struct{ from, to string }
+	fxPairsNeeded := make(map[fxPair]struct{})
+
 	for _, sym := range symbols {
 		candles, err := u.provider.GetEOD(sym, from, now)
 		if err != nil {
@@ -207,9 +228,28 @@ func (u *Updater) refresh(ctx context.Context) {
 			slog.Info("price feed: updated", "symbol", sym, "price", price)
 		}
 
+		// Persist the asset currency discovered from the provider response.
+		if last.Currency != "" {
+			if err := u.store.UpdateHoldingCurrency(ctx, sym, last.Currency); err != nil {
+				slog.Warn("price feed: update currency failed", "symbol", sym, "error", err)
+			}
+			if u.fxService != nil && u.baseCurrency != "" && last.Currency != u.baseCurrency {
+				fxPairsNeeded[fxPair{from: last.Currency, to: u.baseCurrency}] = struct{}{}
+			}
+		}
+
 		// Process any dividend events that appear in the recent candles.
 		if u.divSyncer != nil {
 			u.syncRecentDividends(ctx, sym, candles)
+		}
+	}
+
+	// Sync today's FX rates for all currency pairs encountered during this refresh.
+	if u.fxService != nil {
+		for pair := range fxPairsNeeded {
+			if err := u.fxService.SyncRates(ctx, pair.from, pair.to, now, now); err != nil {
+				slog.Warn("price feed: FX sync failed", "from", pair.from, "to", pair.to, "error", err)
+			}
 		}
 	}
 
@@ -223,7 +263,9 @@ func (u *Updater) refresh(ctx context.Context) {
 }
 
 // recordNAV computes the total portfolio NAV from current holdings and
-// persists it as a TWR checkpoint.
+// persists it as a TWR checkpoint. When an FX service is configured, each
+// holding's NAV is converted to the portfolio base currency before aggregation
+// so that the snapshot is always denominated in a single currency.
 func (u *Updater) recordNAV(ctx context.Context) error {
 	holdings, err := u.navLister.ListHoldings(ctx)
 	if err != nil {
@@ -237,7 +279,7 @@ func (u *Updater) recordNAV(ctx context.Context) error {
 		slog.Debug("price feed: total NAV is zero, skipping snapshot")
 		return nil
 	}
-	return u.navSnapper.RecordNAVSnapshot(ctx, u.portfolioID, time.Now().UTC(), totalNAV)
+	return u.navSnapper.RecordNAVSnapshot(ctx, u.portfolioID, time.Now(), totalNAV)
 }
 
 // syncRecentDividends processes dividend events found in candles that were
@@ -360,10 +402,12 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 		return
 	}
 
-	// priceMap: symbol → (UTC day) → adjusted-close price.
+	// priceMap: symbol → (UTC day) → adjusted-close price (in base currency when FX is available).
 	// splitMap: symbol → []SplitEvent (factor != 1.0 candles).
+	// symbolCurrency: symbol → ISO 4217 currency reported by the data provider.
 	priceMap := make(map[string]map[time.Time]float64, len(symbols))
 	splitMap := make(map[string][]portfolio.SplitEvent)
+	symbolCurrency := make(map[string]string, len(symbols))
 	for _, sym := range symbols {
 		if ctx.Err() != nil {
 			return
@@ -383,6 +427,10 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 			if price > 0 {
 				dayMap[d] = price
 			}
+			// Track the asset's quotation currency (last non-empty value wins).
+			if c.Currency != "" {
+				symbolCurrency[sym] = c.Currency
+			}
 			// A SplitFactor != 1.0 (and != 0) signals a split on that day.
 			if c.SplitFactor != 0 && c.SplitFactor != 1.0 {
 				splitMap[sym] = append(splitMap[sym], portfolio.SplitEvent{
@@ -398,6 +446,49 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 		}
 		if len(dayMap) > 0 {
 			priceMap[sym] = dayMap
+		}
+	}
+
+	// Multi-currency: when an FX service is available, convert each symbol's
+	// prices to base currency before NAV aggregation. This keeps ComputeDailyNAVs
+	// currency-agnostic — it always sums values in a single unit.
+	if u.fxService != nil && u.baseCurrency != "" {
+		// Collect unique foreign-currency pairs to sync in one pass.
+		type fxPair struct{ from, to string }
+		toSync := make(map[fxPair]struct{})
+		for sym, currency := range symbolCurrency {
+			if currency != "" && currency != u.baseCurrency {
+				if _, hasData := priceMap[sym]; hasData {
+					toSync[fxPair{from: currency, to: u.baseCurrency}] = struct{}{}
+				}
+			}
+		}
+		for pair := range toSync {
+			if ctx.Err() != nil {
+				return
+			}
+			if err := u.fxService.SyncRates(ctx, pair.from, pair.to, firstTxDate, today); err != nil {
+				slog.Warn("nav backfill: historical FX sync failed",
+					"from", pair.from, "to", pair.to, "error", err)
+			}
+		}
+
+		// Convert each price point in priceMap to base currency.
+		for sym, dayMap := range priceMap {
+			currency := symbolCurrency[sym]
+			if currency == "" || currency == u.baseCurrency {
+				continue
+			}
+			for d, price := range dayMap {
+				converted, err := u.fxService.Convert(ctx, price, currency, u.baseCurrency, d)
+				if err != nil {
+					// Degrade gracefully: leave the unconverted local-currency price.
+					slog.Debug("nav backfill: FX conversion skipped, using local price",
+						"symbol", sym, "date", d, "error", err)
+					continue
+				}
+				dayMap[d] = converted
+			}
 		}
 	}
 

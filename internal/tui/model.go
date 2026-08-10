@@ -23,13 +23,13 @@ const (
 type tickMsg time.Time
 
 type holdingsMsg struct {
-	holdings         []portfolio.Holding
-	summary          portfolio.Summary
-	unrealizedPnL    float64
-	realized         float64
+	holdings          []portfolio.Holding
+	summary           portfolio.Summary
+	unrealizedPnL     float64
+	realized          float64
 	dividendsBySymbol map[string]float64
-	txBySymbol       map[string][]portfolio.Transaction
-	err              error
+	txBySymbol        map[string][]portfolio.Transaction
+	err               error
 }
 
 type toggledMsg struct {
@@ -65,7 +65,8 @@ type Model struct {
 	store   portfolio.HoldingsStore
 	txStore portfolio.TransactionStore
 
-	portfolioID string
+	portfolioID  string
+	baseCurrency string // ISO 4217 portfolio base currency shown in summaryView
 
 	table             table.Model
 	holdings          []portfolio.Holding
@@ -74,10 +75,10 @@ type Model struct {
 	realized          float64
 	dividendsBySymbol map[string]float64
 	txBySymbol        map[string][]portfolio.Transaction
-	status         string
-	loading        bool
-	loadError      error
-	quit           bool
+	status            string
+	loading           bool
+	loadError         error
+	quit              bool
 
 	mode int
 	form transactionFormModel
@@ -103,6 +104,13 @@ func NewModelWithAll(store portfolio.HoldingsStore, txStore portfolio.Transactio
 	return newModelCore(store, txStore, portfolioID)
 }
 
+// WithBaseCurrency sets the ISO 4217 base currency label shown in the summary
+// bar (e.g. "EUR"). Pass "" to hide the label.
+func (m Model) WithBaseCurrency(currency string) Model {
+	m.baseCurrency = currency
+	return m
+}
+
 func newModelCore(store portfolio.HoldingsStore, txStore portfolio.TransactionStore, portfolioID string) Model {
 	if portfolioID == "" {
 		portfolioID = defaultPortfolioID
@@ -112,6 +120,7 @@ func newModelCore(store portfolio.HoldingsStore, txStore portfolio.TransactionSt
 		{Title: "Sleeve", Width: 12},
 		{Title: "TAA", Width: 5},
 		{Title: "Symbol", Width: 12},
+		{Title: "Ccy", Width: 5},
 		{Title: "Qty", Width: 10},
 		{Title: "PMC", Width: 10},
 		{Title: "Price", Width: 10},
@@ -447,6 +456,11 @@ func (m *Model) syncRows() {
 			divStr = fmt.Sprintf("%+.2f", divIncome)
 		}
 
+		ccyStr := h.Currency
+		if ccyStr == "" {
+			ccyStr = "---"
+		}
+
 		if h.Quantity <= 0 {
 			// Plain-text sleeve label — bubbles/table uses runewidth.Truncate which
 			// counts printable ANSI chars as width, so styled strings get mangled.
@@ -458,6 +472,7 @@ func (m *Model) syncRows() {
 				sleeveBadge,
 				taaStr,
 				h.Symbol,
+				ccyStr,
 				"0.0000",
 				"--",
 				fmt.Sprintf("%.2f", h.MarketPrice),
@@ -485,6 +500,7 @@ func (m *Model) syncRows() {
 			allocation,
 			taaStr,
 			h.Symbol,
+			ccyStr,
 			fmt.Sprintf("%.4f", h.Quantity),
 			pmcStr,
 			fmt.Sprintf("%.2f", h.MarketPrice),
@@ -505,15 +521,19 @@ func (m Model) knownSymbols() []string {
 }
 
 func (m Model) summaryView() string {
+	ccySuffix := ""
+	if m.baseCurrency != "" {
+		ccySuffix = " " + m.baseCurrency
+	}
 	return m.styles.summary.Render(fmt.Sprintf(
-		"NAV: %.2f | Core: %.2f (%.1f%%) | Satellite: %.2f (%.1f%%) | Unreal. PnL: %+.2f | Real. PnL: %+.2f",
-		m.summary.TotalNAV,
+		"NAV: %.2f%s | Core: %.2f (%.1f%%) | Satellite: %.2f (%.1f%%) | Unreal. PnL: %+.2f%s | Real. PnL: %+.2f%s",
+		m.summary.TotalNAV, ccySuffix,
 		m.summary.CoreNAV,
 		m.summary.CorePercent,
 		m.summary.SatelliteNAV,
 		m.summary.SatellitePercent,
-		m.unrealizedPnL,
-		m.realized,
+		m.unrealizedPnL, ccySuffix,
+		m.realized, ccySuffix,
 	))
 }
 
@@ -612,4 +632,3 @@ func (m Model) txPanelView() string {
 func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
-

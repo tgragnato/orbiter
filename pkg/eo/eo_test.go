@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
@@ -41,8 +40,8 @@ func Test_riskLevelLow(t *testing.T) {
 func generateCandle(diff float64) *ohlc.OHLC {
 	now := time.Now()
 	candle := ohlc.New("test", now, time.Minute, false)
-	candle.NewPrice(decimal.NewFromFloat(10), now)
-	candle.NewPrice(decimal.NewFromFloat(10+diff), now)
+	candle.NewPrice(10, now)
+	candle.NewPrice(10+diff, now)
 	candle.ForceClose()
 	return candle
 }

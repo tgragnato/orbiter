@@ -32,14 +32,9 @@ func (v *Stoch) Insert(o *ohlc.OHLC) {
 		return
 	}
 
-	closePrice, _ := o.Close.Float64()
-	v.closePrices.Insert(closePrice)
-
-	highPrice, _ := o.High.Float64()
-	v.highPrices.Insert(highPrice)
-
-	lowPrice, _ := o.Low.Float64()
-	v.lowPrices.Insert(lowPrice)
+	v.closePrices.Insert(o.Close)
+	v.highPrices.Insert(o.High)
+	v.lowPrices.Insert(o.Low)
 }
 
 func (v *Stoch) Value() (map[string]float64, error) {
@@ -68,4 +63,3 @@ func (v *Stoch) Value() (map[string]float64, error) {
 
 	return m, err
 }
-

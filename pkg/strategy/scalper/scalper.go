@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
@@ -22,9 +21,9 @@ type scalper struct {
 	currentTick   tick.Tick
 }
 
-var (
-	targetPercent   = decimal.NewFromFloat(0.12)
-	stopLossPercent = decimal.NewFromFloat(0.25)
+const (
+	targetPercent   = 0.12
+	stopLossPercent = 0.25
 )
 
 func New(instrument string) *scalper {
@@ -92,7 +91,7 @@ func (mr *scalper) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broke
 }
 
 func getBuyDirection(candle *ohlc.OHLC) broker.BuyDirection {
-	if candle.PerformanceInPercentage().GreaterThanOrEqual(decimal.Zero) {
+	if candle.PerformanceInPercentage() >= 0 {
 		return broker.BuyDirectionLong
 	} else {
 		return broker.BuyDirectionShort
@@ -123,33 +122,33 @@ func (mr *scalper) createOrder(openOHLC *ohlc.OHLC, direction broker.BuyDirectio
 	return broker.NewMarketOrder(direction, size, openOHLC.Instrument, targetPrice, stopLossPrice), nil
 }
 
-func (mr *scalper) calcTargetPrice(direction broker.BuyDirection, t tick.Tick, percentage decimal.Decimal) (decimal.Decimal, error) {
+func (mr *scalper) calcTargetPrice(direction broker.BuyDirection, t tick.Tick, percentage float64) (float64, error) {
 	switch direction {
 	case broker.BuyDirectionLong:
 		var currentPrice = t.Ask
-		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(percentage)
-		return currentPrice.Add(percentFrom).Round(6), nil
+		percentFrom := currentPrice / 100 * percentage
+		return currentPrice + percentFrom, nil
 	case broker.BuyDirectionShort:
 		var currentPrice = t.Bid
-		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(percentage)
-		return currentPrice.Sub(percentFrom).Round(6), nil
+		percentFrom := currentPrice / 100 * percentage
+		return currentPrice - percentFrom, nil
 	default:
-		return decimal.Zero, broker.ErrUnknownBuyDirection
+		return 0, broker.ErrUnknownBuyDirection
 	}
 }
 
-func (mr *scalper) calcStopLossPrice(direction broker.BuyDirection, t tick.Tick, percentage decimal.Decimal) (decimal.Decimal, error) {
+func (mr *scalper) calcStopLossPrice(direction broker.BuyDirection, t tick.Tick, percentage float64) (float64, error) {
 	switch direction {
 	case broker.BuyDirectionLong:
 		var currentPrice = t.Ask
-		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(percentage)
-		return currentPrice.Sub(percentFrom).Round(6), nil
+		percentFrom := currentPrice / 100 * percentage
+		return currentPrice - percentFrom, nil
 	case broker.BuyDirectionShort:
 		var currentPrice = t.Bid
-		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(percentage)
-		return currentPrice.Add(percentFrom).Round(6), nil
+		percentFrom := currentPrice / 100 * percentage
+		return currentPrice + percentFrom, nil
 	default:
-		return decimal.Zero, broker.ErrUnknownBuyDirection
+		return 0, broker.ErrUnknownBuyDirection
 	}
 }
 

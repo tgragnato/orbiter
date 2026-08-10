@@ -55,14 +55,9 @@ func (v *ADX) Insert(o *ohlc.OHLC) {
 		return
 	}
 
-	closePrice, _ := o.Close.Float64()
-	v.closePrices.push(closePrice)
-
-	high, _ := o.High.Float64()
-	v.highPrices.push(high)
-
-	low, _ := o.Low.Float64()
-	v.lowPrices.push(low)
+	v.closePrices.push(o.Close)
+	v.highPrices.push(o.High)
+	v.lowPrices.push(o.Low)
 }
 
 func (v *ADX) Value() (map[string]float64, error) {

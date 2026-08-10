@@ -46,6 +46,12 @@ func (f *fakeSettingsService) GetDataProvider(_ context.Context) (configuration.
 func (f *fakeSettingsService) SetDataProvider(_ context.Context, _ configuration.DataProviderSetting) error {
 	return f.saveErr
 }
+func (f *fakeSettingsService) GetBaseCurrency(_ context.Context) (string, error) {
+	return f.currency, f.loadErr
+}
+func (f *fakeSettingsService) SetBaseCurrency(_ context.Context, _ string) error {
+	return f.saveErr
+}
 
 func TestSettingsTabInitNilService(t *testing.T) {
 	t.Parallel()

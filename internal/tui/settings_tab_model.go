@@ -23,6 +23,10 @@ type SettingsService interface {
 	SetTAA(ctx context.Context, value configuration.TAASetting) error
 	GetCoreSatelliteTargets(ctx context.Context) (configuration.CoreSatelliteTargetSetting, error)
 	SetCoreSatelliteTargets(ctx context.Context, value configuration.CoreSatelliteTargetSetting) error
+	// GetBaseCurrency returns the ISO 4217 portfolio base currency (e.g. "EUR").
+	GetBaseCurrency(ctx context.Context) (string, error)
+	// SetBaseCurrency validates and persists the ISO 4217 portfolio base currency.
+	SetBaseCurrency(ctx context.Context, currency string) error
 }
 
 const (
@@ -287,13 +291,17 @@ func (m SettingsTabModel) loadCmd() tea.Cmd {
 		if err != nil {
 			return settingsLoadedMsg{err: err}
 		}
+		baseCurrency, err := svc.GetBaseCurrency(ctx)
+		if err != nil {
+			return settingsLoadedMsg{err: err}
+		}
 		return settingsLoadedMsg{
 			coreRatio: targets.CoreRatio,
 			satRatio:  targets.SatelliteRatio,
 			rebalance: taa.RebalanceThreshold,
 			costBasis: costBasis,
 			provider:  provider.Provider,
-			currency:  provider.Currency,
+			currency:  baseCurrency,
 		}
 	}
 }
@@ -342,8 +350,10 @@ func (m SettingsTabModel) saveCmd() tea.Cmd {
 		}
 		if err := svc.SetDataProvider(ctx, configuration.DataProviderSetting{
 			Provider: providerStr,
-			Currency: currencyStr,
 		}); err != nil {
+			return settingsSavedMsg{err: err}
+		}
+		if err := svc.SetBaseCurrency(ctx, currencyStr); err != nil {
 			return settingsSavedMsg{err: err}
 		}
 		return settingsSavedMsg{}
@@ -371,7 +381,9 @@ func (m SettingsTabModel) View() string {
 		"",
 		st.sectionTitle.Render("Data Provider"),
 		m.renderSettingsInput("Provider:            ", m.providerInput, m.focused == settingFieldProvider),
-		m.renderSettingsInput("Currency:            ", m.currencyInput, m.focused == settingFieldCurrency),
+		"",
+		st.sectionTitle.Render("Portfolio Currency"),
+		m.renderSettingsInput("Base Currency (ISO): ", m.currencyInput, m.focused == settingFieldCurrency),
 		"",
 	}
 

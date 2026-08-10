@@ -20,8 +20,7 @@ func (v *Volatility) AddOHLC(o *ohlc.OHLC) {
 		return
 	}
 
-	volaFloat, _ := o.VolatilityInPercentage().Float64()
-	v.cb.Insert(volaFloat)
+	v.cb.Insert(o.VolatilityInPercentage())
 }
 
 func (v *Volatility) MedianVolatilityInPercentage() (float64, error) {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
@@ -16,12 +15,12 @@ const maxGapBetweenTicksInSeconds = 60
 // OHLC represents a full candle
 type OHLC struct {
 	Instrument        string
-	Open              decimal.Decimal
-	High              decimal.Decimal
+	Open              float64
+	High              float64
 	HighTime          time.Time
-	Low               decimal.Decimal
+	Low               float64
 	LowTime           time.Time
-	Close             decimal.Decimal
+	Close             float64
 	Start             time.Time
 	End               time.Time
 	Duration          time.Duration
@@ -50,7 +49,7 @@ func (o *OHLC) ForceClose() {
 }
 
 func (o *OHLC) String() string {
-	return fmt.Sprintf("OHLC(%s, Open=%s High=%s Low=%s Close=%s, Start=%s End=%s)",
+	return fmt.Sprintf("OHLC(%s, Open=%g High=%g Low=%g Close=%g, Start=%s End=%s)",
 		o.Instrument, o.Open, o.High, o.Low, o.Close, o.Start, o.End)
 }
 
@@ -62,7 +61,7 @@ func (o *OHLC) Closed() bool {
 // NewPrice handles new price data
 // Returns true if data was considered
 // Returns false if the candle is already closed.
-func (o *OHLC) NewPrice(price decimal.Decimal, now time.Time) bool {
+func (o *OHLC) NewPrice(price float64, now time.Time) bool {
 	if o.Closed() {
 		return false
 	}
@@ -72,10 +71,10 @@ func (o *OHLC) NewPrice(price decimal.Decimal, now time.Time) bool {
 		return false
 	}
 
-	if price.GreaterThan(o.High) {
+	if price > o.High {
 		o.High = price
 		o.HighTime = now
-	} else if price.LessThan(o.Low) {
+	} else if price < o.Low {
 		o.Low = price
 		o.LowTime = now
 	}
@@ -112,19 +111,19 @@ func (o *OHLC) Validate() error {
 	if !o.priceDataSeen {
 		return errors.New("no data received")
 	}
-	if o.Low.GreaterThan(o.High) {
+	if o.Low > o.High {
 		return errors.New("low is higher than High")
 	}
-	if o.Open.GreaterThan(o.High) {
+	if o.Open > o.High {
 		return errors.New("open is higher than High")
 	}
-	if o.Open.LessThan(o.Low) {
+	if o.Open < o.Low {
 		return errors.New("open is lower than Low")
 	}
-	if o.Close.GreaterThan(o.High) {
+	if o.Close > o.High {
 		return errors.New("close is higher than High")
 	}
-	if o.Close.LessThan(o.Low) {
+	if o.Close < o.Low {
 		return errors.New("close is lower than Low")
 	}
 	if o.End.Before(o.Start) {
@@ -136,39 +135,39 @@ func (o *OHLC) Validate() error {
 	return nil
 }
 
-func (o *OHLC) PerformanceFromOpenToHighAbsolute() decimal.Decimal {
-	if o.Open.IsZero() {
-		return decimal.Zero
+func (o *OHLC) PerformanceFromOpenToHighAbsolute() float64 {
+	if o.Open == 0 {
+		return 0
 	}
-	return o.High.Sub(o.Open).Div(o.Open).Mul(decimal.NewFromFloat(100)).Round(4)
+	return ((o.High - o.Open) / o.Open * 100)
 }
 
-func (o *OHLC) PerformanceFromOpenToLowAbsolute() decimal.Decimal {
-	if o.Open.IsZero() {
-		return decimal.Zero
+func (o *OHLC) PerformanceFromOpenToLowAbsolute() float64 {
+	if o.Open == 0 {
+		return 0
 	}
-	return o.Low.Sub(o.Open).Div(o.Open).Mul(decimal.NewFromFloat(100)).Round(4)
+	return ((o.Low - o.Open) / o.Open * 100)
 }
 
-func (o *OHLC) ReversionPerformanceFromHighAbsolute() decimal.Decimal {
-	if o.High.IsZero() {
-		return decimal.Zero
+func (o *OHLC) ReversionPerformanceFromHighAbsolute() float64 {
+	if o.High == 0 {
+		return 0
 	}
-	return o.Close.Sub(o.High).Div(o.High).Mul(decimal.NewFromFloat(100)).Round(4)
+	return ((o.Close - o.High) / o.High * 100)
 }
 
-func (o *OHLC) PerformanceInPercentage() decimal.Decimal {
-	if o.Open.IsZero() {
-		return decimal.Zero
+func (o *OHLC) PerformanceInPercentage() float64 {
+	if o.Open == 0 {
+		return 0
 	}
-	return o.Close.Sub(o.Open).Div(o.Open).Mul(decimal.NewFromFloat(100)).Round(4)
+	return ((o.Close - o.Open) / o.Open * 100)
 }
 
-func (o *OHLC) VolatilityInPercentage() decimal.Decimal {
-	if o.Open.IsZero() {
-		return decimal.Zero
+func (o *OHLC) VolatilityInPercentage() float64 {
+	if o.Open == 0 {
+		return 0
 	}
-	return o.High.Sub(o.Low).Div(o.Open).Mul(decimal.NewFromFloat(100)).Round(4)
+	return ((o.High - o.Low) / o.Open * 100)
 }
 
 func (o *OHLC) Age(now time.Time) time.Duration {
@@ -185,12 +184,12 @@ func (o *OHLC) Store(ctx context.Context, db *sql.DB) error {
 		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 	`,
 		oc.Instrument,
-		oc.Open.String(),
-		oc.High.String(),
+		oc.Open,
+		oc.High,
 		oc.HighTime,
-		oc.Low.String(),
+		oc.Low,
 		oc.LowTime,
-		oc.Close.String(),
+		oc.Close,
 		oc.Start,
 		oc.End,
 		int64(oc.Duration),
@@ -244,10 +243,9 @@ func smoothCandleStart(ts time.Time, period time.Duration) time.Time {
 // ToHeikinAshi calculates a Heikin Ashi candle from two OHLC candles
 func ToHeikinAshi(previous, now *OHLC) *OHLC {
 	ha := *now
-	ha.Open = decimal.Avg(previous.Open, previous.Close)
-	ha.Close = decimal.Avg(now.Open, now.Close, now.High, now.Low)
-	ha.High = decimal.Max(now.High, ha.Open, ha.Close)
-	ha.Low = decimal.Min(now.Low, ha.Open, ha.Close)
+	ha.Open = (previous.Open + previous.Close) / 2
+	ha.Close = (now.Open + now.Close + now.High + now.Low) / 4
+	ha.High = max(now.High, ha.Open, ha.Close)
+	ha.Low = min(now.Low, ha.Open, ha.Close)
 	return &ha
 }
-

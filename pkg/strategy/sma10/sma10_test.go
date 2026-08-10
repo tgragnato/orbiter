@@ -1,11 +1,10 @@
 package sma10
 
 import (
-	"math/rand/v2"
+	"math/rand"
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
@@ -24,7 +23,7 @@ func TestSMA10_OnTick_NoOrders(t *testing.T) {
 	t.Parallel()
 
 	s := New("test", time.Minute*60)
-	currentTick := tick.New("test", time.Now(), decimal.NewFromFloat(100), decimal.NewFromFloat(100))
+	currentTick := tick.New("test", time.Now(), 100, 100)
 
 	toOpen, _, _ := s.OnTick(currentTick)
 	if len(toOpen) != 0 {
@@ -132,10 +131,10 @@ func generateCandles(trend string, instrument string, count int, candleDuration 
 		}
 
 		o := ohlc.New(instrument, now.Add(time.Duration(i)*candleDuration), candleDuration, false)
-		o.Open = decimal.NewFromFloat(open)
-		o.High = decimal.NewFromFloat(high)
-		o.Low = decimal.NewFromFloat(low)
-		o.Close = decimal.NewFromFloat(close)
+		o.Open = open
+		o.High = high
+		o.Low = low
+		o.Close = close
 		o.ForceClose()
 		candles[i] = o
 	}
@@ -147,10 +146,10 @@ func generateCandles(trend string, instrument string, count int, candleDuration 
 	}
 
 	o := ohlc.New("test", now.Add(time.Duration(len(candles)-1)*candleDuration), candleDuration, false)
-	o.Open = candles[len(candles)-2].Open.Mul(decimal.NewFromFloat(multiple))
-	o.High = candles[len(candles)-2].High.Mul(decimal.NewFromFloat(multiple))
-	o.Low = candles[len(candles)-2].Low.Mul(decimal.NewFromFloat(multiple))
-	o.Close = candles[len(candles)-2].Close.Mul(decimal.NewFromFloat(multiple))
+	o.Open = candles[len(candles)-2].Open * multiple
+	o.High = candles[len(candles)-2].High * multiple
+	o.Low = candles[len(candles)-2].Low * multiple
+	o.Close = candles[len(candles)-2].Close * multiple
 	o.ForceClose()
 	candles[len(candles)-1] = o
 

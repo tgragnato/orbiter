@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/helper"
 	indicatorrsi "github.com/tgragnato/orbiter/pkg/indicator/rsi"
@@ -123,24 +122,22 @@ func (d *RSI) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Ord
 	return
 }
 
-func (d *RSI) isSMALongSignal(closePrice decimal.Decimal) bool {
+func (d *RSI) isSMALongSignal(closePrice float64) bool {
 	smaValue, err := d.sma.Value()
 	if err != nil {
 		slog.Warn("No SMA", "error", err)
 		return false
 	}
-	smaPrice := decimal.NewFromFloat(smaValue[sma.Value])
-	return closePrice.GreaterThan(smaPrice)
+	return closePrice > smaValue[sma.Value]
 }
 
-func (d *RSI) isSMAShortSignal(closePrice decimal.Decimal) bool {
+func (d *RSI) isSMAShortSignal(closePrice float64) bool {
 	smaValue, err := d.sma.Value()
 	if err != nil {
 		slog.Warn("No SMA", "error", err)
 		return false
 	}
-	smaPrice := decimal.NewFromFloat(smaValue[sma.Value])
-	return closePrice.LessThan(smaPrice)
+	return closePrice < smaValue[sma.Value]
 }
 
 func (d *RSI) isRSILongSignal() bool {
@@ -166,8 +163,8 @@ func (d *RSI) getRSIValues() (rsiValue float64, err error) {
 
 func (d *RSI) prepareOrder(closedCandle *ohlc.OHLC, direction broker.BuyDirection, size float64) broker.Order {
 	var (
-		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(targetInPercent), direction)
-		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(stopLossInPercent), direction)
+		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, targetInPercent, direction)
+		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, stopLossInPercent, direction)
 	)
 
 	d.clog.Debug("Prepare new order",

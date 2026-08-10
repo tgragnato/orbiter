@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/circularbuffer"
 	"github.com/tgragnato/orbiter/pkg/helper"
@@ -68,8 +67,8 @@ func (d *LowCandle) OnWarmUpCandle(closedCandle *ohlc.OHLC) {
 }
 
 func (d *LowCandle) feedIndicator(closedCandle *ohlc.OHLC) {
-	var high = helper.DecimalToFloat(closedCandle.High)
-	var low = helper.DecimalToFloat(closedCandle.Low)
+	var high = closedCandle.High
+	var low = closedCandle.Low
 	d.sma.Insert(closedCandle)
 	d.previousLows.Insert(low)
 	d.previousHighs.Insert(high)
@@ -102,8 +101,8 @@ func (d *LowCandle) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []brok
 
 func (d *LowCandle) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, toClose []broker.Position) {
 	var closedCandle = closedCandles[len(closedCandles)-1]
-	var closePrice = helper.DecimalToFloat(closedCandle.Close)
-	var lowPrice = helper.DecimalToFloat(closedCandle.Low)
+	var closePrice = closedCandle.Close
+	var lowPrice = closedCandle.Low
 
 	smaValue, err := d.sma.Value()
 	if err != nil {
@@ -120,7 +119,7 @@ func (d *LowCandle) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Or
 		if err != nil {
 			return
 		}
-		if helper.DecimalToFloat(closedCandle.Close) > previousCandlesHigh {
+		if closedCandle.Close > previousCandlesHigh {
 			toClose = d.openPositions
 			return
 		}
@@ -150,8 +149,8 @@ func (d *LowCandle) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Or
 
 func (d *LowCandle) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, toClose []broker.Position) {
 	var closedCandle = closedCandles[len(closedCandles)-1]
-	var closePrice = helper.DecimalToFloat(closedCandle.Close)
-	var highPrice = helper.DecimalToFloat(closedCandle.High)
+	var closePrice = closedCandle.Close
+	var highPrice = closedCandle.High
 
 	smaValue, err := d.sma.Value()
 	if err != nil {
@@ -168,7 +167,7 @@ func (d *LowCandle) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 		if err != nil {
 			return
 		}
-		if helper.DecimalToFloat(closedCandle.Close) < previousCandlesLow {
+		if closedCandle.Close < previousCandlesLow {
 			toClose = append(toClose, d.openPositions[i])
 			return
 		}
@@ -198,8 +197,8 @@ func (d *LowCandle) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 
 func (d *LowCandle) prepareOrder(closedCandle *ohlc.OHLC, direction broker.BuyDirection, size float64) broker.Order {
 	var (
-		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(targetInPercent), direction)
-		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(stopLossInPercent), direction)
+		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, targetInPercent, direction)
+		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, stopLossInPercent, direction)
 	)
 
 	d.clog.Debug("Prepare new order",
@@ -240,29 +239,27 @@ func (d *LowCandle) Score(closedCandles []*ohlc.OHLC) float64 {
 		return 0
 	}
 
-	// Convert float64 to decimal.Decimal for consistent arithmetic
-	prevLow := decimal.NewFromFloat(prevLowFloat)
-	prevHigh := decimal.NewFromFloat(prevHighFloat)
+	// Convert float64 to float64 for consistent arithmetic
+	prevLow := prevLowFloat
+	prevHigh := prevHighFloat
 
 	// We need a normalization factor. Let's use the total historical range.
-	totalRange := prevHigh.Sub(prevLow)
+	totalRange := prevHigh - prevLow
 
-	if totalRange.Sign() == 0 {
+	if totalRange == 0 {
 		return 0
 	}
 
 	// Normalize the distance.
 	// If close < prevLow, score = (prevLow - close) / totalRange (positive)
-	if closePrice.LessThan(prevLow) {
-		scoreDecimal := prevLow.Sub(closePrice).Div(totalRange)
-		score, _ := scoreDecimal.Float64()
+	if closePrice < prevLow {
+		score := (prevLow - closePrice) / totalRange
 		return score
 	}
 
 	// If close > prevHigh, score = (close - prevHigh) / totalRange (negative)
-	if closePrice.GreaterThan(prevHigh) {
-		scoreDecimal := closePrice.Sub(prevHigh).Div(totalRange)
-		score, _ := scoreDecimal.Float64()
+	if closePrice > prevHigh {
+		score := (closePrice - prevHigh) / totalRange
 		return -score
 	}
 

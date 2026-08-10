@@ -9,7 +9,6 @@ import (
 	"time"
 
 	talib "github.com/markcheno/go-talib"
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/internal/ml"
 	"github.com/tgragnato/orbiter/internal/portfolio"
 	"github.com/tgragnato/orbiter/internal/portfolio/data"
@@ -103,7 +102,7 @@ func ExtractMLSamples(ctx context.Context, store portfolio.HoldingsStore, provid
 }
 
 // candleToOHLC converts a data.Candle (float64 fields) to *ohlc.OHLC
-// (decimal.Decimal fields) so strategy indicators can consume it.
+// (float64 fields) so strategy indicators can consume it.
 // The resulting candle is treated as a closed EOD bar.
 func candleToOHLC(c data.Candle, symbol string) *ohlc.OHLC {
 	price := c.AdjustedClose
@@ -111,10 +110,10 @@ func candleToOHLC(c data.Candle, symbol string) *ohlc.OHLC {
 		price = c.Close
 	}
 	o := ohlc.New(symbol, c.Time, 24*time.Hour, false)
-	o.Open = decimal.NewFromFloat(c.Open)
-	o.High = decimal.NewFromFloat(c.High)
-	o.Low = decimal.NewFromFloat(c.Low)
-	o.Close = decimal.NewFromFloat(price)
+	o.Open = c.Open
+	o.High = c.High
+	o.Low = c.Low
+	o.Close = price
 	// EOD bars are always closed; ForceClose is required so pkg/indicator
 	// implementations (rsi, adx, sma, stoch, stochrsi) don't silently drop
 	// the bar when checking o.Closed().

@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
@@ -25,7 +24,7 @@ func TestDoji_OnWarmUpCandle(t *testing.T) {
 
 	d := New("test")
 	c := ohlc.New("test", time.Now(), time.Minute*60, false)
-	c.NewPrice(decimal.NewFromFloat(100), c.Start)
+	c.NewPrice(100, c.Start)
 	c.ForceClose()
 
 	d.OnWarmUpCandle(c)
@@ -40,8 +39,8 @@ func TestDoji_OnTick_Long(t *testing.T) {
 	d := New("test")
 	// Mock a DOJI candle
 	prevCandle := ohlc.New("test", time.Now(), time.Minute*60, false)
-	prevCandle.NewPrice(decimal.NewFromFloat(100), prevCandle.Start)
-	prevCandle.NewPrice(decimal.NewFromFloat(100.01), prevCandle.Start)
+	prevCandle.NewPrice(100, prevCandle.Start)
+	prevCandle.NewPrice(100.01, prevCandle.Start)
 	prevCandle.ForceClose()
 	// High: 100.01, Low: 100
 
@@ -49,7 +48,7 @@ func TestDoji_OnTick_Long(t *testing.T) {
 
 	// Tick breaks high by > 2 pips (0.0002)
 	// 100.01 + 0.0002 = 100.0102
-	currentTick := tick.New("test", time.Now(), decimal.NewFromFloat(100.0103), decimal.NewFromFloat(100.0103))
+	currentTick := tick.New("test", time.Now(), 100.0103, 100.0103)
 
 	toOpen, _, _ := d.OnTick(currentTick)
 	if len(toOpen) != 1 {
@@ -66,8 +65,8 @@ func TestDoji_OnTick_Short(t *testing.T) {
 	d := New("test")
 	// Mock a DOJI candle
 	prevCandle := ohlc.New("test", time.Now(), time.Minute*60, false)
-	prevCandle.NewPrice(decimal.NewFromFloat(100), prevCandle.Start)
-	prevCandle.NewPrice(decimal.NewFromFloat(100.01), prevCandle.Start)
+	prevCandle.NewPrice(100, prevCandle.Start)
+	prevCandle.NewPrice(100.01, prevCandle.Start)
 	prevCandle.ForceClose()
 	// High: 100.01, Low: 100
 
@@ -75,7 +74,7 @@ func TestDoji_OnTick_Short(t *testing.T) {
 
 	// Tick breaks low by > 2 pips (0.0002)
 	// 100 - 0.0002 = 99.9998
-	currentTick := tick.New("test", time.Now(), decimal.NewFromFloat(99.9997), decimal.NewFromFloat(99.9997))
+	currentTick := tick.New("test", time.Now(), 99.9997, 99.9997)
 
 	toOpen, _, _ := d.OnTick(currentTick)
 	if len(toOpen) != 1 {
@@ -100,8 +99,8 @@ func TestDoji_Score(t *testing.T) {
 	t.Run("DOJI Candle Active", func(t *testing.T) {
 		d := New("test")
 		c := ohlc.New("test", time.Now(), time.Minute*60, false)
-		c.NewPrice(decimal.NewFromFloat(100), c.Start)
-		c.NewPrice(decimal.NewFromFloat(100.01), c.Start)
+		c.NewPrice(100, c.Start)
+		c.NewPrice(100.01, c.Start)
 		c.ForceClose()
 
 		d.OnWarmUpCandle(c)
@@ -115,8 +114,8 @@ func TestDoji_Score(t *testing.T) {
 	t.Run("Non-DOJI Normal Range", func(t *testing.T) {
 		d := New("test")
 		c := ohlc.New("test", time.Now(), time.Minute*60, false)
-		c.NewPrice(decimal.NewFromFloat(100), c.Start)
-		c.NewPrice(decimal.NewFromFloat(105), c.Start) // 5% performance, not DOJI
+		c.NewPrice(100, c.Start)
+		c.NewPrice(105, c.Start) // 5% performance, not DOJI
 		c.ForceClose()
 
 		d.OnWarmUpCandle(c)
@@ -130,10 +129,10 @@ func TestDoji_Score(t *testing.T) {
 	t.Run("Close Above High Breakout", func(t *testing.T) {
 		d := New("test")
 		c := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(100.0),
-			High:  decimal.NewFromFloat(102.0),
-			Low:   decimal.NewFromFloat(99.0),
-			Close: decimal.NewFromFloat(103.0), // Close > High
+			Open:  100.0,
+			High:  102.0,
+			Low:   99.0,
+			Close: 103.0, // Close > High
 			Start: time.Now(),
 			End:   time.Now().Add(time.Hour),
 		}
@@ -150,10 +149,10 @@ func TestDoji_Score(t *testing.T) {
 	t.Run("Close Below Low Breakout", func(t *testing.T) {
 		d := New("test")
 		c := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(100.0),
-			High:  decimal.NewFromFloat(101.0),
-			Low:   decimal.NewFromFloat(98.0),
-			Close: decimal.NewFromFloat(97.0), // Close < Low
+			Open:  100.0,
+			High:  101.0,
+			Low:   98.0,
+			Close: 97.0, // Close < Low
 			Start: time.Now(),
 			End:   time.Now().Add(time.Hour),
 		}

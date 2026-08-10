@@ -27,6 +27,9 @@ const (
 	KeyTUIPreferences = "tui_preferences"
 	// KeyYahooCredentials stores Yahoo provider credentials/options.
 	KeyYahooCredentials = "credentials.yahoo"
+	// KeyPortfolioBaseCurrency stores the ISO 4217 currency code used as the
+	// portfolio's base currency for NAV aggregation, TWR, and P&L reporting.
+	KeyPortfolioBaseCurrency = "portfolio.base_currency"
 )
 
 // Setting is a key-value configuration row persisted in PostgreSQL.
@@ -70,6 +73,12 @@ type TUIPreferenceSetting struct {
 // YahooCredentialsSetting persists data provider credentials.
 type YahooCredentialsSetting struct {
 	APIKey string `json:"api_key"`
+}
+
+// PortfolioBaseCurrencySetting stores the ISO 4217 base currency for the portfolio.
+// All NAV snapshots, TWR, and aggregated P&L are expressed in this currency.
+type PortfolioBaseCurrencySetting struct {
+	Currency string `json:"currency"`
 }
 
 var defaultSettings = map[string]struct {
@@ -117,5 +126,10 @@ var defaultSettings = map[string]struct {
 		scope:       "credentials",
 		description: "Yahoo Finance credentials",
 		value:       YahooCredentialsSetting{APIKey: ""},
+	},
+	KeyPortfolioBaseCurrency: {
+		scope:       "portfolio",
+		description: "ISO 4217 base currency for NAV, TWR, and P&L aggregation",
+		value:       PortfolioBaseCurrencySetting{Currency: "EUR"},
 	},
 }

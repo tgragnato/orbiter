@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
@@ -21,7 +20,7 @@ func TestSMA_Value(t *testing.T) {
 		o := ohlc.New("test", now, time.Minute, false)
 		total += i
 		prices++
-		o.NewPrice(decimal.NewFromFloat(float64(i)), o.Start)
+		o.NewPrice(float64(i), o.Start)
 		o.ForceClose()
 		sma20.Insert(o)
 		if i < 20 {

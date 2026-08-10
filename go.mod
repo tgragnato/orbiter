@@ -10,7 +10,6 @@ require (
 	github.com/guptarohit/asciigraph v0.10.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/markcheno/go-talib v0.0.0-20260617004048-4ff5e103edd9
-	github.com/shopspring/decimal v1.4.0
 )
 
 require (

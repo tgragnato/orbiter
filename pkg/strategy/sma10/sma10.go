@@ -95,7 +95,7 @@ func (d *SMA) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Ord
 
 func (d *SMA) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, toClose []broker.Position) {
 	var closedCandle = closedCandles[len(closedCandles)-1]
-	var closePrice = helper.DecimalToFloat(closedCandle.Close)
+	var closePrice = closedCandle.Close
 
 	smaValue, err := d.sma.Value()
 	if err != nil {
@@ -114,7 +114,7 @@ func (d *SMA) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, t
 		if d.openPositions[i].BuyDirection != broker.BuyDirectionLong {
 			continue
 		}
-		if helper.DecimalToFloat(closedCandle.Close) > sma10Price {
+		if closedCandle.Close > sma10Price {
 			toClose = d.openPositions
 			return
 		}
@@ -138,7 +138,7 @@ func (d *SMA) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, t
 
 func (d *SMA) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, toClose []broker.Position) {
 	var closedCandle = closedCandles[len(closedCandles)-1]
-	var closePrice = helper.DecimalToFloat(closedCandle.Close)
+	var closePrice = closedCandle.Close
 
 	smaValue, err := d.sma.Value()
 	if err != nil {
@@ -157,7 +157,7 @@ func (d *SMA) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, 
 		if d.openPositions[i].BuyDirection != broker.BuyDirectionShort {
 			continue
 		}
-		if helper.DecimalToFloat(closedCandle.Close) < sma10Price {
+		if closedCandle.Close < sma10Price {
 			toClose = d.openPositions
 			return
 		}
@@ -181,8 +181,8 @@ func (d *SMA) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, 
 
 func (d *SMA) prepareOrder(closedCandle *ohlc.OHLC, direction broker.BuyDirection, size float64) broker.Order {
 	var (
-		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(targetInPercent), direction)
-		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(stopLossInPercent), direction)
+		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, targetInPercent, direction)
+		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, stopLossInPercent, direction)
 	)
 
 	d.clog.Debug("Prepare new order",
@@ -229,7 +229,7 @@ func (d *SMA) Score(closedCandles []*ohlc.OHLC) float64 {
 		return 0
 	}
 
-	closePrice := helper.DecimalToFloat(closedCandles[len(closedCandles)-1].Close)
+	closePrice := closedCandles[len(closedCandles)-1].Close
 
 	// Long setup: above SMA-200 trend filter, price dipped below fast SMA-10.
 	if closePrice > sma200 && closePrice < sma10 {

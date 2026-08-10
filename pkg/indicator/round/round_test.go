@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
@@ -60,7 +59,7 @@ func TestRoundnum_Value(t *testing.T) {
 
 	for _, tc := range testCases {
 		o := ohlc.New("test", now, time.Minute, false)
-		o.NewPrice(decimal.NewFromFloat(tc.price), o.Start)
+		o.NewPrice(tc.price, o.Start)
 		o.ForceClose()
 		rn.Insert(o)
 

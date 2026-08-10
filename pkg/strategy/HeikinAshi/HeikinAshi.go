@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/indicator"
 	"github.com/tgragnato/orbiter/pkg/indicator/sma"
@@ -93,9 +93,9 @@ func (ha *HeikinAshi) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []br
 
 	var direction broker.BuyDirection
 	switch {
-	case isLongCandle(haNow) && isLongCandle(haPrevious) && haNow.Close.GreaterThan(haPrevious.Close):
+	case isLongCandle(haNow) && isLongCandle(haPrevious) && haNow.Close > haPrevious.Close:
 		direction = broker.BuyDirectionLong
-	case isShortCandle(haNow) && isShortCandle(haPrevious) && haNow.Close.LessThan(haPrevious.Close):
+	case isShortCandle(haNow) && isShortCandle(haPrevious) && haNow.Close < haPrevious.Close:
 		direction = broker.BuyDirectionShort
 	default:
 		// undecided
@@ -164,7 +164,7 @@ func (ha *HeikinAshi) createOrder(haCandle *ohlc.OHLC, currentTick tick.Tick, vo
 	if err != nil {
 		return broker.Order{}, err
 	}
-	volaTarget := decimal.NewFromFloat(volaTargetFloat).Abs().Mul(decimal.NewFromFloat(2))
+	volaTarget := math.Abs(volaTargetFloat) * 2
 
 	targetPrice, err := ha.calcTargetPrice(direction, currentTick, volaTarget)
 	if err != nil {
@@ -191,11 +191,11 @@ func (ha *HeikinAshi) createOrder(haCandle *ohlc.OHLC, currentTick tick.Tick, vo
 }
 
 func isShortCandle(candle *ohlc.OHLC) bool {
-	return candle.Close.LessThan(candle.Open)
+	return candle.Close < candle.Open
 }
 
 func isLongCandle(candle *ohlc.OHLC) bool {
-	return candle.Close.GreaterThan(candle.Open)
+	return candle.Close > candle.Open
 }
 
 func (ha *HeikinAshi) checkCandleAmount(direction broker.BuyDirection, offset int) error {
@@ -214,7 +214,7 @@ func (ha *HeikinAshi) checkCandleAmount(direction broker.BuyDirection, offset in
 	candlesInDirection := 0
 	for _, candle := range candles {
 		var candleDirection broker.BuyDirection
-		if candle.PerformanceInPercentage().GreaterThanOrEqual(decimal.Zero) {
+		if candle.Close >= candle.Open {
 			candleDirection = broker.BuyDirectionLong
 		} else {
 			candleDirection = broker.BuyDirectionShort
@@ -231,35 +231,35 @@ func (ha *HeikinAshi) checkCandleAmount(direction broker.BuyDirection, offset in
 	return nil
 }
 
-func (ha *HeikinAshi) calcTargetPrice(direction broker.BuyDirection, t tick.Tick, perfMarginInPercentage decimal.Decimal) (decimal.Decimal, error) {
+func (ha *HeikinAshi) calcTargetPrice(direction broker.BuyDirection, t tick.Tick, perfMarginInPercentage float64) (float64, error) {
 	switch direction {
 	case broker.BuyDirectionLong:
 		var currentPrice = t.Ask
-		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(perfMarginInPercentage)
-		return currentPrice.Add(percentFrom).Round(6), nil
+		percentFrom := currentPrice * perfMarginInPercentage / 100
+		return currentPrice + percentFrom, nil
 	case broker.BuyDirectionShort:
 		var currentPrice = t.Bid
-		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(perfMarginInPercentage)
-		return currentPrice.Sub(percentFrom).Round(6), nil
+		percentFrom := currentPrice * perfMarginInPercentage / 100
+		return currentPrice - percentFrom, nil
 	default:
-		return decimal.Zero, errors.New("unknown direction")
+		return 0, errors.New("unknown direction")
 	}
 }
 
-func (ha *HeikinAshi) calcStopLossPrice(direction broker.BuyDirection, t tick.Tick) (decimal.Decimal, error) {
+func (ha *HeikinAshi) calcStopLossPrice(direction broker.BuyDirection, t tick.Tick) (float64, error) {
 	volaMaxFloat, err := ha.volaTracker.VolatilityInPercentageQuantile(0.95)
 	if err != nil {
-		return decimal.Zero, err
+		return 0, err
 	}
-	volaMax := decimal.NewFromFloat(volaMaxFloat).Abs()
+	volaMax := math.Abs(volaMaxFloat)
 
 	switch direction {
 	case broker.BuyDirectionLong:
-		return t.Price().Sub(volaMax), nil
+		return t.Price() - volaMax, nil
 	case broker.BuyDirectionShort:
-		return t.Price().Add(volaMax), nil
+		return t.Price() + volaMax, nil
 	default:
-		return decimal.Zero, errors.New("unknown direction")
+		return 0, errors.New("unknown direction")
 	}
 }
 
@@ -283,23 +283,20 @@ func (ha *HeikinAshi) Score(closedCandles []*ohlc.OHLC) float64 {
 	haPrev := ohlc.ToHeikinAshi(closedCandles[len(closedCandles)-3], closedCandles[len(closedCandles)-2])
 
 	// Calculate the total range of the two candles
-	rangePrev := haPrev.High.Sub(haPrev.Low)
-	rangeNow := haNow.High.Sub(haNow.Low)
-	totalRange := rangePrev.Add(rangeNow)
+	rangePrev := haPrev.High - haPrev.Low
+	rangeNow := haNow.High - haNow.Low
+	totalRange := rangePrev + rangeNow
 
-	if totalRange.Sign() == 0 {
+	if totalRange == 0 {
 		return 0
 	}
 
 	// Calculate the difference between the current and previous close
-	diff := haNow.Close.Sub(haPrev.Close)
+	diff := haNow.Close - haPrev.Close
 
 	// Calculate the normalized position of the current close within the combined range
 	// Score = diff / totalRange
-	scoreDecimal := diff.Div(totalRange)
-
-	// Convert the decimal score to float64 and clamp it to [-1.0, +1.0]
-	score, _ := scoreDecimal.Float64()
+	score := diff / totalRange
 
 	if score > 1.0 {
 		return 1.0

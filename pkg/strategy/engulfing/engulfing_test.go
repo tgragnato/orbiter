@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
@@ -30,10 +29,10 @@ func generateTestCandles(count int, startPrice float64, step float64) []*ohlc.OH
 		}
 
 		c := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(open),
-			High:  decimal.NewFromFloat(high),
-			Low:   decimal.NewFromFloat(low),
-			Close: decimal.NewFromFloat(close),
+			Open:  open,
+			High:  high,
+			Low:   low,
+			Close: close,
 			Start: start.Add(time.Duration(i) * time.Hour),
 			End:   start.Add(time.Duration(i+1) * time.Hour),
 		}
@@ -56,7 +55,7 @@ func TestEngulfing_OnTick_NoOrders(t *testing.T) {
 	t.Parallel()
 
 	e := New("test", time.Minute*60)
-	currentTick := tick.New("test", time.Now(), decimal.NewFromFloat(100), decimal.NewFromFloat(100))
+	currentTick := tick.New("test", time.Now(), 100, 100)
 
 	toOpen, _, _ := e.OnTick(currentTick)
 	if len(toOpen) != 0 {
@@ -101,20 +100,20 @@ func TestEngulfing_Score(t *testing.T) {
 		e := New("test", time.Minute*60)
 
 		prev := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(100.0),
-			High:  decimal.NewFromFloat(101.0),
-			Low:   decimal.NewFromFloat(99.0),
-			Close: decimal.NewFromFloat(100.0), // Zero body (Doji)
+			Open:  100.0,
+			High:  101.0,
+			Low:   99.0,
+			Close: 100.0, // Zero body (Doji)
 			Start: time.Now(),
 			End:   time.Now().Add(time.Hour),
 		}
 		prev.ForceClose()
 
 		current := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(101.0),
-			High:  decimal.NewFromFloat(102.0),
-			Low:   decimal.NewFromFloat(98.0),
-			Close: decimal.NewFromFloat(99.0),
+			Open:  101.0,
+			High:  102.0,
+			Low:   98.0,
+			Close: 99.0,
 			Start: time.Now().Add(time.Hour),
 			End:   time.Now().Add(time.Hour * 2),
 		}
@@ -131,10 +130,10 @@ func TestEngulfing_Score(t *testing.T) {
 
 		// Previous candle: Bullish (Open: 90, Close: 100) -> Body: 10
 		prev := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(90.0),
-			High:  decimal.NewFromFloat(101.0),
-			Low:   decimal.NewFromFloat(89.0),
-			Close: decimal.NewFromFloat(100.0),
+			Open:  90.0,
+			High:  101.0,
+			Low:   89.0,
+			Close: 100.0,
 			Start: time.Now(),
 			End:   time.Now().Add(time.Hour),
 		}
@@ -142,10 +141,10 @@ func TestEngulfing_Score(t *testing.T) {
 
 		// Current candle: Bearish (Open: 101, Close: 89) -> Body: 12
 		curr := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(101.0),
-			High:  decimal.NewFromFloat(102.0),
-			Low:   decimal.NewFromFloat(88.0),
-			Close: decimal.NewFromFloat(89.0),
+			Open:  101.0,
+			High:  102.0,
+			Low:   88.0,
+			Close: 89.0,
 			Start: time.Now().Add(time.Hour),
 			End:   time.Now().Add(time.Hour * 2),
 		}
@@ -162,10 +161,10 @@ func TestEngulfing_Score(t *testing.T) {
 
 		// Previous candle: Bearish (Open: 100, Close: 90) -> Body: 10
 		prev := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(100.0),
-			High:  decimal.NewFromFloat(101.0),
-			Low:   decimal.NewFromFloat(89.0),
-			Close: decimal.NewFromFloat(90.0),
+			Open:  100.0,
+			High:  101.0,
+			Low:   89.0,
+			Close: 90.0,
 			Start: time.Now(),
 			End:   time.Now().Add(time.Hour),
 		}
@@ -173,10 +172,10 @@ func TestEngulfing_Score(t *testing.T) {
 
 		// Current candle: Bullish (Open: 91, Close: 98) -> Body: 7
 		curr := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(91.0),
-			High:  decimal.NewFromFloat(99.0),
-			Low:   decimal.NewFromFloat(90.0),
-			Close: decimal.NewFromFloat(98.0),
+			Open:  91.0,
+			High:  99.0,
+			Low:   90.0,
+			Close: 98.0,
 			Start: time.Now().Add(time.Hour),
 			End:   time.Now().Add(time.Hour * 2),
 		}

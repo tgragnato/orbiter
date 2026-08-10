@@ -143,7 +143,7 @@ import (
     "fmt"
     "time"
 
-    "github.com/shopspring/decimal"  // 2. third-party
+    "github.com/markcheno/go-talib"  // 2. third-party
 
     "github.com/tgragnato/orbiter/internal/portfolio"  // 3. internal
     "github.com/tgragnato/orbiter/pkg/ohlc"
@@ -205,27 +205,6 @@ func (s *StochRSI) OnCandle(closedCandle *ohlc.OHLC) {
     // evaluate signal purely on indicator values
 }
 ```
-
----
-
-## Financial Arithmetic
-
-Use `github.com/shopspring/decimal` for all financial values where precision matters: prices, NAV, PMC, PnL, fee amounts.
-
-Use `float64` only where approximate values are acceptable and precision loss is documented: conviction scores `[-1.0, +1.0]`, ML feature vectors, indicator intermediates, percentage returns.
-
-```go
-// correct — position value in domain model
-MarketValue() decimal.Decimal { return h.Quantity.Mul(h.MarketPrice) }
-
-// correct — ML conviction score, precision loss acceptable
-conviction := math.Tanh(forest.Predict(features) / scale)
-
-// wrong — financial comparison using float64
-if marketPrice <= pmc {  // only correct when both are float64 by design (TAA engine)
-```
-
-The TAA engine intentionally uses `float64` for market prices and PMC because its inputs come from an approximation layer (Yahoo Finance) and the precision of float64 is adequate for the threshold comparisons it performs. Document such exceptions explicitly.
 
 ---
 
@@ -583,7 +562,6 @@ Prefer the Go standard library. A new dependency is justified only when it provi
 |---|---|
 | `charmbracelet/bubbletea`, `bubbles`, `lipgloss` | Terminal UI — no stdlib equivalent |
 | `jackc/pgx/v5` | PostgreSQL driver — `database/sql` requires a driver |
-| `shopspring/decimal` | Exact decimal arithmetic — `float64` unsuitable for financial values |
 | `markcheno/go-talib` | TA-Lib indicator algorithms (RSI, ADX, Stoch, StochRSI) |
 | `DATA-DOG/go-sqlmock` | SQL mock for unit tests — test-only |
 

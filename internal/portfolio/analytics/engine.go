@@ -44,9 +44,10 @@ type TWRPeriodDetails struct {
 
 // TWRResult contains total chained TWR and per-period diagnostics.
 type TWRResult struct {
-	PortfolioID string
-	TotalReturn float64
-	Periods     []TWRPeriodDetails
+	PortfolioID  string
+	BaseCurrency string // ISO 4217 currency of all NAV snapshots (empty = unknown)
+	TotalReturn  float64
+	Periods      []TWRPeriodDetails
 }
 
 // TransactionFlow is one cash-flow entry derived from a trade transaction.

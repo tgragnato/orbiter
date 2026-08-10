@@ -18,7 +18,7 @@ func (f fakeSignalReadModel) Drain() []signal.Message   { return f.messages }
 func TestRootModelInit(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	if cmd := model.Init(); cmd == nil {
 		t.Fatalf("Init() cmd = nil, want non-nil")
 	}
@@ -27,7 +27,7 @@ func TestRootModelInit(t *testing.T) {
 func TestRootModelTabSwitch(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	model = updated.(RootModel)
 
@@ -42,7 +42,7 @@ func TestRootModelTabSwitch(t *testing.T) {
 func TestRootModelQuitStopsUpdateLoop(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	model = updated.(RootModel)
 
@@ -63,7 +63,7 @@ func TestRootModelQuitStopsUpdateLoop(t *testing.T) {
 func TestRootModelView(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	view := model.View()
 	if view == "" {
 		t.Fatalf("View() empty, want non-empty")
@@ -77,7 +77,7 @@ func TestRootModelView(t *testing.T) {
 func TestRootModelViewQuitting(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	model.quitting = true
 	if got := model.View(); got != "" {
 		t.Fatalf("View() while quitting = %q, want empty", got)
@@ -87,7 +87,7 @@ func TestRootModelViewQuitting(t *testing.T) {
 func TestRootModelViewSignalsTab(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	model = updated.(RootModel)
 
@@ -100,7 +100,7 @@ func TestRootModelViewSignalsTab(t *testing.T) {
 func TestRootModelShiftTabNavigation(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 
 	// holdings(0) → shift+tab → analytics(5) [wraps to last tab]
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
@@ -157,7 +157,7 @@ func TestRootModelShiftTabNavigation(t *testing.T) {
 func TestRootModelTabLAndHKeys(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
 	model = updated.(RootModel)
 	if model.activeTab != tabSignals {
@@ -174,7 +174,7 @@ func TestRootModelTabLAndHKeys(t *testing.T) {
 func TestRootModelForwardCyclesSixTabs(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	// holdings(0) → tab → signals(1)
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	model = updated.(RootModel)
@@ -216,7 +216,7 @@ func TestRootModelForwardCyclesSixTabs(t *testing.T) {
 func TestRootModelSettingsTabView(t *testing.T) {
 	t.Parallel()
 
-	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	// Navigate to settings tab
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	updated, _ = updated.(RootModel).Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -235,7 +235,7 @@ func TestRootModelSignalsTabMessageRouting(t *testing.T) {
 
 	model := NewRootModelWithMetrics(&fakeHoldingsStore{}, fakeSignalReadModel{
 		messages: []signal.Message{{Type: signal.TypeBuy, Summary: "test"}},
-	}, defaultPortfolioID, nil, nil, nil, nil, nil)
+	}, defaultPortfolioID, nil, nil, nil, nil, nil, "")
 	// Switch to signals tab
 	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	model = updated.(RootModel)

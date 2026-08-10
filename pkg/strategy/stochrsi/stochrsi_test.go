@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
@@ -24,7 +23,7 @@ func TestStochRSI_OnTick_NoOrders(t *testing.T) {
 	t.Parallel()
 
 	s := New("test")
-	currentTick := tick.New("test", time.Now(), decimal.NewFromFloat(100), decimal.NewFromFloat(100))
+	currentTick := tick.New("test", time.Now(), 100, 100)
 
 	toOpen, _, _ := s.OnTick(currentTick)
 	if len(toOpen) != 0 {
@@ -47,7 +46,7 @@ func generateSimpleCandles(isBullish bool) []*ohlc.OHLC {
 		}
 
 		o := ohlc.New("test", now.Add(time.Duration(i)*time.Minute), time.Minute, false)
-		o.NewPrice(decimal.NewFromFloat(price), o.Start)
+		o.NewPrice(price, o.Start)
 		o.ForceClose()
 
 		candles[i-1] = o
@@ -81,10 +80,10 @@ func TestRSI_Score(t *testing.T) {
 			instrument: "CAD/USD",
 			closedCandles: []*ohlc.OHLC{
 				{
-					Open:  decimal.NewFromFloat(2.0),
-					High:  decimal.NewFromFloat(3.0),
-					Low:   decimal.NewFromFloat(1.0),
-					Close: decimal.NewFromFloat(1.5),
+					Open:  2.0,
+					High:  3.0,
+					Low:   1.0,
+					Close: 1.5,
 					Start: time.Now().Add(time.Hour),
 					End:   time.Now().Add(2 * time.Hour),
 				},
@@ -138,10 +137,10 @@ func TestRSI_Score(t *testing.T) {
 			instrument: "CAD/USD",
 			closedCandles: []*ohlc.OHLC{
 				{
-					Open:  decimal.NewFromFloat(2.0),
-					High:  decimal.NewFromFloat(3.0),
-					Low:   decimal.NewFromFloat(1.0),
-					Close: decimal.NewFromFloat(1.5),
+					Open:  2.0),
+					High:  3.0),
+					Low:   1.0),
+					Close: 1.5),
 					Start: time.Now().Add(time.Hour),
 					End:   time.Now().Add(2 * time.Hour),
 				},

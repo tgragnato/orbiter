@@ -47,12 +47,12 @@ func TestPostgresStoreListHoldingsAndToggle(t *testing.T) {
 
 	store := NewPostgresStore(db)
 
-	rows := sqlmock.NewRows([]string{"id", "symbol", "quantity", "market_price", "pmc", "allocation_type", "taa_enabled"}).
-		AddRow(1, "VWCE.DE", 2.0, 100.0, 95.0, "CORE", true).
-		AddRow(2, "ZPRV.DE", 1.0, 50.0, 0.0, "SATELLITE", false)
+	rows := sqlmock.NewRows([]string{"id", "symbol", "quantity", "market_price", "pmc", "allocation_type", "taa_enabled", "currency"}).
+		AddRow(1, "VWCE.DE", 2.0, 100.0, 95.0, "CORE", true, "EUR").
+		AddRow(2, "ZPRV.DE", 1.0, 50.0, 0.0, "SATELLITE", false, "USD")
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
-		SELECT id, symbol, quantity, market_price, pmc, allocation_type, taa_enabled
+		SELECT id, symbol, quantity, market_price, pmc, allocation_type, taa_enabled, currency
 		FROM holdings
 		ORDER BY symbol, id
 	`)).WillReturnRows(rows)
@@ -119,14 +119,14 @@ func TestPostgresStoreAddTransactionRecalculatesHolding(t *testing.T) {
 	store := NewPostgresStore(db)
 	executedAt := txBase
 
-	// 1. INSERT INTO transactions
+	// 1. INSERT INTO transactions (now includes currency column)
 	mock.ExpectExec("INSERT INTO transactions").
-		WithArgs("VWCE.MI", "BUY", 10.0, 100.0, 2.0, "SATELLITE", executedAt).
+		WithArgs("VWCE.MI", "BUY", 10.0, 100.0, 2.0, "SATELLITE", "", executedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// 2. ListTransactions(ctx, "VWCE.MI") — called by recalculateSymbol
-	txRows := sqlmock.NewRows([]string{"id", "symbol", "transaction_type", "quantity", "price", "fee", "allocation_type", "executed_at", "created_at"}).
-		AddRow(1, "VWCE.MI", "BUY", 10.0, 100.0, 2.0, "SATELLITE", executedAt, executedAt)
+	txRows := sqlmock.NewRows([]string{"id", "symbol", "transaction_type", "quantity", "price", "fee", "allocation_type", "currency", "executed_at", "created_at"}).
+		AddRow(1, "VWCE.MI", "BUY", 10.0, 100.0, 2.0, "SATELLITE", "", executedAt, executedAt)
 	mock.ExpectQuery("FROM transactions").WithArgs("VWCE.MI").WillReturnRows(txRows)
 
 	// 3. listSplitsForSymbol — no splits recorded for this symbol yet
@@ -136,9 +136,9 @@ func TestPostgresStoreAddTransactionRecalculatesHolding(t *testing.T) {
 	// 4. BEGIN
 	mock.ExpectBegin()
 
-	// 5. Read existing market_price, taa_enabled, allocation_type — returns defaults for new holding
+	// 5. Read existing market_price, taa_enabled, allocation_type, currency — defaults for new holding
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("VWCE.MI").
-		WillReturnRows(sqlmock.NewRows([]string{"price", "taa_enabled", "alloc_type"}).AddRow(98.5, true, "SATELLITE"))
+		WillReturnRows(sqlmock.NewRows([]string{"price", "taa_enabled", "alloc_type", "currency"}).AddRow(98.5, true, "SATELLITE", "EUR"))
 
 	// 5. DELETE existing rows
 	mock.ExpectExec("DELETE FROM holdings").WithArgs("VWCE.MI").
@@ -146,7 +146,7 @@ func TestPostgresStoreAddTransactionRecalculatesHolding(t *testing.T) {
 
 	// 6. INSERT new holding — PMC = (10*100 + 2) / 10 = 100.2; preserve market_price 98.5
 	mock.ExpectExec("INSERT INTO holdings").
-		WithArgs("VWCE.MI", 10.0, 98.5, 100.2, "SATELLITE", true, sqlmock.AnyArg()).
+		WithArgs("VWCE.MI", 10.0, 98.5, 100.2, "SATELLITE", true, "EUR", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// 7. COMMIT
@@ -185,15 +185,15 @@ func TestPostgresStoreAddTransactionClosesPosition(t *testing.T) {
 	store := NewPostgresStore(db)
 	executedAt := txBase
 
-	// SELL 10 on a position of 10 → net qty = 0 → DELETE only, no INSERT.
+	// SELL 10 on a position of 10 → net qty = 0 → no INSERT after DELETE.
 	mock.ExpectExec("INSERT INTO transactions").
-		WithArgs("VWCE.MI", "SELL", 10.0, 110.0, 0.0, "SATELLITE", executedAt).
+		WithArgs("VWCE.MI", "SELL", 10.0, 110.0, 0.0, "SATELLITE", "", executedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	// ListTransactions returns one BUY + one SELL → net qty 0
-	txRows := sqlmock.NewRows([]string{"id", "symbol", "transaction_type", "quantity", "price", "fee", "allocation_type", "executed_at", "created_at"}).
-		AddRow(1, "VWCE.MI", "BUY", 10.0, 100.0, 0.0, "SATELLITE", executedAt.Add(-time.Hour), executedAt.Add(-time.Hour)).
-		AddRow(2, "VWCE.MI", "SELL", 10.0, 110.0, 0.0, "SATELLITE", executedAt, executedAt)
+	txRows := sqlmock.NewRows([]string{"id", "symbol", "transaction_type", "quantity", "price", "fee", "allocation_type", "currency", "executed_at", "created_at"}).
+		AddRow(1, "VWCE.MI", "BUY", 10.0, 100.0, 0.0, "SATELLITE", "", executedAt.Add(-time.Hour), executedAt.Add(-time.Hour)).
+		AddRow(2, "VWCE.MI", "SELL", 10.0, 110.0, 0.0, "SATELLITE", "", executedAt, executedAt)
 	mock.ExpectQuery("FROM transactions").WithArgs("VWCE.MI").WillReturnRows(txRows)
 
 	// listSplitsForSymbol — no splits recorded for this symbol yet
@@ -202,12 +202,12 @@ func TestPostgresStoreAddTransactionClosesPosition(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("VWCE.MI").
-		WillReturnRows(sqlmock.NewRows([]string{"price", "taa_enabled", "alloc_type"}).AddRow(0, true, "SATELLITE"))
+		WillReturnRows(sqlmock.NewRows([]string{"price", "taa_enabled", "alloc_type", "currency"}).AddRow(0, true, "SATELLITE", "EUR"))
 	mock.ExpectExec("DELETE FROM holdings").WithArgs("VWCE.MI").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	// INSERT with qty=0 to preserve taa_enabled and allocation_type for history.
 	mock.ExpectExec("INSERT INTO holdings").
-		WithArgs("VWCE.MI", 0.0, 0.0, 0.0, "SATELLITE", true, sqlmock.AnyArg()).
+		WithArgs("VWCE.MI", 0.0, 0.0, 0.0, "SATELLITE", true, "EUR", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -246,12 +246,12 @@ func TestPostgresStoreAddTransactionPartialSellPreservesPMC(t *testing.T) {
 
 	// SELL 4 of a 10-unit position bought at 100 + €2 fee → qty 6, PMC must stay 100.2.
 	mock.ExpectExec("INSERT INTO transactions").
-		WithArgs("VWCE.MI", "SELL", 4.0, 120.0, 0.0, "SATELLITE", executedAt).
+		WithArgs("VWCE.MI", "SELL", 4.0, 120.0, 0.0, "SATELLITE", "", executedAt).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	txRows := sqlmock.NewRows([]string{"id", "symbol", "transaction_type", "quantity", "price", "fee", "allocation_type", "executed_at", "created_at"}).
-		AddRow(1, "VWCE.MI", "BUY", 10.0, 100.0, 2.0, "SATELLITE", executedAt.Add(-time.Hour), executedAt.Add(-time.Hour)).
-		AddRow(2, "VWCE.MI", "SELL", 4.0, 120.0, 0.0, "SATELLITE", executedAt, executedAt)
+	txRows := sqlmock.NewRows([]string{"id", "symbol", "transaction_type", "quantity", "price", "fee", "allocation_type", "currency", "executed_at", "created_at"}).
+		AddRow(1, "VWCE.MI", "BUY", 10.0, 100.0, 2.0, "SATELLITE", "", executedAt.Add(-time.Hour), executedAt.Add(-time.Hour)).
+		AddRow(2, "VWCE.MI", "SELL", 4.0, 120.0, 0.0, "SATELLITE", "", executedAt, executedAt)
 	mock.ExpectQuery("FROM transactions").WithArgs("VWCE.MI").WillReturnRows(txRows)
 
 	// listSplitsForSymbol — no splits recorded for this symbol yet
@@ -260,12 +260,12 @@ func TestPostgresStoreAddTransactionPartialSellPreservesPMC(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("VWCE.MI").
-		WillReturnRows(sqlmock.NewRows([]string{"price", "taa_enabled", "alloc_type"}).AddRow(98.5, true, "SATELLITE"))
+		WillReturnRows(sqlmock.NewRows([]string{"price", "taa_enabled", "alloc_type", "currency"}).AddRow(98.5, true, "SATELLITE", "EUR"))
 	mock.ExpectExec("DELETE FROM holdings").WithArgs("VWCE.MI").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	// PMC = (10*100 + 2) / 10 = 100.2 from the BUY; partial SELL must NOT alter PMC.
 	mock.ExpectExec("INSERT INTO holdings").
-		WithArgs("VWCE.MI", 6.0, 98.5, 100.2, "SATELLITE", true, sqlmock.AnyArg()).
+		WithArgs("VWCE.MI", 6.0, 98.5, 100.2, "SATELLITE", true, "EUR", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 

@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
@@ -30,10 +29,10 @@ func generateTestCandles(count int, startPrice float64, step float64) []*ohlc.OH
 		}
 
 		c := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(open),
-			High:  decimal.NewFromFloat(high),
-			Low:   decimal.NewFromFloat(low),
-			Close: decimal.NewFromFloat(close),
+			Open:  open,
+			High:  high,
+			Low:   low,
+			Close: close,
 			Start: start.Add(time.Duration(i) * time.Hour),
 			End:   start.Add(time.Duration(i+1) * time.Hour),
 		}
@@ -56,7 +55,7 @@ func TestHarami_OnTick_NoOrders(t *testing.T) {
 	t.Parallel()
 
 	h := New("test", time.Minute*60)
-	currentTick := tick.New("test", time.Now(), decimal.NewFromFloat(100), decimal.NewFromFloat(100))
+	currentTick := tick.New("test", time.Now(), 100, 100)
 
 	toOpen, _, _ := h.OnTick(currentTick)
 	if len(toOpen) != 0 {
@@ -102,20 +101,20 @@ func TestHarami_Score(t *testing.T) {
 
 		// Create previous candle with Open == Close (Doji / zero body)
 		prev := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(100.0),
-			High:  decimal.NewFromFloat(101.0),
-			Low:   decimal.NewFromFloat(99.0),
-			Close: decimal.NewFromFloat(100.0),
+			Open:  100.0,
+			High:  101.0,
+			Low:   99.0,
+			Close: 100.0,
 			Start: time.Now(),
 			End:   time.Now().Add(time.Hour),
 		}
 		prev.ForceClose()
 
 		current := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(100.0),
-			High:  decimal.NewFromFloat(102.0),
-			Low:   decimal.NewFromFloat(99.5),
-			Close: decimal.NewFromFloat(101.5),
+			Open:  100.0,
+			High:  102.0,
+			Low:   99.5,
+			Close: 101.5,
 			Start: time.Now().Add(time.Hour),
 			End:   time.Now().Add(time.Hour * 2),
 		}
@@ -132,20 +131,20 @@ func TestHarami_Score(t *testing.T) {
 
 		// Large Bearish candle followed by small Bullish candle
 		prev := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(100.0),
-			High:  decimal.NewFromFloat(101.0),
-			Low:   decimal.NewFromFloat(79.0),
-			Close: decimal.NewFromFloat(80.0), // body = 20
+			Open:  100.0,
+			High:  101.0,
+			Low:   79.0,
+			Close: 80.0, // body = 20
 			Start: time.Now(),
 			End:   time.Now().Add(time.Hour),
 		}
 		prev.ForceClose()
 
 		current := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(82.0),
-			High:  decimal.NewFromFloat(86.0),
-			Low:   decimal.NewFromFloat(81.0),
-			Close: decimal.NewFromFloat(84.0), // body = 2
+			Open:  82.0,
+			High:  86.0,
+			Low:   81.0,
+			Close: 84.0, // body = 2
 			Start: time.Now().Add(time.Hour),
 			End:   time.Now().Add(time.Hour * 2),
 		}
@@ -162,20 +161,20 @@ func TestHarami_Score(t *testing.T) {
 
 		// Large Bullish candle followed by small Bearish candle
 		prev := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(80.0),
-			High:  decimal.NewFromFloat(101.0),
-			Low:   decimal.NewFromFloat(79.0),
-			Close: decimal.NewFromFloat(100.0), // body = 20
+			Open:  80.0,
+			High:  101.0,
+			Low:   79.0,
+			Close: 100.0, // body = 20
 			Start: time.Now(),
 			End:   time.Now().Add(time.Hour),
 		}
 		prev.ForceClose()
 
 		current := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(98.0),
-			High:  decimal.NewFromFloat(99.0),
-			Low:   decimal.NewFromFloat(95.0),
-			Close: decimal.NewFromFloat(96.0), // body = 2
+			Open:  98.0,
+			High:  99.0,
+			Low:   95.0,
+			Close: 96.0, // body = 2
 			Start: time.Now().Add(time.Hour),
 			End:   time.Now().Add(time.Hour * 2),
 		}

@@ -13,6 +13,7 @@ type DividendRecord struct {
 	Quantity             float64
 	CashDividendPerShare float64
 	IncomeAmount         float64
+	Currency             string // ISO 4217 currency of the dividend payment
 }
 
 // QuantityAtDate replays txs (oldest-first) and returns the net quantity held
@@ -67,6 +68,7 @@ func ComputeDividendIncomes(txs []Transaction, candles []data.Candle) []Dividend
 			Quantity:             qty,
 			CashDividendPerShare: c.CashDividend,
 			IncomeAmount:         qty * c.CashDividend,
+			Currency:             c.Currency,
 		})
 	}
 	return records

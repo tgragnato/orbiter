@@ -3,9 +3,9 @@ package engulfing
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/helper"
 	"github.com/tgragnato/orbiter/pkg/indicator/sma"
@@ -105,22 +105,22 @@ func (d *Engulfing) isBearishEngulfingCandle(closedCandles []*ohlc.OHLC) bool {
 	previousCandle := closedCandles[len(closedCandles)-2]
 
 	// Rule 1
-	if !previousCandle.Close.GreaterThan(previousCandle.Open) {
+	if !(previousCandle.Close > previousCandle.Open) {
 		return false
 	}
 
 	// Rule 2
-	if !currentCandle.Close.LessThan(currentCandle.Open) {
+	if !(currentCandle.Close < currentCandle.Open) {
 		return false
 	}
 
 	// Rule 3
-	if !currentCandle.Open.GreaterThan(previousCandle.Close) {
+	if !(currentCandle.Open > previousCandle.Close) {
 		return false
 	}
 
 	// Rule 4
-	if !currentCandle.Close.LessThan(previousCandle.Open) {
+	if !(currentCandle.Close < previousCandle.Open) {
 		return false
 	}
 
@@ -141,22 +141,22 @@ func (d *Engulfing) isBullishEngulfingCandle(closedCandles []*ohlc.OHLC) bool {
 	previousCandle := closedCandles[len(closedCandles)-2]
 
 	// Rule 1
-	if !currentCandle.Close.GreaterThan(currentCandle.Open) {
+	if !(currentCandle.Close > currentCandle.Open) {
 		return false
 	}
 
 	// Rule 2
-	if !previousCandle.Close.LessThan(previousCandle.Open) {
+	if !(previousCandle.Close < previousCandle.Open) {
 		return false
 	}
 
 	// Rule 3
-	if !previousCandle.Open.GreaterThan(currentCandle.Close) {
+	if !(previousCandle.Open > currentCandle.Close) {
 		return false
 	}
 
 	// Rule 4
-	if !previousCandle.Close.LessThan(currentCandle.Open) {
+	if !(previousCandle.Close < currentCandle.Open) {
 		return false
 	}
 
@@ -165,8 +165,8 @@ func (d *Engulfing) isBullishEngulfingCandle(closedCandles []*ohlc.OHLC) bool {
 
 func (d *Engulfing) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, toClose []broker.Position) {
 	var closedCandle = closedCandles[len(closedCandles)-1]
-	var closePrice = helper.DecimalToFloat(closedCandle.Close)
-	var lowPrice = helper.DecimalToFloat(closedCandle.Low)
+	var closePrice = closedCandle.Close
+	var lowPrice = closedCandle.Low
 
 	if len(closedCandles) < 2 {
 		return
@@ -185,7 +185,7 @@ func (d *Engulfing) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 		if d.openPositions[i].BuyDirection != broker.BuyDirectionShort {
 			continue
 		}
-		if closedCandle.Close.LessThan(previousCandle.Close) {
+		if closedCandle.Close < previousCandle.Close {
 			toClose = d.openPositions
 			return
 		}
@@ -209,8 +209,8 @@ func (d *Engulfing) strategyShort(closedCandles []*ohlc.OHLC) (toOpen []broker.O
 
 func (d *Engulfing) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Order, toClose []broker.Position) {
 	var closedCandle = closedCandles[len(closedCandles)-1]
-	var closePrice = helper.DecimalToFloat(closedCandle.Close)
-	var lowPrice = helper.DecimalToFloat(closedCandle.Low)
+	var closePrice = closedCandle.Close
+	var lowPrice = closedCandle.Low
 
 	if len(closedCandles) < 2 {
 		return
@@ -229,7 +229,7 @@ func (d *Engulfing) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Or
 		if d.openPositions[i].BuyDirection != broker.BuyDirectionLong {
 			continue
 		}
-		if closedCandle.Close.GreaterThan(previousCandle.Close) {
+		if closedCandle.Close > previousCandle.Close {
 			toClose = d.openPositions
 			return
 		}
@@ -253,8 +253,8 @@ func (d *Engulfing) strategyLong(closedCandles []*ohlc.OHLC) (toOpen []broker.Or
 
 func (d *Engulfing) prepareOrder(closedCandle *ohlc.OHLC, direction broker.BuyDirection, size float64) broker.Order {
 	var (
-		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(targetInPercent), direction)
-		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, helper.FloatToDecimal(stopLossInPercent), direction)
+		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, targetInPercent, direction)
+		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, stopLossInPercent, direction)
 	)
 
 	d.clog.Debug("Prepare new order",
@@ -288,36 +288,35 @@ func (d *Engulfing) Score(closedCandles []*ohlc.OHLC) float64 {
 	second := closedCandles[len(closedCandles)-2]
 	first := closedCandles[len(closedCandles)-1]
 
-	// Calculate the body sizes using decimal.Decimal
-	prevBody := second.Close.Sub(second.Open).Abs()
-	currentBody := first.Close.Sub(first.Open).Abs()
+	// Calculate the body sizes using float64
+	prevBody := math.Abs(second.Close - second.Open)
+	currentBody := math.Abs(first.Close - first.Open)
 
-	if prevBody.Sign() == 0 {
+	if prevBody == 0 {
 		return 0
 	}
 
 	// Calculate the ratio of the current body size to the previous body size.
-	ratio := currentBody.Div(prevBody)
+	ratio := currentBody / prevBody
 
 	// Define thresholds for strong/weak engulfing.
 	// A ratio significantly greater than 1.0 indicates a strong engulfing.
-	minRatio := decimal.NewFromFloat(0.5) // Weak engulfing
-	maxRatio := decimal.NewFromFloat(2.0) // Strong engulfing
+	minRatio := 0.5 // Weak engulfing
+	maxRatio := 2.0 // Strong engulfing
 
 	// Map the ratio to a continuous score between 0 and 1 (strength of engulfing).
 	// If ratio is <= minRatio, score is 1.0 (strongest signal).
 	// If ratio is >= maxRatio, score is 0 (weakest signal).
 	var score float64
-	if ratio.LessThanOrEqual(minRatio) {
+	if ratio <= minRatio {
 		score = 1.0
-	} else if ratio.GreaterThanOrEqual(maxRatio) {
+	} else if ratio >= maxRatio {
 		score = 0.0
 	} else {
 		// Linear interpolation between 0 and 1: (maxRatio - ratio) / (maxRatio - minRatio)
-		numerator := maxRatio.Sub(ratio)
-		denominator := maxRatio.Sub(minRatio)
-		scoreDecimal := numerator.Div(denominator)
-		score, _ = scoreDecimal.Float64()
+		numerator := maxRatio - ratio
+		denominator := maxRatio - minRatio
+		score = numerator / denominator
 	}
 
 	// Apply direction based on the type of engulfing

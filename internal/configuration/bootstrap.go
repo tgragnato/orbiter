@@ -40,6 +40,7 @@ var migrations = []migration{
 				allocation_type TEXT           NOT NULL DEFAULT 'SATELLITE'
 				                CHECK (allocation_type IN ('CORE','SATELLITE')),
 				taa_enabled     BOOLEAN        NOT NULL DEFAULT true,
+				currency        TEXT           NOT NULL DEFAULT 'EUR',
 				updated_at      TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 			);
 			CREATE UNIQUE INDEX IF NOT EXISTS idx_holdings_symbol
@@ -53,6 +54,7 @@ var migrations = []migration{
 				quantity                NUMERIC(20,8)  NOT NULL,
 				cash_dividend_per_share NUMERIC(20,10) NOT NULL,
 				income_amount           NUMERIC(20,10) NOT NULL,
+				currency                TEXT           NOT NULL DEFAULT 'EUR',
 				created_at              TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
 				UNIQUE (symbol, ex_date)
 			);
@@ -77,6 +79,7 @@ var migrations = []migration{
 				fee              NUMERIC(20,10) NOT NULL DEFAULT 0 CHECK (fee >= 0),
 				allocation_type  TEXT           NOT NULL DEFAULT 'SATELLITE'
 				                 CHECK (allocation_type IN ('CORE','SATELLITE')),
+				currency         TEXT           NOT NULL DEFAULT 'EUR',
 				executed_at      TIMESTAMPTZ    NOT NULL,
 				created_at       TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 			);
@@ -89,6 +92,7 @@ var migrations = []migration{
 				flow_type    TEXT           NOT NULL CHECK (flow_type IN ('DEPOSIT','WITHDRAWAL')),
 				amount       NUMERIC(20,10) NOT NULL CHECK (amount > 0),
 				asset        TEXT           NOT NULL DEFAULT 'CASH',
+				currency     TEXT           NOT NULL DEFAULT 'EUR',
 				occurred_at  TIMESTAMPTZ    NOT NULL,
 				created_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW()
 			);
@@ -119,6 +123,18 @@ var migrations = []migration{
 			);
 			CREATE INDEX IF NOT EXISTS idx_stock_splits_symbol_date
 				ON stock_splits (symbol, split_date);
+
+			CREATE TABLE IF NOT EXISTS fx_rates (
+				id             BIGSERIAL      PRIMARY KEY,
+				base_currency  TEXT           NOT NULL,
+				quote_currency TEXT           NOT NULL,
+				rate_date      DATE           NOT NULL,
+				rate           NUMERIC(20,10) NOT NULL CHECK (rate > 0),
+				created_at     TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+				UNIQUE (base_currency, quote_currency, rate_date)
+			);
+			CREATE INDEX IF NOT EXISTS idx_fx_rates_lookup
+				ON fx_rates (base_currency, quote_currency, rate_date);
 		`,
 	},
 }

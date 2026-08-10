@@ -18,12 +18,21 @@ type Holding struct {
 	MarketPrice    float64
 	PMC            float64 // weighted average purchase cost (Prezzo Medio di Carico)
 	AllocationType AllocationType
-	TAAEnabled     bool // when false the TAA engine skips this holding
+	TAAEnabled     bool   // when false the TAA engine skips this holding
+	Currency       string // ISO 4217 quotation currency of the asset (e.g. "USD", "EUR")
 }
 
-// NAV computes current position net asset value.
+// NAV computes current position net asset value in the asset's local currency.
 func (h Holding) NAV() float64 {
 	return h.Quantity * h.MarketPrice
+}
+
+// NAVInBase converts the local-currency NAV to the portfolio base currency.
+// fxRate must be the rate "how many base-currency units per 1 unit of h.Currency"
+// (i.e. Rate{Base: baseCurrency, Quote: h.Currency}.Rate inverted, or use
+// fx.Service.RateFor(ctx, h.Currency, baseCurrency, date)).
+func (h Holding) NAVInBase(fxRate float64) float64 {
+	return h.NAV() * fxRate
 }
 
 // ToggleAllocation swaps CORE and SATELLITE allocation tags.

@@ -1,11 +1,10 @@
 package rsi
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/indicator"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
@@ -119,7 +118,7 @@ func TestRSI_NotEnoughCandles(t *testing.T) {
 
 func generateCandle(price float64) *ohlc.OHLC {
 	var o = ohlc.New("test", time.Now(), time.Minute, false)
-	o.NewPrice(decimal.NewFromFloat(price), o.Start)
+	o.NewPrice(price, o.Start)
 	o.ForceClose()
 	return o
 }

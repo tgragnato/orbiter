@@ -4,21 +4,19 @@ import (
 	"fmt"
 	"math"
 	"time"
-
-	"github.com/shopspring/decimal"
 )
 
 type Position struct {
 	PerformanceRecordID uint // foreign key
 	Reference           string
 	Instrument          string
-	BuyPrice            decimal.Decimal
+	BuyPrice            float64
 	BuyTime             time.Time
 	BuyDirection        BuyDirection
-	SellPrice           decimal.Decimal
+	SellPrice           float64
 	SellTime            time.Time
-	TargetPrice         decimal.Decimal
-	StopLossPrice       decimal.Decimal
+	TargetPrice         float64
+	StopLossPrice       float64
 	Size                float64
 	OHLCAgeOnBuy        time.Duration
 	CandleBuyTime       time.Time
@@ -27,8 +25,8 @@ type Position struct {
 	// Backtesting
 	MaxSurge                  float64 // Pips
 	MaxDrawdown               float64 // Pips
-	TodayPerformanceInPercent decimal.Decimal
-	GapToSMA                  decimal.Decimal
+	TodayPerformanceInPercent float64
+	GapToSMA                  float64
 }
 
 // Duration - returns duration of position
@@ -36,58 +34,56 @@ func (p *Position) Duration() time.Duration {
 	return p.SellTime.Sub(p.BuyTime)
 }
 
-func (p *Position) PerformanceAbsolute(bid, ask decimal.Decimal) float64 {
-	var abs decimal.Decimal
-	if p.SellPrice.IsZero() {
+func (p *Position) PerformanceAbsolute(bid, ask float64) float64 {
+	var abs float64
+	if p.SellPrice == 0 {
 		switch p.BuyDirection {
 		case BuyDirectionLong:
-			abs = bid.Sub(p.BuyPrice)
+			abs = bid - p.BuyPrice
 		case BuyDirectionShort:
-			abs = p.BuyPrice.Sub(ask)
+			abs = p.BuyPrice - ask
 		}
 	} else {
 		switch p.BuyDirection {
 		case BuyDirectionLong:
-			abs = p.SellPrice.Sub(p.BuyPrice)
+			abs = p.SellPrice - p.BuyPrice
 		case BuyDirectionShort:
-			abs = p.BuyPrice.Sub(p.SellPrice)
+			abs = p.BuyPrice - p.SellPrice
 		}
 	}
-	abs = abs.Mul(decimal.NewFromFloat(p.Size))
-	absFloat, _ := abs.Float64()
-	return absFloat
+	abs *= p.Size
+	return abs
 }
 
-// PerformanceInPercentagePretty returns performance for closed positions, round to 2 decimal places
+// PerformanceInPercentagePretty returns performance for closed positions
 func (p *Position) PerformanceInPercentagePretty() float64 {
-	perf := p.PerformanceInPercentage(decimal.Zero, decimal.Zero)
+	perf := p.PerformanceInPercentage(0, 0)
 	return math.Round(perf*100) / 100
 }
 
-func (p *Position) PerformanceInPercentage(bid, ask decimal.Decimal) float64 {
-	var percentage decimal.Decimal
-	if p.SellPrice.IsZero() {
+func (p *Position) PerformanceInPercentage(bid, ask float64) float64 {
+	var percentage float64
+	if p.SellPrice == 0 {
 		switch p.BuyDirection {
 		case BuyDirectionLong:
-			percentage = bid.Sub(p.BuyPrice).Div(p.BuyPrice)
+			percentage = (bid - p.BuyPrice) / p.BuyPrice
 		case BuyDirectionShort:
-			if ask.IsZero() {
+			if ask == 0 {
 				return 0
 			}
-			percentage = p.BuyPrice.Sub(ask).Div(ask)
+			percentage = (p.BuyPrice - ask) / ask
 		}
-		percentage = percentage.Mul(decimal.NewFromFloat(100))
+		percentage *= 100
 	} else {
 		switch p.BuyDirection {
 		case BuyDirectionLong:
-			percentage = p.SellPrice.Sub(p.BuyPrice).Div(p.BuyPrice)
+			percentage = (p.SellPrice - p.BuyPrice) / p.BuyPrice
 		case BuyDirectionShort:
-			percentage = p.BuyPrice.Sub(p.SellPrice).Div(p.SellPrice)
+			percentage = (p.BuyPrice - p.SellPrice) / p.SellPrice
 		}
-		percentage = percentage.Mul(decimal.NewFromFloat(100))
+		percentage *= 100
 	}
-	percentageFloat, _ := percentage.Float64()
-	return percentageFloat
+	return percentage
 }
 
 func (p *Position) Age(now time.Time) time.Duration {
@@ -95,6 +91,6 @@ func (p *Position) Age(now time.Time) time.Duration {
 }
 
 func (p *Position) String() string {
-	return fmt.Sprintf("%s/%s: Direction=%s BuyLevel=%s BuyTime=%s Size=%.2f",
+	return fmt.Sprintf("%s/%s: Direction=%s BuyLevel=%g BuyTime=%s Size=%.2f",
 		p.Instrument, p.Reference, p.BuyDirection, p.BuyPrice, p.BuyTime, p.Size)
 }

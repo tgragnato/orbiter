@@ -14,6 +14,10 @@ type Candle struct {
 	Volume        int64
 	SplitFactor   float64
 	CashDividend  float64
+	// Currency is the ISO 4217 quotation currency reported by the data
+	// provider (e.g. "USD" for NYSE, "EUR" for Euronext, "GBp" for LSE).
+	// Empty string means the provider did not supply currency metadata.
+	Currency string
 }
 
 // DataProvider retrieves EOD candles for a ticker and date range.

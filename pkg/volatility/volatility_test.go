@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
@@ -15,9 +14,9 @@ func TestAddOHLC(t *testing.T) {
 	now := time.Now()
 	for i := 1; i < 12; i++ {
 		o := ohlc.New("test", now, time.Minute, false)
-		o.NewPrice(decimal.NewFromFloat(1.0), o.Start)
-		o.NewPrice(decimal.NewFromFloat(float64(i)+1), o.Start)
-		t.Logf("ADD: %d -> %s", i, o.VolatilityInPercentage())
+		o.NewPrice(1.0, o.Start)
+		o.NewPrice(float64(i)+1.0, o.Start)
+		t.Logf("ADD: %d -> %g", i, o.VolatilityInPercentage())
 		o.ForceClose()
 		v.AddOHLC(o)
 	}
@@ -43,8 +42,8 @@ func TestMedianVolatilityInPercentage(t *testing.T) {
 	now := time.Now()
 	for i := range 10 {
 		o := ohlc.New("EURUSD", now, time.Minute, false)
-		o.NewPrice(decimal.NewFromFloat(1.0), o.Start)
-		o.NewPrice(decimal.NewFromFloat(float64(i)+1.0), o.Start)
+		o.NewPrice(1.0, o.Start)
+		o.NewPrice(float64(i)+1.0, o.Start)
 		o.ForceClose()
 		v.AddOHLC(o)
 	}
@@ -65,8 +64,8 @@ func TestVolatilityInPercentageQuantile(t *testing.T) {
 	now := time.Now()
 	for i := range 1000 {
 		o := ohlc.New("EURUSD", now, time.Minute, false)
-		o.NewPrice(decimal.NewFromFloat(1.0), o.Start)
-		o.NewPrice(decimal.NewFromFloat(float64(i)+1.0), o.End)
+		o.NewPrice(1.0, o.Start)
+		o.NewPrice(float64(i)+1.0, o.End)
 		if !o.Closed() {
 			t.Fatalf("expected true")
 		}

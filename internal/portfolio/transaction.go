@@ -43,6 +43,7 @@ type Transaction struct {
 	Price          float64
 	Fee            float64
 	AllocationType AllocationType
+	Currency       string // ISO 4217 quotation currency at execution time
 	ExecutedAt     time.Time
 	CreatedAt      time.Time
 }
@@ -53,6 +54,7 @@ type holdingState struct {
 	PMC            float64
 	AllocationType AllocationType
 	RealizedPnL    float64
+	Currency       string // ISO 4217 currency; tracks the most recent transaction's currency4)
 }
 
 // ComputeHoldingStates derives per-symbol quantity and PMC from an oldest-first
@@ -102,6 +104,9 @@ func ComputeHoldingStates(txs []Transaction, splitMap map[string][]SplitEvent) m
 				s.PMC = totalCost / s.Quantity
 			}
 			s.AllocationType = tx.AllocationType
+			if tx.Currency != "" {
+				s.Currency = tx.Currency
+			}
 		case TransactionSell:
 			if s.PMC > 0 && s.Quantity > 0 {
 				sellQty := adjQty

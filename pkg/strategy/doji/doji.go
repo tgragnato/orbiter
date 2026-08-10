@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
@@ -24,13 +24,10 @@ type Doji struct {
 }
 
 const (
-	ohlcPeriod = time.Minute * 60
-)
-
-var (
-	decZero         = decimal.NewFromFloat(0)
-	targetInPercent = decimal.NewFromFloat(0.045)
-	dec2Pip         = decimal.NewFromFloat(0.0002)
+	ohlcPeriod      = time.Minute * 60
+	decZero         = 0
+	targetInPercent = 0.045
+	dec2Pip         = 0.0002
 )
 
 func New(instrument string) *Doji {
@@ -77,7 +74,7 @@ func (d *Doji) OnTick(currentTick tick.Tick) (toOpen, toClose []broker.Order, to
 		return
 	}
 
-	if currentTick.Bid.GreaterThan(d.previousCandle.High.Add(dec2Pip)) {
+	if currentTick.Bid > d.previousCandle.High+dec2Pip {
 		order, err := d.createOrder(currentTick, targetInPercent, broker.BuyDirectionLong, 1.00)
 		if err == nil {
 			toOpen = []broker.Order{order}
@@ -85,7 +82,7 @@ func (d *Doji) OnTick(currentTick tick.Tick) (toOpen, toClose []broker.Order, to
 		return
 	}
 
-	if currentTick.Ask.LessThan(d.previousCandle.Low.Sub(dec2Pip)) {
+	if currentTick.Ask < d.previousCandle.Low-dec2Pip {
 		order, err := d.createOrder(currentTick, targetInPercent, broker.BuyDirectionShort, 1.00)
 		if err == nil {
 			toOpen = []broker.Order{order}
@@ -95,7 +92,7 @@ func (d *Doji) OnTick(currentTick tick.Tick) (toOpen, toClose []broker.Order, to
 	return
 }
 
-func (d *Doji) createOrder(currentTick tick.Tick, perfMargin decimal.Decimal, direction broker.BuyDirection, size float64) (broker.Order, error) {
+func (d *Doji) createOrder(currentTick tick.Tick, perfMargin float64, direction broker.BuyDirection, size float64) (broker.Order, error) {
 	targetPrice, err := d.calcTargetPrice(direction, currentTick, perfMargin)
 	if err != nil {
 		return broker.Order{}, fmt.Errorf("calcTargetPrice() failed: %w", err)
@@ -123,26 +120,26 @@ func isDOJI(candle *ohlc.OHLC) bool {
 	if candle == nil || !candle.Closed() {
 		return false
 	}
-	perfPercentage := candle.PerformanceInPercentage().Abs()
-	return perfPercentage.LessThanOrEqual(decimal.NewFromFloat(0.025))
+	perfPercentage := math.Abs(candle.PerformanceInPercentage())
+	return perfPercentage <= 0.025
 }
 
-func (d *Doji) calcTargetPrice(direction broker.BuyDirection, t tick.Tick, perfMarginInPercentage decimal.Decimal) (decimal.Decimal, error) {
+func (d *Doji) calcTargetPrice(direction broker.BuyDirection, t tick.Tick, perfMarginInPercentage float64) (float64, error) {
 	switch direction {
 	case broker.BuyDirectionLong:
 		currentPrice := t.Ask
-		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(perfMarginInPercentage)
-		return currentPrice.Add(percentFrom).Round(6), nil
+		percentFrom := currentPrice * perfMarginInPercentage / 100
+		return currentPrice + percentFrom, nil
 	case broker.BuyDirectionShort:
 		currentPrice := t.Bid
-		percentFrom := currentPrice.Div(decimal.NewFromFloat(100)).Mul(perfMarginInPercentage)
-		return currentPrice.Sub(percentFrom).Round(6), nil
+		percentFrom := currentPrice * perfMarginInPercentage / 100
+		return currentPrice - percentFrom, nil
 	default:
 		return decZero, errors.New("unknown direction")
 	}
 }
 
-func (d *Doji) calcStopLossPrice(direction broker.BuyDirection) (decimal.Decimal, error) {
+func (d *Doji) calcStopLossPrice(direction broker.BuyDirection) (float64, error) {
 	if d.previousCandle == nil {
 		return decZero, errors.New("previousCandle is nil")
 	}
@@ -185,28 +182,27 @@ func (d *Doji) Score(_ []*ohlc.OHLC) float64 {
 
 	// We use a sensitivity factor to determine how quickly the score reaches 1.0 or -1.0.
 	// A value of 100 pips (0.0010) is used as a normalization factor for the "strength" of the breakout.
-	sensitivity := decimal.NewFromFloat(0.0010)
+	sensitivity := 0.0010
 
-	score := decimal.NewFromFloat(0)
+	score := 0.0
 
-	if lastCandle.Close.GreaterThan(lastCandle.High) {
+	if lastCandle.Close > lastCandle.High {
 		// Distance above high
-		dist := lastCandle.Close.Sub(lastCandle.High)
+		dist := lastCandle.Close - lastCandle.High
 		// Normalize: score = dist / sensitivity, clamped to 1.0
-		score = dist.Div(sensitivity)
-		if score.GreaterThan(decimal.NewFromFloat(1.0)) {
-			score = decimal.NewFromFloat(1.0)
+		score = dist / sensitivity
+		if score > 1.0 {
+			score = 1.0
 		}
-	} else if lastCandle.Close.LessThan(lastCandle.Low) {
+	} else if lastCandle.Close < lastCandle.Low {
 		// Distance below low
-		dist := lastCandle.Low.Sub(lastCandle.Close)
+		dist := lastCandle.Low - lastCandle.Close
 		// Normalize: score = - (dist / sensitivity), clamped to -1.0
-		score = score.Sub(dist.Div(sensitivity))
-		if score.LessThan(decimal.NewFromFloat(-1.0)) {
-			score = decimal.NewFromFloat(-1.0)
+		score = score - dist/sensitivity
+		if score < -1.0 {
+			score = -1.0
 		}
 	}
 
-	s, _ := score.Float64()
-	return s
+	return score
 }

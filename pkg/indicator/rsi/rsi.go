@@ -60,8 +60,7 @@ func (v *RSI) Insert(o *ohlc.OHLC) {
 		return
 	}
 
-	closePrice, _ := o.Close.Float64()
-	v.cb.push(closePrice)
+	v.cb.push(o.Close)
 }
 
 func (v *RSI) Value() (map[string]float64, error) {

@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shopspring/decimal"
 	"github.com/tgragnato/orbiter/pkg/broker"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
@@ -32,10 +31,10 @@ func generateTestCandles(count int, startPrice float64, step float64) []*ohlc.OH
 		}
 
 		c := &ohlc.OHLC{
-			Open:  decimal.NewFromFloat(open),
-			High:  decimal.NewFromFloat(high),
-			Low:   decimal.NewFromFloat(low),
-			Close: decimal.NewFromFloat(close),
+			Open:  open,
+			High:  high,
+			Low:   low,
+			Close: close,
 			Start: start.Add(time.Duration(i) * time.Hour),
 			End:   start.Add(time.Duration(i+1) * time.Hour),
 		}
@@ -58,8 +57,8 @@ func getHACandlesLong(amount int) (candles []*ohlc.OHLC) {
 	for range amount {
 		now := time.Now()
 		o := ohlc.New("test", now, time.Minute, false)
-		o.NewPrice(decimal.NewFromFloat(float64(1)), o.Start)
-		o.NewPrice(decimal.NewFromFloat(float64(2)), o.Start)
+		o.NewPrice(1, o.Start)
+		o.NewPrice(2, o.Start)
 		o.ForceClose()
 		candles = append(candles, o)
 	}
@@ -70,8 +69,8 @@ func getHACandlesShort(amount int) (candles []*ohlc.OHLC) {
 	for range amount {
 		now := time.Now()
 		o := ohlc.New("test", now, time.Minute, false)
-		o.NewPrice(decimal.NewFromFloat(float64(2)), o.Start)
-		o.NewPrice(decimal.NewFromFloat(float64(1)), o.Start)
+		o.NewPrice(2, o.Start)
+		o.NewPrice(1, o.Start)
 		o.ForceClose()
 		candles = append(candles, o)
 	}
@@ -123,7 +122,7 @@ func TestHeikinAshi_OnTick_NoOrders(t *testing.T) {
 	t.Parallel()
 
 	ha := New("test")
-	currentTick := tick.New("test", time.Now(), decimal.NewFromFloat(100), decimal.NewFromFloat(100))
+	currentTick := tick.New("test", time.Now(), 100, 100)
 
 	toOpen, _, _ := ha.OnTick(currentTick)
 	if len(toOpen) != 0 {

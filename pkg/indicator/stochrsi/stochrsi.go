@@ -30,8 +30,7 @@ func (v *StochRSI) Insert(o *ohlc.OHLC) {
 		return
 	}
 
-	closePrice, _ := o.Close.Float64()
-	v.cb.Insert(closePrice)
+	v.cb.Insert(o.Close)
 }
 
 func (v *StochRSI) Value() (map[string]float64, error) {
