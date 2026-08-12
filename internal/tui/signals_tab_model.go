@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -30,15 +29,12 @@ type MLEngine interface {
 	// Trigger requests an immediate training run (bypasses the 24-hour interval).
 	// No-op when training is already in progress.
 	Trigger()
-	// LogsChan returns the channel of log lines streamed from the training goroutine.
-	LogsChan() chan string
 }
 
 // SignalsTabModel renders the signal queue and ML training status in Tab 2.
 type SignalsTabModel struct {
 	readModel innersignal.ReadModel
 	mlEngine  MLEngine
-	logCh     LogChannel // ML log lines are forwarded here so they appear in the Logs tab
 	messages  []innersignal.Message
 	quit      bool
 
@@ -72,15 +68,8 @@ func NewSignalsTabModelWithML(readModel innersignal.ReadModel, ml MLEngine) Sign
 	}
 }
 
-// WithLogChannel wires a LogChannel so that ML engine log lines are forwarded
-// to the Logs tab instead of being displayed inline here.
-func (m SignalsTabModel) WithLogChannel(ch LogChannel) SignalsTabModel {
-	m.logCh = ch
-	return m
-}
-
 func (m SignalsTabModel) Init() tea.Cmd {
-	return tea.Batch(signalsTickCmd(), m.refreshCmd(), m.drainMLLogsCmd())
+	return tea.Batch(signalsTickCmd(), m.refreshCmd())
 }
 
 func (m SignalsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -126,7 +115,7 @@ func (m SignalsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case signalsTickMsg:
-		return m, tea.Batch(signalsTickCmd(), m.refreshCmd(), m.drainMLLogsCmd())
+		return m, tea.Batch(signalsTickCmd(), m.refreshCmd())
 
 	case signalsMsg:
 		m.messages = msg.messages
@@ -223,38 +212,6 @@ func (m SignalsTabModel) refreshCmd() tea.Cmd {
 	}
 	return func() tea.Msg {
 		return signalsMsg{messages: m.readModel.Pending()}
-	}
-}
-
-// drainMLLogsCmd drains all available lines from the ML engine's log channel
-// (non-blocking) and forwards them to the Logs tab via logCh.
-// The signals tab itself no longer accumulates or displays these lines.
-func (m SignalsTabModel) drainMLLogsCmd() tea.Cmd {
-	if m.mlEngine == nil {
-		return nil
-	}
-	ch := m.mlEngine.LogsChan()
-	logCh := m.logCh
-	return func() tea.Msg {
-		for {
-			select {
-			case line := <-ch:
-				if logCh != nil {
-					entry := LogEntry{
-						Time:    time.Now(),
-						Level:   slog.LevelInfo,
-						Message: line,
-						Attrs:   []slog.Attr{slog.String("source", "ml-engine")},
-					}
-					select {
-					case logCh <- entry:
-					default:
-					}
-				}
-			default:
-				return nil
-			}
-		}
 	}
 }
 

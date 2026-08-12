@@ -61,7 +61,7 @@ func NewRootModelWithMetrics(
 	}
 	return RootModel{
 		holdingsTab:     NewModelWithAll(store, txStore, portfolioID).WithBaseCurrency(baseCurrency),
-		signalsTab:      NewSignalsTabModelWithML(readModel, ml).WithLogChannel(logCh),
+		signalsTab:      NewSignalsTabModelWithML(readModel, ml),
 		settingsTab:     NewSettingsTabModel(configSvc),
 		logsTab:         NewLogsTabModel(logCh),
 		transactionsTab: NewTransactionsTabModel(txEditor),
