@@ -135,6 +135,33 @@ func runTUI(ctx context.Context, args []string) error {
 	})
 	go runner.run(ctx)
 
+	// Bridge ML engine raw log lines into the shared TUI log channel so they
+	// appear in the Logs tab. This runs independently of any TUI component and
+	// owns the drain loop for the lifetime of the process.
+	go func() {
+		ch := runner.LogsChan()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case line, ok := <-ch:
+				if !ok {
+					return
+				}
+				entry := signals.LogEntry{
+					Time:    time.Now(),
+					Level:   slog.LevelInfo,
+					Message: line,
+					Attrs:   []slog.Attr{slog.String("source", "ml-engine")},
+				}
+				select {
+				case logCh <- entry:
+				default:
+				}
+			}
+		}
+	}()
+
 	// TAA engine: 0.19 % broker fee capped at €18.90, evaluated every 24 h.
 	taaEngine := taa.NewEngine(
 		store,
@@ -149,6 +176,13 @@ func runTUI(ctx context.Context, args []string) error {
 			Buffer:           0.01,
 		},
 	)
+
+	// Block until the conviction map is populated from the DB checkpoint before
+	// the first TAA evaluation. Without this barrier, Evaluate races with
+	// seedConvictionScores and reads an empty map — all satellite signals are
+	// suppressed because conviction=0 never exceeds the friction gate.
+	<-runner.convictionReady
+
 	go func() {
 		if err := taaEngine.Evaluate(ctx); err != nil {
 			slog.Warn("taa initial evaluation failed", "error", err)

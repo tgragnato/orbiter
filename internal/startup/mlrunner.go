@@ -19,6 +19,11 @@ import (
 //
 // After each training run the best forest is saved to PostgreSQL via checkpoint
 // and per-symbol conviction scores are recomputed from current candle data.
+//
+// convictionReady is closed exactly once: either immediately when no active
+// checkpoint exists, or after seedConvictionScores completes. Callers that must
+// not read a cold conviction map (e.g. the first TAA evaluation) should block on
+// it before proceeding.
 type mlRunner struct {
 	engine         *ml.Engine
 	samples        func() []ml.Sample
@@ -27,10 +32,11 @@ type mlRunner struct {
 	checkpoint     *ml.Checkpoint
 	currentSamples func(context.Context) (map[string]ml.Sample, error)
 
-	mu         sync.Mutex
-	lastRun    time.Time
-	trigger    chan struct{}
-	conviction sync.Map // map[string]float64
+	mu              sync.Mutex
+	lastRun         time.Time
+	trigger         chan struct{}
+	conviction      sync.Map   // map[string]float64
+	convictionReady chan struct{} // closed once conviction scores are seeded (or unavailable)
 }
 
 func newMLRunner(
@@ -41,13 +47,14 @@ func newMLRunner(
 	currentSamples func(context.Context) (map[string]ml.Sample, error),
 ) *mlRunner {
 	return &mlRunner{
-		engine:         engine,
-		samples:        samples,
-		cfg:            cfg,
-		interval:       time.Hour,
-		trigger:        make(chan struct{}, 1),
-		checkpoint:     checkpoint,
-		currentSamples: currentSamples,
+		engine:          engine,
+		samples:         samples,
+		cfg:             cfg,
+		interval:        time.Hour,
+		trigger:         make(chan struct{}, 1),
+		checkpoint:      checkpoint,
+		currentSamples:  currentSamples,
+		convictionReady: make(chan struct{}),
 	}
 }
 
@@ -104,9 +111,16 @@ func (r *mlRunner) run(ctx context.Context) {
 	// the 24-hour interval — otherwise lastRun is zero on every restart and a
 	// full retrain fires even if one completed recently.
 	// The conviction score population (network I/O) runs in a separate goroutine
-	// so it never blocks the training scheduler.
+	// so it never blocks the training scheduler. convictionReady is closed when
+	// seeding finishes (or immediately when there is no active checkpoint) so that
+	// the TAA engine's first Evaluate can safely block on it.
 	if forest := r.initLastRunFromCheckpoint(ctx); forest != nil {
-		go r.seedConvictionScores(ctx, forest)
+		go func() {
+			r.seedConvictionScores(ctx, forest)
+			close(r.convictionReady)
+		}()
+	} else {
+		close(r.convictionReady)
 	}
 	r.maybeStart(ctx, true)
 
