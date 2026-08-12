@@ -237,14 +237,17 @@ func (m AnalyticsTabModel) View() string {
 		asciigraph.Caption("Rolling Sortino Ratio"),
 	)
 
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render("  r: reload data")
-
 	return lipgloss.JoinVertical(lipgloss.Left,
 		title,
 		stats,
 		"\n", twrChart,
 		"\n", ddChart,
 		"\n", sortinoChart,
-		hint,
 	)
+}
+
+// NavHint returns the context-sensitive hint string that the root model merges
+// into its global help line when the Analytics tab is active.
+func (m AnalyticsTabModel) NavHint() string {
+	return "r: reload data"
 }

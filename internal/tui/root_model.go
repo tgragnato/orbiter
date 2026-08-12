@@ -61,7 +61,7 @@ func NewRootModelWithMetrics(
 	}
 	return RootModel{
 		holdingsTab:     NewModelWithAll(store, txStore, portfolioID).WithBaseCurrency(baseCurrency),
-		signalsTab:      NewSignalsTabModelWithML(readModel, ml),
+		signalsTab:      NewSignalsTabModelWithML(readModel, ml).WithLogChannel(logCh),
 		settingsTab:     NewSettingsTabModel(configSvc),
 		logsTab:         NewLogsTabModel(logCh),
 		transactionsTab: NewTransactionsTabModel(txEditor),
@@ -270,7 +270,27 @@ func (m RootModel) View() string {
 		}
 	}
 	header := tabParts[0] + "  " + tabParts[1] + "  " + tabParts[2] + "  " + tabParts[3] + "  " + tabParts[4] + "  " + tabParts[5]
-	help := m.tabStyle.help.Render("tab/l: next · shift+tab/h: prev · q: quit")
+	const globalNav = "tab/l: next · shift+tab/h: prev · q: quit"
+	var tabHint string
+	switch m.activeTab {
+	case tabHoldings:
+		tabHint = m.holdingsTab.NavHint()
+	case tabSignals:
+		tabHint = m.signalsTab.NavHint()
+	case tabSettings:
+		tabHint = m.settingsTab.NavHint()
+	case tabLogs:
+		tabHint = m.logsTab.NavHint()
+	case tabTransactions:
+		tabHint = m.transactionsTab.NavHint()
+	case tabAnalytics:
+		tabHint = m.analyticsTab.NavHint()
+	}
+	helpStr := globalNav
+	if tabHint != "" {
+		helpStr = globalNav + "  |  " + tabHint
+	}
+	help := m.tabStyle.help.Render(helpStr)
 
 	var body string
 	switch m.activeTab {

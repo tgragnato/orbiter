@@ -261,7 +261,9 @@ func (m TransactionsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.tbl.SetWidth(max(40, msg.Width-4))
-		m.tbl.SetHeight(max(10, msg.Height-10))
+		// SetHeight controls data rows only; the table also renders 1 header row.
+		// The view now contains only the table, so the full content area is available.
+		m.tbl.SetHeight(max(10, msg.Height-1))
 		return m, nil
 
 	case txsLoadedMsg:
@@ -315,6 +317,21 @@ func (m TransactionsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// NavHint returns the context-sensitive hint string that the root model merges
+// into its global help line when the Transactions tab is active.
+func (m TransactionsTabModel) NavHint() string {
+	if m.editor == nil {
+		return ""
+	}
+	if m.mode == txModeAdding || m.mode == txModeEditing {
+		return "esc: cancel"
+	}
+	if m.status != "" {
+		return m.status
+	}
+	return "a: add · e: edit · d: delete · r: reload"
+}
+
 func (m TransactionsTabModel) View() string {
 	if m.editor == nil {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render(
@@ -326,11 +343,7 @@ func (m TransactionsTabModel) View() string {
 		return m.form.View()
 	}
 
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("242"))
-	return lipgloss.JoinVertical(lipgloss.Left,
-		m.tbl.View(),
-		statusStyle.Render(m.status),
-	)
+	return m.tbl.View()
 }
 
 // buildEntries merges m.txs and m.divs into a single date-sorted slice and

@@ -240,8 +240,10 @@ func TestLogsTabViewShowsScrollHint(t *testing.T) {
 	up, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = up.(LogsTabModel)
 
-	view := m.View()
-	if !strings.Contains(view, "more below") {
-		t.Errorf("View() = %q, want scroll hint 'more below'", view)
+	// The scroll hint is surfaced via NavHint() (merged into the root help line),
+	// not in View() itself — the log body fills the full available height.
+	hint := m.NavHint()
+	if !strings.Contains(hint, "more below") {
+		t.Errorf("NavHint() = %q, want scroll hint 'more below'", hint)
 	}
 }

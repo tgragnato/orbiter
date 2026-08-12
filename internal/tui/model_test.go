@@ -165,8 +165,10 @@ func TestModelToggleError(t *testing.T) {
 	if m.loadError == nil {
 		t.Fatalf("loadError = nil, want non-nil")
 	}
-	if !strings.Contains(m.View(), "Toggle failed") {
-		t.Fatalf("view missing toggle error status: %s", m.View())
+	// Status messages (including "Toggle failed") are surfaced via NavHint(),
+	// not embedded in View() — the body renders only content, not chrome.
+	if !strings.Contains(m.NavHint(), "Toggle failed") {
+		t.Fatalf("NavHint() missing toggle error status: %s", m.NavHint())
 	}
 }
 

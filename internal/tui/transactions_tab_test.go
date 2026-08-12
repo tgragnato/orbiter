@@ -628,9 +628,10 @@ func TestTransactionsTabViewNormalMode(t *testing.T) {
 
 	m := NewTransactionsTabModel(&fakeTransactionEditor{})
 	m.status = "ready"
-	view := m.View()
-	if !strings.Contains(view, "ready") {
-		t.Errorf("View() = %q, want status 'ready'", view)
+	// Status is surfaced via NavHint() (merged into the root help line),
+	// not embedded in View() — the body renders only the table.
+	if !strings.Contains(m.NavHint(), "ready") {
+		t.Errorf("NavHint() = %q, want status 'ready'", m.NavHint())
 	}
 }
 

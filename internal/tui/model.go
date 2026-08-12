@@ -28,7 +28,6 @@ type holdingsMsg struct {
 	unrealizedPnL     float64
 	realized          float64
 	dividendsBySymbol map[string]float64
-	txBySymbol        map[string][]portfolio.Transaction
 	err               error
 }
 
@@ -74,7 +73,6 @@ type Model struct {
 	unrealizedPnL     float64
 	realized          float64
 	dividendsBySymbol map[string]float64
-	txBySymbol        map[string][]portfolio.Transaction
 	status            string
 	loading           bool
 	loadError         error
@@ -203,7 +201,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.width = msg.Width
 			m.height = msg.Height
 			m.table.SetWidth(max(40, msg.Width-4))
-			m.table.SetHeight(max(3, msg.Height-24))
+			// SetHeight controls data rows only; bubbles/table also renders 1 header row.
+		// Fixed chrome in the holdings body: summary(1) + table-header(1) = 2 rows.
+		m.table.SetHeight(max(3, msg.Height-2))
 			return m, nil
 
 		default:
@@ -261,7 +261,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.table.SetWidth(max(40, msg.Width-4))
-		m.table.SetHeight(max(3, msg.Height-24))
+		// SetHeight controls data rows only; bubbles/table also renders 1 header row.
+		// Fixed chrome in the holdings body: summary(1) + table-header(1) = 2 rows.
+		m.table.SetHeight(max(3, msg.Height-2))
 		return m, nil
 
 	case tickMsg:
@@ -283,7 +285,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.unrealizedPnL = msg.unrealizedPnL
 		m.realized = msg.realized
 		m.dividendsBySymbol = msg.dividendsBySymbol
-		m.txBySymbol = msg.txBySymbol
 		m.status = fmt.Sprintf("%d holdings loaded", len(msg.holdings))
 		m.syncRows()
 		return m, nil
@@ -323,30 +324,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// NavHint returns the context-sensitive hint string that the root model merges
+// into its global help line when the Holdings tab is active.
+func (m Model) NavHint() string {
+	if m.mode == modeAddTx {
+		return "esc: cancel"
+	}
+	nav := "t: core↔sat · x: toggle TAA"
+	if m.txStore != nil {
+		nav = "a: add trade · " + nav
+	}
+	if m.status != "" {
+		return m.status + "  |  " + nav
+	}
+	return nav
+}
+
 func (m Model) View() string {
 	if m.quit {
 		return ""
 	}
 
-	title := m.styles.title.Render("Tab 1 - Unified Holdings")
 	summary := m.summaryView()
 
 	if m.mode == modeAddTx {
-		return lipgloss.JoinVertical(lipgloss.Left, title, summary, m.form.View())
+		return lipgloss.JoinVertical(lipgloss.Left, summary, m.form.View())
 	}
 
 	if m.loadError != nil {
 		errLine := m.styles.error.Render(fmt.Sprintf("Error: %v", m.loadError))
-		status := m.styles.status.Render(m.status)
-		return lipgloss.JoinVertical(lipgloss.Left, title, summary, errLine, status)
+		return lipgloss.JoinVertical(lipgloss.Left, summary, errLine)
 	}
 
-	hint := "t: core↔sat | x: toggle TAA | q: quit"
-	if m.txStore != nil {
-		hint = "a: add trade | t: core↔sat | x: toggle TAA | q: quit"
-	}
-	status := m.styles.status.Render(m.status + " | " + hint)
-	return lipgloss.JoinVertical(lipgloss.Left, title, summary, m.table.View(), m.txPanelView(), status)
+	return lipgloss.JoinVertical(lipgloss.Left, summary, m.table.View())
 }
 
 func (m Model) refreshCmd() tea.Cmd {
@@ -389,24 +399,12 @@ func (m Model) refreshCmd() tea.Cmd {
 			}
 		}
 
-		// Preload all transactions for the per-holding breakdown panel.
-		var txBySymbol map[string][]portfolio.Transaction
-		if m.txStore != nil {
-			if allTxs, err := m.txStore.ListTransactions(context.Background(), ""); err == nil {
-				txBySymbol = make(map[string][]portfolio.Transaction, len(holdings))
-				for i := range allTxs {
-					txBySymbol[allTxs[i].Symbol] = append(txBySymbol[allTxs[i].Symbol], allTxs[i])
-				}
-			}
-		}
-
 		return holdingsMsg{
 			holdings:          holdings,
 			summary:           portfolio.BuildSummary(holdings),
 			unrealizedPnL:     unrealizedPnL,
 			realized:          realizedPnL,
 			dividendsBySymbol: dividendsBySymbol,
-			txBySymbol:        txBySymbol,
 		}
 	}
 }
@@ -537,97 +535,6 @@ func (m Model) summaryView() string {
 	))
 }
 
-// txPanelView renders up to 5 of the most recent transactions for the holding
-// currently under the cursor. Transactions are ordered newest-first.
-// Per-BUY it shows the updated PMC; per-SELL it shows the realized P&L.
-func (m Model) txPanelView() string {
-	if len(m.holdings) == 0 || m.txBySymbol == nil {
-		return ""
-	}
-	cursor := m.table.Cursor()
-	if cursor < 0 || cursor >= len(m.holdings) {
-		return ""
-	}
-	h := m.holdings[cursor]
-	txs := m.txBySymbol[h.Symbol]
-
-	header := m.styles.status.Render(fmt.Sprintf("  Transactions: %s", h.Symbol))
-	if len(txs) == 0 {
-		return lipgloss.JoinVertical(lipgloss.Left, header, m.styles.status.Render("  (no transactions recorded)"))
-	}
-
-	// Replay all transactions to compute per-row PMC / realized PnL.
-	type row struct {
-		tx          portfolio.Transaction
-		pmcAfter    float64
-		realizedPnL float64
-	}
-	rows := make([]row, len(txs))
-	var qty, pmc float64
-	for i := range txs {
-		tx := txs[i]
-		r := row{tx: tx}
-		switch tx.Type {
-		case portfolio.TransactionBuy:
-			total := qty*pmc + tx.Quantity*tx.Price + tx.Fee
-			qty += tx.Quantity
-			if qty > 0 {
-				pmc = total / qty
-			}
-			r.pmcAfter = pmc
-		case portfolio.TransactionSell:
-			sell := tx.Quantity
-			if sell > qty {
-				sell = qty
-			}
-			r.realizedPnL = sell*(tx.Price-pmc) - tx.Fee
-			qty -= tx.Quantity
-			if qty <= 0 {
-				qty = 0
-				pmc = 0
-			}
-		}
-		rows[i] = r
-	}
-
-	// Show at most 5 rows, newest first.
-	const maxRows = 12
-	start := 0
-	if len(rows) > maxRows {
-		start = len(rows) - maxRows
-	}
-	shown := len(rows) - start
-	suffix := ""
-	if start > 0 {
-		suffix = fmt.Sprintf(" (showing %d of %d, newest first)", shown, len(rows))
-	}
-	lines := []string{m.styles.status.Render(fmt.Sprintf("  Transactions: %s%s", h.Symbol, suffix))}
-
-	for i := len(rows) - 1; i >= start; i-- {
-		r := rows[i]
-		typeStr := "BUY "
-		if r.tx.Type == portfolio.TransactionSell {
-			typeStr = "SELL"
-		}
-		extra := ""
-		if r.tx.Type == portfolio.TransactionBuy {
-			extra = fmt.Sprintf("  PMC→ %8.2f", r.pmcAfter)
-		} else {
-			extra = fmt.Sprintf("  PnL  %+8.2f", r.realizedPnL)
-		}
-		line := fmt.Sprintf("    %s  %s  %9.4f  @ %8.2f  fee %6.2f%s",
-			r.tx.ExecutedAt.Format("2006-01-02"),
-			typeStr,
-			r.tx.Quantity,
-			r.tx.Price,
-			r.tx.Fee,
-			extra,
-		)
-		lines = append(lines, m.styles.status.Render(line))
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
-}
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg { return tickMsg(t) })

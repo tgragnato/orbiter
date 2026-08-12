@@ -360,6 +360,16 @@ func (m SettingsTabModel) saveCmd() tea.Cmd {
 	}
 }
 
+// NavHint returns the context-sensitive hint string that the root model merges
+// into its global help line when the Settings tab is active.
+func (m SettingsTabModel) NavHint() string {
+	nav := "j/k: navigate · space: cycle cost basis · s/enter: save"
+	if m.status != "" {
+		return m.status + "  |  " + nav
+	}
+	return nav
+}
+
 func (m SettingsTabModel) View() string {
 	if m.quit {
 		return ""
@@ -367,8 +377,6 @@ func (m SettingsTabModel) View() string {
 
 	st := m.styles
 	lines := []string{
-		st.title.Render("Tab 3 - Settings"),
-		"",
 		st.sectionTitle.Render("Portfolio Targets"),
 		m.renderSettingsInput("Core Ratio:          ", m.coreInput, m.focused == settingFieldCoreRatio),
 		m.renderSettingsInput("Satellite Ratio:     ", m.satInput, m.focused == settingFieldSatRatio),
@@ -384,17 +392,7 @@ func (m SettingsTabModel) View() string {
 		"",
 		st.sectionTitle.Render("Portfolio Currency"),
 		m.renderSettingsInput("Base Currency (ISO): ", m.currencyInput, m.focused == settingFieldCurrency),
-		"",
 	}
-
-	if m.status != "" {
-		style := st.status
-		if strings.HasPrefix(m.status, "Error:") || strings.HasPrefix(m.status, "Load error:") {
-			style = st.errStyle
-		}
-		lines = append(lines, style.Render(m.status))
-	}
-	lines = append(lines, st.hint.Render("j/k: navigate · space: cycle cost basis · s/enter: save"))
 
 	return strings.Join(lines, "\n")
 }

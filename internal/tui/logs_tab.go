@@ -104,11 +104,27 @@ func (m LogsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m LogsTabModel) visibleLines() int {
-	n := m.height - 4 // header strip + status bar
-	if n < 1 {
+	if m.height < 1 {
 		return 20
 	}
-	return n
+	return m.height
+}
+
+// NavHint returns the scroll/count string that the root model merges into its
+// global help line when the Logs tab is active.  This keeps the log view
+// itself free of any fixed-height chrome so log entries fill every available row.
+func (m LogsTabModel) NavHint() string {
+	base := "↑/↓ scroll · g top · G bottom"
+	if len(m.entries) == 0 {
+		return base
+	}
+	total := len(m.entries)
+	end := total - m.offset
+	scrollHint := ""
+	if m.offset > 0 {
+		scrollHint = fmt.Sprintf(" ↑ %d more below", m.offset)
+	}
+	return fmt.Sprintf("%d/%d entries · %s%s", end, total, base, scrollHint)
 }
 
 func (m LogsTabModel) View() string {
@@ -126,17 +142,10 @@ func (m LogsTabModel) View() string {
 	start := max(end-visible, 0)
 	slice := m.entries[start:end]
 
-	lines := make([]string, 0, len(slice)+1)
+	lines := make([]string, 0, len(slice))
 	for _, e := range slice {
 		lines = append(lines, m.renderEntry(e))
 	}
-
-	scrollHint := ""
-	if m.offset > 0 {
-		scrollHint = fmt.Sprintf(" ↑ %d more below", m.offset)
-	}
-	statusLine := st.status.Render(fmt.Sprintf("  %d/%d entries · ↑/↓ scroll · g top · G bottom%s", end, total, scrollHint))
-	lines = append(lines, statusLine)
 
 	return strings.Join(lines, "\n")
 }

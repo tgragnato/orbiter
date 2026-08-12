@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -10,19 +11,12 @@ import (
 	innersignal "github.com/tgragnato/orbiter/internal/signal"
 )
 
-const (
-	signalsRefreshInterval = time.Hour
-	mlLogMaxLines          = 20 // visible ML log lines kept in the ring buffer
-)
+const signalsRefreshInterval = time.Hour
 
 type signalsTickMsg time.Time
 
 type signalsMsg struct {
 	messages []innersignal.Message
-}
-
-type mlLogMsg struct {
-	line string
 }
 
 // MLEngine is the subset of the background ML engine surface needed by the TUI.
@@ -44,20 +38,23 @@ type MLEngine interface {
 type SignalsTabModel struct {
 	readModel innersignal.ReadModel
 	mlEngine  MLEngine
+	logCh     LogChannel // ML log lines are forwarded here so they appear in the Logs tab
 	messages  []innersignal.Message
-	mlLogs    []string // ring buffer of recent ML log lines
 	quit      bool
+
+	width  int
+	height int
+	offset int // lines scrolled up from the bottom; 0 = newest entries visible
 
 	styles signalStyles
 }
 
 type signalStyles struct {
-	title   lipgloss.Style
-	line    lipgloss.Style
-	empty   lipgloss.Style
-	status  lipgloss.Style
-	mlLog   lipgloss.Style
-	mlTitle lipgloss.Style
+	ts      lipgloss.Style // timestamp — dimmed
+	sigType lipgloss.Style // signal type (BUY/SELL/…) — rosa bold, matches table Selected
+	summary lipgloss.Style // signal summary — terminal default (white)
+	empty   lipgloss.Style // placeholder when no signals
+	status  lipgloss.Style // nav hints
 }
 
 // NewSignalsTabModelWithML creates the Tab 2 model with optional ML status.
@@ -66,14 +63,20 @@ func NewSignalsTabModelWithML(readModel innersignal.ReadModel, ml MLEngine) Sign
 		readModel: readModel,
 		mlEngine:  ml,
 		styles: signalStyles{
-			title:   lipgloss.NewStyle().Bold(true),
-			line:    lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
+			ts:      lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
+			sigType: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212")),
+			summary: lipgloss.NewStyle(),
 			empty:   lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 			status:  lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
-			mlLog:   lipgloss.NewStyle().Foreground(lipgloss.Color("33")),
-			mlTitle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")),
 		},
 	}
+}
+
+// WithLogChannel wires a LogChannel so that ML engine log lines are forwarded
+// to the Logs tab instead of being displayed inline here.
+func (m SignalsTabModel) WithLogChannel(ch LogChannel) SignalsTabModel {
+	m.logCh = ch
+	return m
 }
 
 func (m SignalsTabModel) Init() tea.Cmd {
@@ -87,10 +90,13 @@ func (m SignalsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// The signals tab renders plain text; terminal dimensions are not needed.
+		m.width = msg.Width
+		m.height = msg.Height
 		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
+		// ML engine controls.
 		case "p":
 			if m.mlEngine != nil {
 				if m.mlEngine.Status() == 1 { // StatusRunning
@@ -103,18 +109,71 @@ func (m SignalsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.mlEngine != nil {
 				m.mlEngine.Trigger()
 			}
+		// Scroll controls.
+		case "up", "k":
+			maxOff := max(0, len(m.messages)-m.visibleLines())
+			if m.offset < maxOff {
+				m.offset++
+			}
+		case "down", "j":
+			if m.offset > 0 {
+				m.offset--
+			}
+		case "g":
+			m.offset = max(0, len(m.messages)-m.visibleLines())
+		case "G":
+			m.offset = 0
 		}
+
 	case signalsTickMsg:
 		return m, tea.Batch(signalsTickCmd(), m.refreshCmd(), m.drainMLLogsCmd())
+
 	case signalsMsg:
 		m.messages = msg.messages
-		return m, nil
-	case mlLogMsg:
-		m.mlLogs = appendRing(m.mlLogs, msg.line, mlLogMaxLines)
+		// Clamp scroll offset after a refresh so it never exceeds the new range.
+		maxOff := max(0, len(m.messages)-m.visibleLines())
+		if m.offset > maxOff {
+			m.offset = maxOff
+		}
 		return m, nil
 	}
 
 	return m, nil
+}
+
+// visibleLines returns how many signal rows fit on screen.
+// All chrome (ML status, nav hints, scroll indicator) is surfaced via NavHint()
+// in the root help line, so the full content height is available here.
+func (m SignalsTabModel) visibleLines() int {
+	if m.height < 1 {
+		return 20
+	}
+	return m.height
+}
+
+// NavHint returns the context-sensitive hint string that the root model merges
+// into its global help line when the Signals tab is active.
+func (m SignalsTabModel) NavHint() string {
+	parts := []string{}
+
+	if m.mlEngine != nil {
+		label := mlStatusLabel(m.mlEngine.Status())
+		parts = append(parts, fmt.Sprintf("ML: %s · p: pause/resume · r: run now", label))
+	}
+
+	nav := "↑/↓ scroll · g top · G bottom"
+	if len(m.messages) > 0 {
+		total := len(m.messages)
+		end := total - m.offset
+		scrollHint := ""
+		if m.offset > 0 {
+			scrollHint = fmt.Sprintf(" ↑ %d more below", m.offset)
+		}
+		nav = fmt.Sprintf("%d/%d signals · %s%s", end, total, nav, scrollHint)
+	}
+	parts = append(parts, nav)
+
+	return strings.Join(parts, "  |  ")
 }
 
 func (m SignalsTabModel) View() string {
@@ -122,39 +181,26 @@ func (m SignalsTabModel) View() string {
 		return ""
 	}
 
-	sections := []string{m.styles.title.Render("Tab 2 - Signals")}
-
-	// Signal queue.
 	if len(m.messages) == 0 {
-		sections = append(sections, m.styles.empty.Render("No queued signals yet."))
-	} else {
-		for i := range m.messages {
-			line := fmt.Sprintf("%s | %-22s | %s", m.messages[i].CreatedAt.Format(time.RFC3339), m.messages[i].Type, m.messages[i].Summary)
-			sections = append(sections, m.styles.line.Render(line))
-		}
-	}
-	sections = append(sections, m.styles.status.Render(fmt.Sprintf("Queued messages: %d", len(m.messages))))
-
-	// ML training panel (only shown when an engine is wired).
-	if m.mlEngine != nil {
-		sections = append(sections, m.renderMLPanel())
+		return m.styles.empty.Render("No queued signals yet.")
 	}
 
-	return strings.Join(sections, "\n")
-}
+	visible := m.visibleLines()
+	total := len(m.messages)
+	end := total - m.offset
+	start := max(end-visible, 0)
+	slice := m.messages[start:end]
 
-func (m SignalsTabModel) renderMLPanel() string {
-	statusLabel := mlStatusLabel(m.mlEngine.Status())
-	header := m.styles.mlTitle.Render(fmt.Sprintf("ML Engine — %s  [p: pause/resume | r: run now]", statusLabel))
-	lines := []string{header}
-
-	if len(m.mlLogs) == 0 {
-		lines = append(lines, m.styles.empty.Render("No training logs yet."))
-	} else {
-		for _, l := range m.mlLogs {
-			lines = append(lines, m.styles.mlLog.Render(l))
-		}
+	lines := make([]string, 0, len(slice))
+	for i := range slice {
+		row := m.styles.ts.Render(slice[i].CreatedAt.Format(time.RFC3339)) +
+			" │ " +
+			m.styles.sigType.Render(fmt.Sprintf("%-22s", slice[i].Type)) +
+			" │ " +
+			m.styles.summary.Render(slice[i].Summary)
+		lines = append(lines, row)
 	}
+
 	return strings.Join(lines, "\n")
 }
 
@@ -180,33 +226,38 @@ func (m SignalsTabModel) refreshCmd() tea.Cmd {
 	}
 }
 
-// drainMLLogsCmd reads one log line from the ML engine's channel (non-blocking)
-// and returns it as a mlLogMsg. This keeps UI latency low while the training
-// goroutine emits at its own pace.
+// drainMLLogsCmd drains all available lines from the ML engine's log channel
+// (non-blocking) and forwards them to the Logs tab via logCh.
+// The signals tab itself no longer accumulates or displays these lines.
 func (m SignalsTabModel) drainMLLogsCmd() tea.Cmd {
 	if m.mlEngine == nil {
 		return nil
 	}
 	ch := m.mlEngine.LogsChan()
+	logCh := m.logCh
 	return func() tea.Msg {
-		select {
-		case line := <-ch:
-			return mlLogMsg{line: line}
-		default:
-			return nil
+		for {
+			select {
+			case line := <-ch:
+				if logCh != nil {
+					entry := LogEntry{
+						Time:    time.Now(),
+						Level:   slog.LevelInfo,
+						Message: line,
+						Attrs:   []slog.Attr{slog.String("source", "ml-engine")},
+					}
+					select {
+					case logCh <- entry:
+					default:
+					}
+				}
+			default:
+				return nil
+			}
 		}
 	}
 }
 
 func signalsTickCmd() tea.Cmd {
 	return tea.Tick(signalsRefreshInterval, func(t time.Time) tea.Msg { return signalsTickMsg(t) })
-}
-
-// appendRing appends line to buf and trims it to maxLen from the end.
-func appendRing(buf []string, line string, maxLen int) []string {
-	buf = append(buf, line)
-	if len(buf) > maxLen {
-		buf = buf[len(buf)-maxLen:]
-	}
-	return buf
 }

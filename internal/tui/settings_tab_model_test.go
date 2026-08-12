@@ -231,7 +231,7 @@ func TestSettingsTabViewContainsExpectedSections(t *testing.T) {
 	m := NewSettingsTabModel(nil)
 	view := m.View()
 
-	for _, want := range []string{"Tab 3", "Portfolio Targets", "TAA Parameters", "Cost Basis", "Data Provider"} {
+	for _, want := range []string{"Portfolio Targets", "TAA Parameters", "Cost Basis", "Data Provider"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("View() missing %q", want)
 		}
