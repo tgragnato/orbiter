@@ -26,14 +26,6 @@ func (rn *Number) Insert(o *ohlc.OHLC) {
 	rn.latestCandle = o
 }
 
-func floor(number, multiplier float64) float64 {
-	return math.Floor(number*multiplier) / multiplier
-}
-
-func ceil(number, multiplier float64) float64 {
-	return math.Ceil(number*multiplier) / multiplier
-}
-
 func (rn *Number) Value() (map[string]float64, error) {
 	if rn.latestCandle == nil {
 		return nil, errors.New("price data is missing")

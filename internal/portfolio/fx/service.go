@@ -3,6 +3,7 @@ package fx
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -56,12 +57,6 @@ func (s *Service) Convert(ctx context.Context, amount float64, fromCurrency, toC
 		return 0, err
 	}
 	return amount * rate, nil
-}
-
-// RateFor returns the exchange rate: 1 unit of from = ? units of to on date.
-// Exported so callers can apply the rate directly (e.g. per-holding NAV conversion).
-func (s *Service) RateFor(ctx context.Context, from, to string, date time.Time) (float64, error) {
-	return s.rateFor(ctx, strings.ToUpper(from), strings.ToUpper(to), date)
 }
 
 // SyncRates fetches the rate series for (base→quote) over [from, to] from the
@@ -141,7 +136,7 @@ func (s *Service) rateFor(ctx context.Context, from, to string, date time.Time) 
 	}
 
 	if storeErr := s.store.UpsertRates(ctx, rates); storeErr != nil {
-		// Non-fatal: we still have the rate in memory for this call.
+		slog.Warn("fx: live rate persist failed, using in-memory value", "from", from, "to", to, "error", storeErr)
 	}
 
 	// Use the last (most recent) rate in the fetched series.

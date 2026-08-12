@@ -102,6 +102,7 @@ func TestMergeForests(t *testing.T) {
 	merged := MergeForests(results)
 	if merged == nil {
 		t.Fatal("MergeForests returned nil")
+		return
 	}
 
 	totalTrees := 0

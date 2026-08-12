@@ -29,8 +29,7 @@ func (h Holding) NAV() float64 {
 
 // NAVInBase converts the local-currency NAV to the portfolio base currency.
 // fxRate must be the rate "how many base-currency units per 1 unit of h.Currency"
-// (i.e. Rate{Base: baseCurrency, Quote: h.Currency}.Rate inverted, or use
-// fx.Service.RateFor(ctx, h.Currency, baseCurrency, date)).
+// (i.e. the result of fx.Service.Convert(ctx, 1, h.Currency, baseCurrency, date)).
 func (h Holding) NAVInBase(fxRate float64) float64 {
 	return h.NAV() * fxRate
 }
