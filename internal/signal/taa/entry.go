@@ -39,10 +39,7 @@ func evaluateEntries(
 	suppressed := map[string]struct{}{}
 	totalSatelliteNAV := 0.0
 	for _, h := range holdings {
-		if h.AllocationType != portfolio.AllocationSatellite {
-			continue
-		}
-		if !h.TAAEnabled {
+		if h.AllocationType != portfolio.AllocationSatellite || !h.TAAEnabled {
 			suppressed[h.Symbol] = struct{}{}
 			continue
 		}
@@ -54,7 +51,7 @@ func evaluateEntries(
 
 	// Collect unowned candidates with non-trivial conviction.
 	type candidate struct {
-		symbol    string
+		symbol     string
 		conviction float64
 		rawWeight  float64
 	}
