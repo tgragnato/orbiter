@@ -44,7 +44,7 @@ func newMLRunner(
 		engine:         engine,
 		samples:        samples,
 		cfg:            cfg,
-		interval:       24 * time.Hour,
+		interval:       time.Hour,
 		trigger:        make(chan struct{}, 1),
 		checkpoint:     checkpoint,
 		currentSamples: currentSamples,

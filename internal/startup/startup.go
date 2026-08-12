@@ -153,7 +153,7 @@ func runTUI(ctx context.Context, args []string) error {
 		if err := taaEngine.Evaluate(ctx); err != nil {
 			slog.Warn("taa initial evaluation failed", "error", err)
 		}
-		ticker := time.NewTicker(24 * time.Hour)
+		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
 		for {
 			select {

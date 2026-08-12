@@ -14,7 +14,7 @@ No third-party ML library is used. All training, inference, and serialisation ar
 feed.Updater (30 min)
   └─ Yahoo EOD candles → PostgreSQL market_price
 
-mlRunner (24 h, or on Trigger())
+mlRunner (1h, or on Trigger())
   └─ featurizer.ExtractMLSamples
        ├─ 8 years of EOD candles per active holding (Yahoo, ~2016 bars)
        ├─ batch indicators via go-talib          (features 0–12)

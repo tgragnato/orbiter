@@ -146,13 +146,13 @@ main.go
             │
             ├─ portfolio.NewPostgresStore  (HoldingsStore + TransactionStore + PriceStore)
             │
-            ├─ [goroutine] mlRunner  (24 h auto-schedule)
+            ├─ [goroutine] mlRunner  (1h auto-schedule)
             │    ├─ featurizer.ExtractMLSamples  ──► portfolio store + Yahoo data
             │    │    ├─ go-talib batch indicators       (features 0–12)
             │    │    └─ strategy.ScoredStrategy scores  (features 13–22)
             │    └─ ml.Engine  (Random Forest, WalkForward CV)
             │
-            ├─ [goroutine] taa.Engine  (24 h ticker)
+            ├─ [goroutine] taa.Engine  (1h ticker)
             │    ├─ reads holdings from store
             │    ├─ applies conviction + PMC reader
             │    └─ dispatches signals ──► signal.Dispatcher
