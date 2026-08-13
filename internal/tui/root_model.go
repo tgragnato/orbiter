@@ -59,8 +59,15 @@ func NewRootModelWithMetrics(
 	if te, ok := txStore.(TransactionEditor); ok {
 		txEditor = te
 	}
+
+	holdingsTab := NewModelWithAll(store, txStore, portfolioID).WithBaseCurrency(baseCurrency)
+	// Enable the watchlist section if the store implements WatchlistStore.
+	if ws, ok := store.(portfolio.WatchlistStore); ok {
+		holdingsTab = holdingsTab.WithWatchlist(ws)
+	}
+
 	return RootModel{
-		holdingsTab:     NewModelWithAll(store, txStore, portfolioID).WithBaseCurrency(baseCurrency),
+		holdingsTab:     holdingsTab,
 		signalsTab:      NewSignalsTabModelWithML(readModel, ml),
 		settingsTab:     NewSettingsTabModel(configSvc),
 		logsTab:         NewLogsTabModel(logCh),
@@ -103,7 +110,8 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logsTab.quit = true
 			return m, tea.Quit
 		case "tab", "l":
-			if m.activeTab == tabHoldings && m.holdingsTab.mode == modeAddTx {
+			if m.activeTab == tabHoldings &&
+				(m.holdingsTab.mode == modeAddTx || m.holdingsTab.mode == modeAddWatchlist) {
 				break
 			}
 			if m.activeTab == tabTransactions &&
@@ -113,7 +121,8 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = (m.activeTab + 1) % tabCount
 			return m, m.initActiveTab()
 		case "shift+tab", "h":
-			if m.activeTab == tabHoldings && m.holdingsTab.mode == modeAddTx {
+			if m.activeTab == tabHoldings &&
+				(m.holdingsTab.mode == modeAddTx || m.holdingsTab.mode == modeAddWatchlist) {
 				break
 			}
 			if m.activeTab == tabTransactions &&

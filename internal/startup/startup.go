@@ -112,10 +112,19 @@ func runTUI(ctx context.Context, args []string) error {
 
 	// ML engine with 24-hour auto-scheduling, checkpoint persistence, and
 	// per-symbol conviction scoring for the TAA engine.
+	//
+	// The raw Yahoo provider is wrapped with a DB-backed candle cache so that
+	// historical EOD data is fetched from Yahoo only once per symbol. Subsequent
+	// featurizer runs (training + inference) query the local eod_candles table
+	// and only request the delta (new days since last cache update) from Yahoo.
 	yahooProvider := data.NewYahooProvider(&http.Client{Timeout: 30 * time.Second})
+	var candleProvider data.DataProvider = yahooProvider
+	if cs, ok := store.(data.CandleStorer); ok {
+		candleProvider = data.NewCachingProvider(yahooProvider, cs)
+	}
 	ckpt := ml.NewCheckpoint(db)
 	runner := newMLRunner(ml.NewEngine(), func() []ml.Sample {
-		samples, err := featurizer.ExtractMLSamples(ctx, store, yahooProvider)
+		samples, err := featurizer.ExtractMLSamples(ctx, store, candleProvider)
 		if err != nil {
 			slog.Warn("ml: sample extraction failed", "error", err)
 			return nil
@@ -131,7 +140,7 @@ func runTUI(ctx context.Context, args []string) error {
 		MaxDepth:         5,
 		MinSamples:       10,
 	}, ckpt, func(ctx context.Context) (map[string]ml.Sample, error) {
-		return featurizer.CurrentSamples(ctx, store, yahooProvider)
+		return featurizer.CurrentSamples(ctx, store, candleProvider)
 	})
 	go runner.run(ctx)
 
@@ -233,9 +242,9 @@ func runTUI(ctx context.Context, args []string) error {
 	if priceStore != nil {
 		var priceFeed *feed.Updater
 		if ds, ok := store.(feed.DividendSyncer); ok {
-			priceFeed = feed.NewWithDividendSync(priceStore, ds, yahooProvider, 30*time.Minute)
+			priceFeed = feed.NewWithDividendSync(priceStore, ds, candleProvider, 30*time.Minute)
 		} else {
-			priceFeed = feed.New(priceStore, yahooProvider, 30*time.Minute)
+			priceFeed = feed.New(priceStore, candleProvider, 30*time.Minute)
 		}
 		priceFeed.WithNAVSnapshot(store, twrEngine, "MAIN")
 		priceFeed.WithFXService(fxSvc, baseCurrency)
@@ -245,6 +254,9 @@ func runTUI(ctx context.Context, args []string) error {
 		}
 		if sp, ok := store.(feed.SplitPersister); ok {
 			priceFeed.WithSplitPersister(sp)
+		}
+		if ws, ok := store.(feed.WatchlistPriceStore); ok {
+			priceFeed.WithWatchlistUpdater(ws)
 		}
 		go priceFeed.Run(ctx)
 	}

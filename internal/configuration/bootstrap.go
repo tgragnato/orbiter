@@ -135,6 +135,33 @@ var migrations = []migration{
 			);
 			CREATE INDEX IF NOT EXISTS idx_fx_rates_lookup
 				ON fx_rates (base_currency, quote_currency, rate_date);
+
+			CREATE TABLE IF NOT EXISTS watchlist (
+				id           BIGSERIAL      PRIMARY KEY,
+				symbol       TEXT           NOT NULL,
+				market_price NUMERIC(20,8)  NOT NULL DEFAULT 0,
+				created_at   TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+				UNIQUE (symbol)
+			);
+
+			CREATE TABLE IF NOT EXISTS eod_candles (
+				id            BIGSERIAL      PRIMARY KEY,
+				symbol        TEXT           NOT NULL,
+				candle_date   DATE           NOT NULL,
+				open          NUMERIC(20,8)  NOT NULL DEFAULT 0,
+				high          NUMERIC(20,8)  NOT NULL DEFAULT 0,
+				low           NUMERIC(20,8)  NOT NULL DEFAULT 0,
+				close_price   NUMERIC(20,8)  NOT NULL DEFAULT 0,
+				adj_close     NUMERIC(20,8)  NOT NULL DEFAULT 0,
+				volume        BIGINT         NOT NULL DEFAULT 0,
+				cash_dividend NUMERIC(20,8)  NOT NULL DEFAULT 0,
+				split_factor  NUMERIC(10,6)  NOT NULL DEFAULT 1,
+				currency      TEXT           NOT NULL DEFAULT '',
+				created_at    TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+				UNIQUE (symbol, candle_date)
+			);
+			CREATE INDEX IF NOT EXISTS idx_eod_candles_symbol_date
+				ON eod_candles (symbol, candle_date);
 		`,
 	},
 }

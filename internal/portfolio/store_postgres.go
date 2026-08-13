@@ -654,6 +654,89 @@ func (s *PostgresStore) UpsertSplit(ctx context.Context, symbol string, splitDat
 	return nil
 }
 
+// ListWatchlist returns all watchlist items ordered by creation date descending.
+func (s *PostgresStore) ListWatchlist(ctx context.Context) ([]WatchlistItem, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, symbol, market_price, currency, created_at FROM watchlist ORDER BY created_at DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list watchlist: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var items []WatchlistItem
+	for rows.Next() {
+		var item WatchlistItem
+		if err := rows.Scan(&item.ID, &item.Symbol, &item.MarketPrice, &item.Currency, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan watchlist item: %w", err)
+		}
+		item.CreatedAt = item.CreatedAt.UTC()
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// UpdateWatchlistPrice stores the latest EOD market price and quotation currency
+// for a watchlist item. It is a no-op when the symbol is not in the watchlist.
+func (s *PostgresStore) UpdateWatchlistPrice(ctx context.Context, symbol string, price float64, currency string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE watchlist SET market_price = $1, currency = $2 WHERE symbol = $3`,
+		price, currency, symbol,
+	)
+	if err != nil {
+		return fmt.Errorf("update watchlist price %s: %w", symbol, err)
+	}
+	return nil
+}
+
+// AddToWatchlist inserts a symbol into the watchlist. Duplicate symbols are
+// silently ignored (ON CONFLICT DO NOTHING).
+func (s *PostgresStore) AddToWatchlist(ctx context.Context, symbol string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO watchlist (symbol) VALUES ($1) ON CONFLICT (symbol) DO NOTHING`,
+		symbol,
+	)
+	if err != nil {
+		return fmt.Errorf("add to watchlist %s: %w", symbol, err)
+	}
+	return nil
+}
+
+// RemoveFromWatchlist deletes a symbol from the watchlist. It is a no-op if
+// the symbol is not present.
+func (s *PostgresStore) RemoveFromWatchlist(ctx context.Context, symbol string) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM watchlist WHERE symbol = $1`,
+		symbol,
+	)
+	if err != nil {
+		return fmt.Errorf("remove from watchlist %s: %w", symbol, err)
+	}
+	return nil
+}
+
+// ListWatchlistSymbols returns the ticker strings for every watchlist entry.
+// Used by the featurizer to include unowned assets in ML conviction scoring.
+func (s *PostgresStore) ListWatchlistSymbols(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT symbol FROM watchlist ORDER BY symbol`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list watchlist symbols: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var symbols []string
+	for rows.Next() {
+		var sym string
+		if err := rows.Scan(&sym); err != nil {
+			return nil, fmt.Errorf("scan watchlist symbol: %w", err)
+		}
+		symbols = append(symbols, sym)
+	}
+	return symbols, rows.Err()
+}
+
 // UpdateHoldingCurrency sets the ISO 4217 currency for the holding identified
 // by symbol. Called by the feed updater after each price fetch to persist the
 // currency parsed from the data provider's response.

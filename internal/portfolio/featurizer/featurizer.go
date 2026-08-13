@@ -35,12 +35,21 @@ const (
 	forwardDays  = 5  // label horizon: 5-trading-day forward log-return (improves SNR over 1-day)
 )
 
+// watchlistLister is satisfied by any store that exposes watchlist symbol access.
+// It is defined here (rather than importing portfolio) to avoid an import cycle.
+type watchlistLister interface {
+	ListWatchlistSymbols(ctx context.Context) ([]string, error)
+}
+
 // CurrentSamples returns the most recent feature vector for each TAA-eligible
 // holding, including those with Quantity=0 (closed positions preserved in the
 // portfolio). Zero-qty holdings are included so the TAA entry-signal path can
 // compute conviction scores and suggest re-entry when the asset returns to trend.
 // The Label field is populated but should be ignored — it is a current-bar
 // feature vector, not a forward-return target.
+//
+// If the store also implements watchlistLister, watchlist symbols are included
+// so the TAA engine can emit TypeBuy signals for assets not yet held.
 func CurrentSamples(ctx context.Context, store portfolio.HoldingsStore, provider data.DataProvider) (map[string]ml.Sample, error) {
 	holdings, err := store.ListHoldings(ctx)
 	if err != nil {
@@ -68,6 +77,30 @@ func CurrentSamples(ctx context.Context, store portfolio.HoldingsStore, provider
 		}
 		result[h.Symbol] = samples[len(samples)-1]
 	}
+
+	// Also score watchlist symbols so the TAA entry path can emit TypeBuy
+	// signals for assets not yet in the portfolio.
+	if wl, ok := store.(watchlistLister); ok {
+		syms, err := wl.ListWatchlistSymbols(ctx)
+		if err == nil {
+			for _, sym := range syms {
+				if seen[sym] {
+					continue
+				}
+				seen[sym] = true
+				candles, err := provider.GetEOD(sym, from, now)
+				if err != nil || len(candles) < warmupBars+forwardDays+1 {
+					continue
+				}
+				samples := samplesFromCandles(sym, candles)
+				if len(samples) == 0 {
+					continue
+				}
+				result[sym] = samples[len(samples)-1]
+			}
+		}
+	}
+
 	return result, nil
 }
 
@@ -75,6 +108,9 @@ func CurrentSamples(ctx context.Context, store portfolio.HoldingsStore, provider
 // holding (Quantity > 0) and converts them into ml.Sample vectors ready for
 // walk-forward training. Symbols whose fetch fails or whose history is too
 // short are silently skipped so a partial portfolio still yields samples.
+//
+// If the store also implements watchlistLister, watchlist symbols are included
+// in the training set so the model learns their patterns before entry.
 func ExtractMLSamples(ctx context.Context, store portfolio.HoldingsStore, provider data.DataProvider) ([]ml.Sample, error) {
 	holdings, err := store.ListHoldings(ctx)
 	if err != nil {
@@ -98,6 +134,26 @@ func ExtractMLSamples(ctx context.Context, store portfolio.HoldingsStore, provid
 		}
 		all = append(all, samplesFromCandles(h.Symbol, candles)...)
 	}
+
+	// Include watchlist symbols in the training corpus so the model learns
+	// their feature distributions before the user opens a position.
+	if wl, ok := store.(watchlistLister); ok {
+		syms, err := wl.ListWatchlistSymbols(ctx)
+		if err == nil {
+			for _, sym := range syms {
+				if seen[sym] {
+					continue
+				}
+				seen[sym] = true
+				candles, err := provider.GetEOD(sym, from, now)
+				if err != nil || len(candles) < warmupBars+forwardDays+1 {
+					continue
+				}
+				all = append(all, samplesFromCandles(sym, candles)...)
+			}
+		}
+	}
+
 	return all, nil
 }
 

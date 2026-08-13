@@ -72,18 +72,26 @@ type SplitPersister interface {
 	UpsertSplit(ctx context.Context, symbol string, splitDate time.Time, factor float64) error
 }
 
+// WatchlistPriceStore is the persistence interface for keeping watchlist item
+// prices current. *portfolio.PostgresStore satisfies this interface.
+type WatchlistPriceStore interface {
+	ListWatchlistSymbols(ctx context.Context) ([]string, error)
+	UpdateWatchlistPrice(ctx context.Context, symbol string, price float64, currency string) error
+}
+
 // Updater fetches EOD prices from a DataProvider and writes them to the store.
 type Updater struct {
 	store            PriceStore
-	divSyncer        DividendSyncer   // optional; nil disables dividend sync
-	navLister        NAVLister        // optional; nil disables NAV snapshotting
-	navSnapper       NAVSnapper       // optional; nil disables NAV snapshotting
-	navBackfiller    NAVBackfiller    // optional; nil disables historical NAV backfill
-	cashFlowRecorder CashFlowRecorder // optional; nil disables cash flow backfill
-	splitPersister   SplitPersister   // optional; nil disables split detection
-	fxService        *fx.Service      // optional; nil disables FX conversion in NAV aggregation
-	baseCurrency     string           // ISO 4217 portfolio base currency (default "EUR")
-	portfolioID      string           // used when navSnapper is set
+	divSyncer        DividendSyncer      // optional; nil disables dividend sync
+	navLister        NAVLister           // optional; nil disables NAV snapshotting
+	navSnapper       NAVSnapper          // optional; nil disables NAV snapshotting
+	navBackfiller    NAVBackfiller       // optional; nil disables historical NAV backfill
+	cashFlowRecorder CashFlowRecorder    // optional; nil disables cash flow backfill
+	splitPersister   SplitPersister      // optional; nil disables split detection
+	watchlistStore   WatchlistPriceStore // optional; nil disables watchlist price updates
+	fxService        *fx.Service         // optional; nil disables FX conversion in NAV aggregation
+	baseCurrency     string              // ISO 4217 portfolio base currency (default "EUR")
+	portfolioID      string              // used when navSnapper is set
 	provider         data.DataProvider
 	interval         time.Duration
 }
@@ -138,6 +146,14 @@ func (u *Updater) WithCashFlowRecorder(recorder CashFlowRecorder) *Updater {
 func (u *Updater) WithFXService(svc *fx.Service, baseCurrency string) *Updater {
 	u.fxService = svc
 	u.baseCurrency = baseCurrency
+	return u
+}
+
+// WithWatchlistUpdater enables price updates for watchlist items. On every
+// refresh cycle the feed fetches the latest EOD quote for each watchlist symbol
+// and persists it to the watchlist table, making prices visible in the TUI.
+func (u *Updater) WithWatchlistUpdater(ws WatchlistPriceStore) *Updater {
+	u.watchlistStore = ws
 	return u
 }
 
@@ -253,11 +269,60 @@ func (u *Updater) refresh(ctx context.Context) {
 		}
 	}
 
+	// Update prices for watchlist symbols (assets tracked for entry, not yet held).
+	if u.watchlistStore != nil {
+		u.refreshWatchlist(ctx)
+	}
+
 	// After all prices are refreshed, record a NAV snapshot so the TWR chart
 	// accumulates data points over time.
 	if u.navLister != nil && u.navSnapper != nil {
 		if err := u.recordNAV(ctx); err != nil {
 			slog.Warn("price feed: NAV snapshot failed", "error", err)
+		}
+	}
+}
+
+// refreshWatchlist fetches the latest EOD price for every watchlist symbol and
+// persists it. Symbols that are already active holdings are skipped — their
+// price is already updated by the main refresh loop above.
+func (u *Updater) refreshWatchlist(ctx context.Context) {
+	symbols, err := u.watchlistStore.ListWatchlistSymbols(ctx)
+	if err != nil {
+		slog.Warn("price feed: list watchlist symbols", "error", err)
+		return
+	}
+	if len(symbols) == 0 {
+		return
+	}
+
+	now := time.Now().UTC()
+	from := now.AddDate(0, 0, -5)
+
+	for _, sym := range symbols {
+		candles, err := u.provider.GetEOD(sym, from, now)
+		if err != nil {
+			slog.Warn("price feed: watchlist EOD fetch failed", "symbol", sym, "error", err)
+			continue
+		}
+		if len(candles) == 0 {
+			continue
+		}
+
+		last := candles[len(candles)-1]
+		price := last.AdjustedClose
+		if price <= 0 {
+			price = last.Close
+		}
+		if price <= 0 {
+			slog.Warn("price feed: watchlist zero price, skipping", "symbol", sym)
+			continue
+		}
+
+		if err := u.watchlistStore.UpdateWatchlistPrice(ctx, sym, price, last.Currency); err != nil {
+			slog.Warn("price feed: update watchlist price failed", "symbol", sym, "error", err)
+		} else {
+			slog.Info("price feed: watchlist updated", "symbol", sym, "price", price, "currency", last.Currency)
 		}
 	}
 }
