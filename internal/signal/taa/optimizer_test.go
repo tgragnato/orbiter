@@ -74,8 +74,8 @@ func TestOptimizerEqualWeightWithZeroConviction(t *testing.T) {
 		if math.Abs(m.TargetWeight-0.5) > 1e-9 {
 			t.Errorf("%s: target weight = %.4f, want 0.5", m.Instrument, m.TargetWeight)
 		}
-		if math.Abs(m.DeltaEUR) > 1e-6 {
-			t.Errorf("%s: deltaEUR = %.4f, want 0 (already at target)", m.Instrument, m.DeltaEUR)
+		if math.Abs(m.Delta) > 1e-6 {
+			t.Errorf("%s: delta = %.4f, want 0 (already at target)", m.Instrument, m.Delta)
 		}
 	}
 }
@@ -107,12 +107,12 @@ func TestOptimizerConvictionWeightedAllocation(t *testing.T) {
 	}
 
 	// A needs to increase by 25% of 2000 EUR total NAV = +500 EUR
-	if math.Abs(bySymbol["A"].DeltaEUR-500) > 1e-6 {
-		t.Errorf("A deltaEUR = %.4f, want 500", bySymbol["A"].DeltaEUR)
+	if math.Abs(bySymbol["A"].Delta-500) > 1e-6 {
+		t.Errorf("A delta = %.4f, want 500", bySymbol["A"].Delta)
 	}
 	// B needs to decrease by 25% of 2000 EUR = -500 EUR
-	if math.Abs(bySymbol["B"].DeltaEUR-(-500)) > 1e-6 {
-		t.Errorf("B deltaEUR = %.4f, want -500", bySymbol["B"].DeltaEUR)
+	if math.Abs(bySymbol["B"].Delta-(-500)) > 1e-6 {
+		t.Errorf("B delta = %.4f, want -500", bySymbol["B"].Delta)
 	}
 }
 
@@ -170,8 +170,8 @@ func TestOptimizerAllNegativeConvictionEmitsExits(t *testing.T) {
 		if m.TargetWeight != 0 {
 			t.Errorf("%s: target weight = %.4f, want 0 (full exit)", m.Instrument, m.TargetWeight)
 		}
-		if m.DeltaEUR >= 0 {
-			t.Errorf("%s: deltaEUR = %.2f, want negative (selling)", m.Instrument, m.DeltaEUR)
+		if m.Delta >= 0 {
+			t.Errorf("%s: delta = %.2f, want negative (selling)", m.Instrument, m.Delta)
 		}
 	}
 }
@@ -208,12 +208,12 @@ func TestOptimizerRebalanceMessageDirection(t *testing.T) {
 	for _, m := range msgs {
 		switch m.Instrument {
 		case "UP":
-			if m.DeltaEUR <= 0 {
-				t.Errorf("UP: deltaEUR should be positive (buy), got %.2f", m.DeltaEUR)
+			if m.Delta <= 0 {
+				t.Errorf("UP: delta should be positive (buy), got %.2f", m.Delta)
 			}
 		case "DOWN":
-			if m.DeltaEUR >= 0 {
-				t.Errorf("DOWN: deltaEUR should be negative (sell), got %.2f", m.DeltaEUR)
+			if m.Delta >= 0 {
+				t.Errorf("DOWN: delta should be negative (sell), got %.2f", m.Delta)
 			}
 		}
 	}

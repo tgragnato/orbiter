@@ -117,9 +117,9 @@ func evaluateEntries(
 		}
 
 		targetWeight := cand.rawWeight / totalRaw
-		deltaEUR := targetWeight * totalSatelliteNAV
+		delta := targetWeight * totalSatelliteNAV
 
-		msgs = append(msgs, signal.NewBuyMessage(now, cand.symbol, cand.conviction, targetWeight, deltaEUR))
+		msgs = append(msgs, signal.NewBuyMessage(now, cand.symbol, cand.conviction, targetWeight, delta, cfg.Currency))
 	}
 
 	return msgs

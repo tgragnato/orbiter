@@ -70,7 +70,7 @@ func TestEvaluateEntriesDeltaEURScalesWithSatelliteNAV(t *testing.T) {
 	// Satellite NAV = 1000 EUR (10 units @ 100 EUR)
 	// A (held) conviction=0 → rawWeight=1
 	// B (unowned) conviction=1 → rawWeight=2
-	// total raw = 3 → B target = 2/3, deltaEUR = 2/3 * 1000
+	// total raw = 3 → B target = 2/3, delta = 2/3 * 1000
 	holdings := []portfolio.Holding{
 		{Symbol: "A", Quantity: 10, MarketPrice: 100, AllocationType: portfolio.AllocationSatellite, TAAEnabled: true},
 	}
@@ -83,20 +83,20 @@ func TestEvaluateEntriesDeltaEURScalesWithSatelliteNAV(t *testing.T) {
 	if math.Abs(msgs[0].TargetWeight-wantTarget) > 1e-9 {
 		t.Errorf("target weight = %.6f, want %.6f", msgs[0].TargetWeight, wantTarget)
 	}
-	if math.Abs(msgs[0].DeltaEUR-wantDelta) > 1e-4 {
-		t.Errorf("deltaEUR = %.4f, want %.4f", msgs[0].DeltaEUR, wantDelta)
+	if math.Abs(msgs[0].Delta-wantDelta) > 1e-4 {
+		t.Errorf("delta = %.4f, want %.4f", msgs[0].Delta, wantDelta)
 	}
 }
 
 func TestEvaluateEntriesNoHoldingsDeltaEURIsZero(t *testing.T) {
 	t.Parallel()
-	// No existing satellite holdings → totalSatelliteNAV = 0 → deltaEUR = 0
+	// No existing satellite holdings → totalSatelliteNAV = 0 → delta = 0
 	msgs := evaluateEntries(nil, []string{"B"}, perSymbolConviction{"B": 0.9}, Config{Buffer: 0.01}, testNow)
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 entry signal, got %d", len(msgs))
 	}
-	if msgs[0].DeltaEUR != 0 {
-		t.Errorf("deltaEUR = %.4f, want 0 when no satellite holdings exist", msgs[0].DeltaEUR)
+	if msgs[0].Delta != 0 {
+		t.Errorf("delta = %.4f, want 0 when no satellite holdings exist", msgs[0].Delta)
 	}
 }
 

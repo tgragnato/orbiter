@@ -36,11 +36,14 @@ type Config struct {
 	TaxRate float64
 	// BrokerFeePercent is the broker transaction cost as a fraction (e.g. 0.0019).
 	BrokerFeePercent float64
-	// MaxBrokerFeeEUR caps the broker fee in absolute currency units. When > 0
-	// the effective fee rate is min(BrokerFeePercent, MaxBrokerFeeEUR/positionValue).
-	MaxBrokerFeeEUR float64
+	// MaxBrokerFee caps the broker fee in absolute units of the portfolio base currency.
+	// When > 0 the effective fee rate is min(BrokerFeePercent, MaxBrokerFee/positionValue).
+	MaxBrokerFee float64
 	// Buffer is an additional threshold above taxes+fees required to trade.
 	Buffer float64
+	// Currency is the ISO 4217 code of the portfolio base currency (e.g. "EUR").
+	// It is stamped onto every emitted signal so consumers can format amounts correctly.
+	Currency string
 }
 
 // Engine evaluates all holdings in the store and emits TAA signals when
@@ -102,7 +105,8 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 				"symbol", msg.Instrument,
 				"current_weight", msg.CurrentWeight,
 				"target_weight", msg.TargetWeight,
-				"delta_eur", msg.DeltaEUR,
+				"delta", msg.Delta,
+				"currency", msg.Currency,
 			)
 		}
 	}
@@ -118,7 +122,8 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 				slog.Info("entry signal dispatched",
 					"symbol", msg.Instrument,
 					"target_weight", msg.TargetWeight,
-					"delta_eur", msg.DeltaEUR,
+					"delta", msg.Delta,
+					"currency", msg.Currency,
 				)
 			}
 		}

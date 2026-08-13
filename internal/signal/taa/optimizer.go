@@ -73,10 +73,10 @@ func optimizeSatellite(
 	// Emit exit signals for holdings with conviction = -1.
 	for _, cand := range exits {
 		feeRate := cfg.BrokerFeePercent
-		if cfg.MaxBrokerFeeEUR > 0 {
+		if cfg.MaxBrokerFee > 0 {
 			posValue := cand.h.Quantity * cand.h.MarketPrice
 			if posValue > 0 {
-				if capped := cfg.MaxBrokerFeeEUR / posValue; capped < feeRate {
+				if capped := cfg.MaxBrokerFee / posValue; capped < feeRate {
 					feeRate = capped
 				}
 			}
@@ -86,8 +86,8 @@ func optimizeSatellite(
 			continue
 		}
 		currentWeight := cand.h.NAV() / totalNAV
-		deltaEUR := -currentWeight * totalNAV
-		msgs = append(msgs, signal.NewSellMessage(now, cand.h.Symbol, cand.conviction, currentWeight, deltaEUR))
+		delta := -currentWeight * totalNAV
+		msgs = append(msgs, signal.NewSellMessage(now, cand.h.Symbol, cand.conviction, currentWeight, delta, cfg.Currency))
 	}
 
 	// Normalize keeps and emit rebalance signals.
@@ -99,13 +99,13 @@ func optimizeSatellite(
 		for _, cand := range keeps {
 			targetWeight := cand.rawWeight / totalRaw
 			currentWeight := cand.h.NAV() / totalNAV
-			deltaEUR := (targetWeight - currentWeight) * totalNAV
+			delta := (targetWeight - currentWeight) * totalNAV
 
 			feeRate := cfg.BrokerFeePercent
-			if cfg.MaxBrokerFeeEUR > 0 {
+			if cfg.MaxBrokerFee > 0 {
 				posValue := cand.h.Quantity * cand.h.MarketPrice
 				if posValue > 0 {
-					if capped := cfg.MaxBrokerFeeEUR / posValue; capped < feeRate {
+					if capped := cfg.MaxBrokerFee / posValue; capped < feeRate {
 						feeRate = capped
 					}
 				}
@@ -126,7 +126,8 @@ func optimizeSatellite(
 				direction,
 				currentWeight,
 				targetWeight,
-				deltaEUR,
+				delta,
+				cfg.Currency,
 			))
 		}
 	}

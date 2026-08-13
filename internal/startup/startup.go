@@ -171,7 +171,18 @@ func runTUI(ctx context.Context, args []string) error {
 		}
 	}()
 
-	// TAA engine: 0.19 % broker fee capped at €18.90, evaluated every 24 h.
+	// Portfolio base currency — falls back to "EUR" if not configured.
+	// Resolved here so the TAA engine can stamp it onto every emitted signal.
+	baseCurrency := "EUR"
+	if configSvc != nil {
+		if bc, err := configSvc.GetBaseCurrency(ctx); err == nil && bc != "" {
+			baseCurrency = bc
+		} else if err != nil {
+			slog.Warn("startup: could not read base currency, defaulting to EUR", "error", err)
+		}
+	}
+
+	// TAA engine: 0.19 % broker fee capped at 18.90 base-currency units, evaluated every 24 h.
 	taaEngine := taa.NewEngine(
 		store,
 		taa.NullPMCReader{},
@@ -181,8 +192,9 @@ func runTUI(ctx context.Context, args []string) error {
 		taa.Config{
 			TaxRate:          0.26,
 			BrokerFeePercent: 0.0019,
-			MaxBrokerFeeEUR:  18.90,
+			MaxBrokerFee:     18.90,
 			Buffer:           0.01,
+			Currency:         baseCurrency,
 		},
 	)
 
@@ -224,16 +236,6 @@ func runTUI(ctx context.Context, args []string) error {
 	fxStore := fx.NewPostgresStore(db)
 	fxProvider := data.NewYahooFXProvider(&http.Client{Timeout: 30 * time.Second})
 	fxSvc := fx.NewService(fxProvider, fxStore)
-
-	// Portfolio base currency — falls back to "EUR" if not configured.
-	baseCurrency := "EUR"
-	if configSvc != nil {
-		if bc, err := configSvc.GetBaseCurrency(ctx); err == nil && bc != "" {
-			baseCurrency = bc
-		} else if err != nil {
-			slog.Warn("startup: could not read base currency, defaulting to EUR", "error", err)
-		}
-	}
 
 	// Price feed: refresh EOD quotes every 30 minutes and sync dividend income when
 	// the store supports the DividendSyncer interface (no-op otherwise).

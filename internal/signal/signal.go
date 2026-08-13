@@ -24,11 +24,15 @@ type Message struct {
 	Type          Type
 	CreatedAt     time.Time
 	Instrument    string
-	Summary       string
+	Summary       string  // brief human-readable label, suitable for logs; not the primary display
 	OrderID       string
+	Conviction    float64 // ML conviction score that produced this signal; 0 for alerts
 	TargetWeight  float64 // target allocation as fraction of total satellite NAV [0,1]
 	CurrentWeight float64 // current allocation as fraction of total satellite NAV [0,1]
-	DeltaEUR      float64 // positive = buy, negative = sell
+	Delta         float64 // monetary change in the portfolio base currency; positive = buy, negative = sell
+	Currency      string  // ISO 4217 code of the portfolio base currency (e.g. "EUR")
+	MarketPrice   float64 // for CORE_PMC_FLOOR_ALERT: current market price
+	PMC           float64 // for CORE_PMC_FLOOR_ALERT: Prezzo Medio di Carico
 }
 
 // Dispatcher receives signals for downstream presentation/handling.
@@ -37,22 +41,24 @@ type Dispatcher interface {
 }
 
 // NewRebalanceMessage builds a tactical rebalance signal for a Satellite holding.
-func NewRebalanceMessage(now time.Time, symbol string, conviction float64, direction string, currentWeight, targetWeight, deltaEUR float64) Message {
+func NewRebalanceMessage(now time.Time, symbol string, conviction float64, direction string, currentWeight, targetWeight, delta float64, currency string) Message {
 	return Message{
 		Type:          TypeRebalance,
 		CreatedAt:     now,
 		Instrument:    symbol,
-		Summary:       fmt.Sprintf("Rebalance %s %s %.1f%%→%.1f%% (Δ%.0f€, conviction %.2f)", symbol, direction, currentWeight*100, targetWeight*100, deltaEUR, conviction),
+		Summary:       fmt.Sprintf("Rebalance %s %s", symbol, direction),
+		Conviction:    conviction,
 		CurrentWeight: currentWeight,
 		TargetWeight:  targetWeight,
-		DeltaEUR:      deltaEUR,
+		Delta:         delta,
+		Currency:      currency,
 	}
 }
 
 // NewBuyMessage suggests opening a new satellite position for a symbol not currently held.
-// targetWeight is the suggested allocation as a fraction of total satellite NAV; deltaEUR is
-// the recommended investment amount.
-func NewBuyMessage(now time.Time, symbol string, conviction, targetWeight, deltaEUR float64) Message {
+// targetWeight is the suggested allocation as a fraction of total satellite NAV; delta is
+// the recommended investment amount in the portfolio base currency.
+func NewBuyMessage(now time.Time, symbol string, conviction, targetWeight, delta float64, currency string) Message {
 	direction := "long"
 	if conviction < 0 {
 		direction = "short"
@@ -61,16 +67,18 @@ func NewBuyMessage(now time.Time, symbol string, conviction, targetWeight, delta
 		Type:         TypeBuy,
 		CreatedAt:    now,
 		Instrument:   symbol,
-		Summary:      fmt.Sprintf("Entry %s %s target %.1f%% (Δ%.0f€, conviction %.2f)", symbol, direction, targetWeight*100, deltaEUR, conviction),
+		Summary:      fmt.Sprintf("Entry %s %s", symbol, direction),
+		Conviction:   conviction,
 		TargetWeight: targetWeight,
-		DeltaEUR:     deltaEUR,
+		Delta:        delta,
+		Currency:     currency,
 	}
 }
 
 // NewSellMessage suggests closing an existing satellite position entirely.
 // currentWeight is the holding's current allocation as a fraction of total satellite NAV;
-// deltaEUR is the recovered amount (negative: selling reduces exposure).
-func NewSellMessage(now time.Time, symbol string, conviction, currentWeight, deltaEUR float64) Message {
+// delta is the recovered amount in the portfolio base currency (negative: selling reduces exposure).
+func NewSellMessage(now time.Time, symbol string, conviction, currentWeight, delta float64, currency string) Message {
 	direction := "long"
 	if conviction < 0 {
 		direction = "short"
@@ -79,19 +87,23 @@ func NewSellMessage(now time.Time, symbol string, conviction, currentWeight, del
 		Type:          TypeSell,
 		CreatedAt:     now,
 		Instrument:    symbol,
-		Summary:       fmt.Sprintf("Exit %s %s from %.1f%% (Δ%.0f€, conviction %.2f)", symbol, direction, currentWeight*100, deltaEUR, conviction),
+		Summary:       fmt.Sprintf("Exit %s %s", symbol, direction),
+		Conviction:    conviction,
 		CurrentWeight: currentWeight,
 		TargetWeight:  0,
-		DeltaEUR:      deltaEUR,
+		Delta:         delta,
+		Currency:      currency,
 	}
 }
 
 // NewCorePMCFloorAlert builds an alert signal when a Core holding is at or below PMC.
 func NewCorePMCFloorAlert(now time.Time, symbol string, marketPrice, pmc float64) Message {
 	return Message{
-		Type:       TypeCorePMCFloorAlert,
-		CreatedAt:  now,
-		Instrument: symbol,
-		Summary:    fmt.Sprintf("CORE PMC FLOOR: %s market=%.4f pmc=%.4f", symbol, marketPrice, pmc),
+		Type:        TypeCorePMCFloorAlert,
+		CreatedAt:   now,
+		Instrument:  symbol,
+		Summary:     fmt.Sprintf("PMC floor alert: %s", symbol),
+		MarketPrice: marketPrice,
+		PMC:         pmc,
 	}
 }

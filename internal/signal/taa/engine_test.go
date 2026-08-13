@@ -195,7 +195,7 @@ func TestEvaluateSatellitePerOrderFeeCapNotAggregate(t *testing.T) {
 	}}
 	dispatch := &fakeDispatcher{}
 	engine := NewEngine(store, &NullPMCReader{}, &fakeConviction{0.005}, nil, dispatch, Config{
-		TaxRate: 0, BrokerFeePercent: 0.01, MaxBrokerFeeEUR: 18.90, Buffer: 0,
+		TaxRate: 0, BrokerFeePercent: 0.01, MaxBrokerFee: 18.90, Buffer: 0,
 	})
 	if err := engine.Evaluate(context.Background()); err != nil {
 		t.Fatalf("Evaluate: %v", err)
