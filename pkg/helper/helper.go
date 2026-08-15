@@ -1,6 +1,8 @@
 package helper
 
 import (
+	"math"
+
 	"github.com/tgragnato/orbiter/pkg/broker"
 )
 
@@ -31,8 +33,11 @@ func CalcTargetPriceByPercentage(price, percentage float64, orderDirection broke
 }
 
 func GetPercentile(n []float64, percentile int) float64 {
-	var pos = int(float64(len(n)) / float64(100) * float64(percentile))
-	if pos < 1 {
+	if len(n) == 0 {
+		return 0.0
+	}
+	var pos = int(math.Round(float64(len(n)) / 100.0 * float64(percentile)))
+	if pos < 1 || percentile == 0 {
 		pos = 1
 	}
 	return n[pos-1]
