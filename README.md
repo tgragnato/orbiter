@@ -206,6 +206,7 @@ go mod tidy                       # clean go.mod/go.sum
 
 - [/docs/engineering-standards.md](/docs/engineering-standards.md)
 - [/docs/ml-engine.md](/docs/ml-engine.md)
+- [/docs/ai-guidelines.md](/docs/ai-guidelines.md)
 
 ## Disclaimer
 

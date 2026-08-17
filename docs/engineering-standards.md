@@ -352,7 +352,6 @@ signal.Runtime
 |---|---|---|
 | `BUY` | Strategies | Open a new position |
 | `SELL` | Strategies | Close an open position |
-| `CANCEL_ORDER` | Strategies | Cancel a pending order |
 | `REBALANCE` | TAA engine | Adjust satellite allocation |
 | `CORE_PMC_FLOOR_ALERT` | TAA engine | Core holding at or below purchase cost |
 
@@ -385,7 +384,7 @@ friction = effectiveFeeRate × (1 + TaxRate) + Buffer
 where:
 
 ```
-effectiveFeeRate = min(BrokerFeePercent, MaxBrokerFeeEUR / positionValue)
+effectiveFeeRate = min(BrokerFeePercent, MaxBrokerFee / positionValue)
 ```
 
 The fee cap (currently €18.90 at 0.19%) reduces friction for large positions. Use `Quantity × MarketPrice` as position value; fall back to the uncapped `BrokerFeePercent` when quantity is zero.
@@ -396,9 +395,8 @@ Default production config:
 |---|---|---|
 | `TaxRate` | 0.26 | Italian capital gains tax (26%) |
 | `BrokerFeePercent` | 0.0019 | 0.19% per trade |
-| `MaxBrokerFeeEUR` | 18.90 | Broker fee cap in EUR |
+| `MaxBrokerFee` | 18.90 | Broker fee cap in EUR |
 | `Buffer` | 0.01 | 1% additional safety margin |
-| `RebalanceThreshold` | 0.05 | Minimum 5% allocation drift |
 
 ---
 
@@ -423,7 +421,7 @@ Raw prices must never be fed directly to the model. All features must be station
 | Percentage return | Removes price scale |
 | Relative distance to SMA | Scale-invariant momentum proxy |
 
-Features are computed in `internal/portfolio/features`. Use population standard deviation (÷ n), not sample (÷ n−1), for Z-Score normalisation — the window is a full population, not a random sample.
+Features are computed in `internal/portfolio/featurizer`. Use population standard deviation (÷ n), not sample (÷ n−1), for Z-Score normalisation — the window is a full population, not a random sample.
 
 ### Walk-Forward Cross-Validation
 
@@ -482,13 +480,14 @@ type MLEngine interface {
 |---|---|
 | `p` | Pause training if running; resume if paused |
 | `r` | Trigger a new training run (no-op if already running) |
-| `tab` / `l` | Switch to Tab 1 |
+| `up` / `k` | Scroll signal list up (older entries) |
+| `down` / `j` | Scroll signal list down (newer entries) |
+| `g` | Jump to oldest signal |
+| `G` | Jump to most recent signal |
 
-### Log Ring Buffer
+### ML Training Logs
 
-ML training logs are kept in a ring buffer of 20 lines (`mlLogMaxLines`). Use `appendRing(buf, line, max)` to add entries — it trims from the front, keeping the most recent lines.
-
-Drain the ML log channel non-blocking via `drainMLLogsCmd()`, which reads at most one line per tick. This keeps UI latency low regardless of training throughput.
+`ml.Engine` streams training progress through `Engine.Logs`, a buffered channel with capacity 512. When the channel is full, the engine drains the oldest entry before pushing the new one — ring semantics are enforced inside the engine, not in the TUI layer. ML logs are routed from the root model to **Tab 4 (Logs)**, not to Tab 2.
 
 ---
 
@@ -542,11 +541,9 @@ Current versions:
 
 | Version | Name |
 |---|---|
-| 1 | `create_app_settings` |
-| 2 | `create_holdings_and_allocation_type` |
-| 3 | `create_corporate_actions_and_accounting_tables` |
-| 4 | `create_twr_analytics_tables` |
-| 5 | `create_ml_model_checkpoints` |
+| 1 | `initial_schema` |
+
+Migration 1 creates the complete schema in a single block: `app_settings`, `holdings`, `dividend_income_records`, `ml_model_checkpoints`, `transactions`, `cash_flows`, `nav_snapshots`, `stock_splits`, `fx_rates`, `watchlist`, `eod_candles`. The next migration must use version **2**.
 
 ### Tests
 
@@ -563,6 +560,7 @@ Prefer the Go standard library. A new dependency is justified only when it provi
 | `charmbracelet/bubbletea`, `bubbles`, `lipgloss` | Terminal UI — no stdlib equivalent |
 | `jackc/pgx/v5` | PostgreSQL driver — `database/sql` requires a driver |
 | `markcheno/go-talib` | TA-Lib indicator algorithms (RSI, ADX, Stoch, StochRSI) |
+| `guptarohit/asciigraph` | ASCII chart rendering for Analytics tab (TWR, drawdown, Sortino) |
 | `DATA-DOG/go-sqlmock` | SQL mock for unit tests — test-only |
 
 Before adding a dependency:
