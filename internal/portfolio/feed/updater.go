@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tgragnato/orbiter/internal/portfolio"
@@ -81,6 +83,9 @@ type WatchlistPriceStore interface {
 
 // Updater fetches EOD prices from a DataProvider and writes them to the store.
 type Updater struct {
+	mu          sync.RWMutex
+	backfilling atomic.Bool
+
 	store            PriceStore
 	divSyncer        DividendSyncer      // optional; nil disables dividend sync
 	navLister        NAVLister           // optional; nil disables NAV snapshotting
@@ -90,7 +95,7 @@ type Updater struct {
 	splitPersister   SplitPersister      // optional; nil disables split detection
 	watchlistStore   WatchlistPriceStore // optional; nil disables watchlist price updates
 	fxService        *fx.Service         // optional; nil disables FX conversion in NAV aggregation
-	baseCurrency     string              // ISO 4217 portfolio base currency (default "EUR")
+	baseCurrency     string              // ISO 4217 portfolio base currency (default "EUR") — protected by mu
 	portfolioID      string              // used when navSnapper is set
 	provider         data.DataProvider
 	interval         time.Duration
@@ -139,14 +144,49 @@ func (u *Updater) WithCashFlowRecorder(recorder CashFlowRecorder) *Updater {
 	return u
 }
 
+// getBaseCurrency returns the current base currency in a thread-safe way.
+func (u *Updater) getBaseCurrency() string {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.baseCurrency
+}
+
+// SetBaseCurrency updates the ISO 4217 base currency used for multi-currency NAV
+// aggregation. Safe to call while the Updater is running. The next refresh cycle
+// and any subsequent backfill will use the new value. Call TriggerBackfill
+// afterwards to rebuild historical NAV snapshots in the new currency.
+func (u *Updater) SetBaseCurrency(currency string) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.baseCurrency = currency
+}
+
 // WithFXService enables multi-currency NAV aggregation. When set, each
 // holding's NAV is converted to baseCurrency before being summed. baseCurrency
 // must be a valid ISO 4217 code (e.g. "EUR"). Calling this method on a nil
 // Updater panics.
 func (u *Updater) WithFXService(svc *fx.Service, baseCurrency string) *Updater {
 	u.fxService = svc
-	u.baseCurrency = baseCurrency
+	u.SetBaseCurrency(baseCurrency)
 	return u
+}
+
+// TriggerBackfill asynchronously re-runs the historical NAV backfill using the
+// current base currency. Intended for hot-reload after SetBaseCurrency is called.
+// No-op when NAVBackfiller or NAVSnapper are not configured, or when a backfill
+// is already in progress.
+func (u *Updater) TriggerBackfill(ctx context.Context) {
+	if u.navBackfiller == nil || u.navSnapper == nil {
+		return
+	}
+	if !u.backfilling.CompareAndSwap(false, true) {
+		slog.Debug("price feed: backfill already in progress, skipping trigger")
+		return
+	}
+	go func() {
+		defer u.backfilling.Store(false)
+		u.backfillNAV(ctx)
+	}()
 }
 
 // WithWatchlistUpdater enables price updates for watchlist items. On every
@@ -179,7 +219,11 @@ func (u *Updater) Run(ctx context.Context) {
 		go u.backfillDividends(ctx)
 	}
 	if u.navBackfiller != nil && u.navSnapper != nil {
-		go u.backfillNAV(ctx)
+		u.backfilling.Store(true)
+		go func() {
+			defer u.backfilling.Store(false)
+			u.backfillNAV(ctx)
+		}()
 	}
 
 	u.refresh(ctx)
@@ -198,6 +242,8 @@ func (u *Updater) Run(ctx context.Context) {
 }
 
 func (u *Updater) refresh(ctx context.Context) {
+	baseCurrency := u.getBaseCurrency()
+
 	symbols, err := u.store.ActiveSymbols(ctx)
 	if err != nil {
 		slog.Error("price feed: list active symbols", "error", err)
@@ -249,8 +295,8 @@ func (u *Updater) refresh(ctx context.Context) {
 			if err := u.store.UpdateHoldingCurrency(ctx, sym, last.Currency); err != nil {
 				slog.Warn("price feed: update currency failed", "symbol", sym, "error", err)
 			}
-			if u.fxService != nil && u.baseCurrency != "" && last.Currency != u.baseCurrency {
-				fxPairsNeeded[fxPair{from: last.Currency, to: u.baseCurrency}] = struct{}{}
+			if u.fxService != nil && baseCurrency != "" && last.Currency != baseCurrency {
+				fxPairsNeeded[fxPair{from: last.Currency, to: baseCurrency}] = struct{}{}
 			}
 		}
 
@@ -442,6 +488,8 @@ func (u *Updater) backfillDividends(ctx context.Context) {
 // historical data on the very first startup.
 // Runs once asynchronously at startup.
 func (u *Updater) backfillNAV(ctx context.Context) {
+	baseCurrency := u.getBaseCurrency()
+
 	allTxs, err := u.navBackfiller.ListTransactions(ctx, "")
 	if err != nil {
 		slog.Warn("nav backfill: list transactions", "error", err)
@@ -517,14 +565,14 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 	// Multi-currency: when an FX service is available, convert each symbol's
 	// prices to base currency before NAV aggregation. This keeps ComputeDailyNAVs
 	// currency-agnostic — it always sums values in a single unit.
-	if u.fxService != nil && u.baseCurrency != "" {
+	if u.fxService != nil && baseCurrency != "" {
 		// Collect unique foreign-currency pairs to sync in one pass.
 		type fxPair struct{ from, to string }
 		toSync := make(map[fxPair]struct{})
 		for sym, currency := range symbolCurrency {
-			if currency != "" && currency != u.baseCurrency {
+			if currency != "" && currency != baseCurrency {
 				if _, hasData := priceMap[sym]; hasData {
-					toSync[fxPair{from: currency, to: u.baseCurrency}] = struct{}{}
+					toSync[fxPair{from: currency, to: baseCurrency}] = struct{}{}
 				}
 			}
 		}
@@ -541,11 +589,11 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 		// Convert each price point in priceMap to base currency.
 		for sym, dayMap := range priceMap {
 			currency := symbolCurrency[sym]
-			if currency == "" || currency == u.baseCurrency {
+			if currency == "" || currency == baseCurrency {
 				continue
 			}
 			for d, price := range dayMap {
-				converted, err := u.fxService.Convert(ctx, price, currency, u.baseCurrency, d)
+				converted, err := u.fxService.Convert(ctx, price, currency, baseCurrency, d)
 				if err != nil {
 					// Degrade gracefully: leave the unconverted local-currency price.
 					slog.Debug("nav backfill: FX conversion skipped, using local price",

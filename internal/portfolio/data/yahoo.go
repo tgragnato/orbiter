@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,8 +18,10 @@ const defaultYahooBaseURL = "https://query1.finance.yahoo.com"
 
 // YahooProvider fetches EOD data from Yahoo Finance chart API.
 type YahooProvider struct {
+	mu      sync.RWMutex
 	client  *http.Client
 	baseURL string
+	apiKey  string
 }
 
 // NewYahooProvider creates a provider using a production Yahoo endpoint.
@@ -27,6 +30,26 @@ func NewYahooProvider(client *http.Client) *YahooProvider {
 		client = &http.Client{Timeout: 15 * time.Second}
 	}
 	return &YahooProvider{client: client, baseURL: defaultYahooBaseURL}
+}
+
+// SetAPIKey dynamically updates the API key used for authenticated Yahoo endpoints.
+func (p *YahooProvider) SetAPIKey(apiKey string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.apiKey = strings.TrimSpace(apiKey)
+}
+
+// APIKey returns the current API key.
+func (p *YahooProvider) APIKey() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.apiKey
+}
+
+// WithAPIKey sets an optional API key for authenticated Yahoo endpoints.
+func (p *YahooProvider) WithAPIKey(apiKey string) *YahooProvider {
+	p.SetAPIKey(apiKey)
+	return p
 }
 
 // GetEOD returns daily candles including adjusted close and corporate action fields.
@@ -50,6 +73,9 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 	}
 
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15")
+	if key := p.APIKey(); key != "" {
+		req.Header.Set("X-API-KEY", key)
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {

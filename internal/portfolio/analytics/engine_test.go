@@ -77,6 +77,11 @@ func (f *fakeRepository) BackfillTransactionFlows(_ context.Context, _ string, _
 	return nil
 }
 
+func (f *fakeRepository) ClearSnapshots(_ context.Context, _ string) error {
+	f.snapshots = nil
+	return nil
+}
+
 func (f *fakeRepository) LastSnapshotAt(_ context.Context, _ string) (time.Time, bool, error) {
 	if len(f.snapshots) == 0 {
 		return time.Time{}, false, nil

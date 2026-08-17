@@ -92,12 +92,8 @@ func TestBootstrap(t *testing.T) {
 		mock.ExpectExec("INSERT INTO app_settings").WillReturnResult(sqlmock.NewResult(1, 1))
 	}
 
-	addGetSettingExpectation(mock, KeyCostBasisMethod, []byte(`{"method":"PMC"}`), now)
-	addGetSettingExpectation(mock, KeyDataProvider, []byte(`{"provider":"YAHOO","currency":"EUR"}`), now)
-	addGetSettingExpectation(mock, KeyTAAParameters, []byte(`{"rebalance_threshold":0.05}`), now)
-	addGetSettingExpectation(mock, KeyCoreSatelliteTargets, []byte(`{"core_ratio":0.8,"satellite_ratio":0.2}`), now)
-	addGetSettingExpectation(mock, KeyTUIPreferences, []byte(`{"show_percentages":true,"number_format":"2dp"}`), now)
 	addGetSettingExpectation(mock, KeyYahooCredentials, []byte(`{"api_key":""}`), now)
+	addGetSettingExpectation(mock, KeyPortfolioBaseCurrency, []byte(`{"currency":"EUR"}`), now)
 
 	svc, err := Bootstrap(context.Background(), db)
 	if err != nil {

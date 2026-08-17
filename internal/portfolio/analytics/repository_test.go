@@ -282,3 +282,26 @@ func TestPostgresRepositorySignedCashFlowBetweenError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestPostgresRepositoryClearSnapshots(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	repo := NewPostgresRepository(db)
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM nav_snapshots WHERE portfolio_id = $1")).
+		WithArgs("MAIN").
+		WillReturnResult(sqlmock.NewResult(0, 5))
+
+	if err := repo.ClearSnapshots(context.Background(), "MAIN"); err != nil {
+		t.Fatalf("ClearSnapshots() error = %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unfulfilled expectations: %v", err)
+	}
+}

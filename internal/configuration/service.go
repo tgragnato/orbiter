@@ -26,118 +26,13 @@ func NewService(repo Repository) *Service {
 
 // ValidateRequired ensures all mandatory settings are present and valid.
 func (s *Service) ValidateRequired(ctx context.Context) error {
-	if _, err := s.GetCostBasisMethod(ctx); err != nil {
-		return fmt.Errorf("validate %s: %w", KeyCostBasisMethod, err)
-	}
-	if _, err := s.GetDataProvider(ctx); err != nil {
-		return fmt.Errorf("validate %s: %w", KeyDataProvider, err)
-	}
-	if _, err := s.GetTAA(ctx); err != nil {
-		return fmt.Errorf("validate %s: %w", KeyTAAParameters, err)
-	}
-	if _, err := s.GetCoreSatelliteTargets(ctx); err != nil {
-		return fmt.Errorf("validate %s: %w", KeyCoreSatelliteTargets, err)
-	}
-	if _, err := s.GetTUIPreferences(ctx); err != nil {
-		return fmt.Errorf("validate %s: %w", KeyTUIPreferences, err)
-	}
 	if _, err := s.GetYahooCredentials(ctx); err != nil {
 		return fmt.Errorf("validate %s: %w", KeyYahooCredentials, err)
 	}
+	if _, err := s.GetBaseCurrency(ctx); err != nil {
+		return fmt.Errorf("validate %s: %w", KeyPortfolioBaseCurrency, err)
+	}
 	return nil
-}
-
-// GetCostBasisMethod returns the configured lot accounting method.
-func (s *Service) GetCostBasisMethod(ctx context.Context) (CostBasisMethod, error) {
-	setting, err := getTyped[CostBasisSetting](ctx, s.repo, KeyCostBasisMethod)
-	if err != nil {
-		return "", err
-	}
-	switch setting.Method {
-	case CostBasisPMC, CostBasisFIFO, CostBasisLIFO:
-		return setting.Method, nil
-	default:
-		return "", fmt.Errorf("%w: unsupported cost basis method %q", ErrInvalidSetting, setting.Method)
-	}
-}
-
-// SetCostBasisMethod updates the configured lot accounting method.
-func (s *Service) SetCostBasisMethod(ctx context.Context, method CostBasisMethod) error {
-	switch method {
-	case CostBasisPMC, CostBasisFIFO, CostBasisLIFO:
-		return setTyped(ctx, s.repo, KeyCostBasisMethod, defaultSettings[KeyCostBasisMethod].scope, defaultSettings[KeyCostBasisMethod].description, CostBasisSetting{Method: method})
-	default:
-		return fmt.Errorf("%w: unsupported cost basis method %q", ErrInvalidSetting, method)
-	}
-}
-
-// GetDataProvider returns provider and currency preferences.
-func (s *Service) GetDataProvider(ctx context.Context) (DataProviderSetting, error) {
-	return getTyped[DataProviderSetting](ctx, s.repo, KeyDataProvider)
-}
-
-// SetDataProvider updates provider and currency preferences.
-func (s *Service) SetDataProvider(ctx context.Context, value DataProviderSetting) error {
-	if value.Provider == "" {
-		return fmt.Errorf("%w: provider is required", ErrInvalidSetting)
-	}
-	if value.Currency == "" {
-		return fmt.Errorf("%w: currency is required", ErrInvalidSetting)
-	}
-	return setTyped(ctx, s.repo, KeyDataProvider, defaultSettings[KeyDataProvider].scope, defaultSettings[KeyDataProvider].description, value)
-}
-
-// GetTAA returns tactical allocation parameters.
-func (s *Service) GetTAA(ctx context.Context) (TAASetting, error) {
-	value, err := getTyped[TAASetting](ctx, s.repo, KeyTAAParameters)
-	if err != nil {
-		return TAASetting{}, err
-	}
-	if value.RebalanceThreshold <= 0 || value.RebalanceThreshold >= 1 {
-		return TAASetting{}, fmt.Errorf("%w: rebalance_threshold must be in (0,1)", ErrInvalidSetting)
-	}
-	return value, nil
-}
-
-// SetTAA updates tactical allocation parameters.
-func (s *Service) SetTAA(ctx context.Context, value TAASetting) error {
-	if value.RebalanceThreshold <= 0 || value.RebalanceThreshold >= 1 {
-		return fmt.Errorf("%w: rebalance_threshold must be in (0,1)", ErrInvalidSetting)
-	}
-	return setTyped(ctx, s.repo, KeyTAAParameters, defaultSettings[KeyTAAParameters].scope, defaultSettings[KeyTAAParameters].description, value)
-}
-
-// GetCoreSatelliteTargets returns target allocation ratios.
-func (s *Service) GetCoreSatelliteTargets(ctx context.Context) (CoreSatelliteTargetSetting, error) {
-	value, err := getTyped[CoreSatelliteTargetSetting](ctx, s.repo, KeyCoreSatelliteTargets)
-	if err != nil {
-		return CoreSatelliteTargetSetting{}, err
-	}
-	if err := validateTargets(value); err != nil {
-		return CoreSatelliteTargetSetting{}, err
-	}
-	return value, nil
-}
-
-// SetCoreSatelliteTargets updates target allocation ratios.
-func (s *Service) SetCoreSatelliteTargets(ctx context.Context, value CoreSatelliteTargetSetting) error {
-	if err := validateTargets(value); err != nil {
-		return err
-	}
-	return setTyped(ctx, s.repo, KeyCoreSatelliteTargets, defaultSettings[KeyCoreSatelliteTargets].scope, defaultSettings[KeyCoreSatelliteTargets].description, value)
-}
-
-// GetTUIPreferences returns persisted terminal UI settings.
-func (s *Service) GetTUIPreferences(ctx context.Context) (TUIPreferenceSetting, error) {
-	return getTyped[TUIPreferenceSetting](ctx, s.repo, KeyTUIPreferences)
-}
-
-// SetTUIPreferences updates terminal UI settings.
-func (s *Service) SetTUIPreferences(ctx context.Context, value TUIPreferenceSetting) error {
-	if value.NumberFormat == "" {
-		return fmt.Errorf("%w: number_format is required", ErrInvalidSetting)
-	}
-	return setTyped(ctx, s.repo, KeyTUIPreferences, defaultSettings[KeyTUIPreferences].scope, defaultSettings[KeyTUIPreferences].description, value)
 }
 
 // GetYahooCredentials returns persisted Yahoo provider credentials.
@@ -175,6 +70,39 @@ func (s *Service) SetBaseCurrency(ctx context.Context, currency string) error {
 	)
 }
 
+// GetBrokerConfig returns the persisted TAA broker friction parameters.
+// Falls back to the built-in defaults when the key is absent.
+func (s *Service) GetBrokerConfig(ctx context.Context) (TAABrokerConfig, error) {
+	cfg, err := getTyped[TAABrokerConfig](ctx, s.repo, KeyTAABrokerConfig)
+	if err != nil {
+		d := defaultSettings[KeyTAABrokerConfig].value.(TAABrokerConfig)
+		return d, nil //nolint:nilerr // absent key → use defaults
+	}
+	return cfg, nil
+}
+
+// SetBrokerConfig validates and persists the TAA broker friction parameters.
+// All rate fields must be in [0, 1]; MaxBrokerFee must be >= 0.
+func (s *Service) SetBrokerConfig(ctx context.Context, value TAABrokerConfig) error {
+	if value.TaxRate < 0 || value.TaxRate > 1 {
+		return fmt.Errorf("%w: tax_rate must be in [0, 1], got %g", ErrInvalidSetting, value.TaxRate)
+	}
+	if value.BrokerFeePercent < 0 || value.BrokerFeePercent > 1 {
+		return fmt.Errorf("%w: broker_fee_percent must be in [0, 1], got %g", ErrInvalidSetting, value.BrokerFeePercent)
+	}
+	if value.MaxBrokerFee < 0 {
+		return fmt.Errorf("%w: max_broker_fee must be >= 0, got %g", ErrInvalidSetting, value.MaxBrokerFee)
+	}
+	if value.Buffer < 0 || value.Buffer > 1 {
+		return fmt.Errorf("%w: buffer must be in [0, 1], got %g", ErrInvalidSetting, value.Buffer)
+	}
+	return setTyped(ctx, s.repo, KeyTAABrokerConfig,
+		defaultSettings[KeyTAABrokerConfig].scope,
+		defaultSettings[KeyTAABrokerConfig].description,
+		value,
+	)
+}
+
 func getTyped[T any](ctx context.Context, repo Repository, key string) (T, error) {
 	setting, err := repo.Get(ctx, key)
 	if err != nil {
@@ -203,15 +131,4 @@ func setTyped(ctx context.Context, repo Repository, key, scope, description stri
 		Description: description,
 		ValueJSON:   data,
 	})
-}
-
-func validateTargets(value CoreSatelliteTargetSetting) error {
-	if value.CoreRatio < 0 || value.SatelliteRatio < 0 {
-		return fmt.Errorf("%w: target ratios must be >= 0", ErrInvalidSetting)
-	}
-	sum := value.CoreRatio + value.SatelliteRatio
-	if sum < 0.999999 || sum > 1.000001 {
-		return fmt.Errorf("%w: target ratios must sum to 1.0", ErrInvalidSetting)
-	}
-	return nil
 }

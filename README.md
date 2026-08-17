@@ -55,12 +55,8 @@ Bootstrap sequence:
 
 Settings seeded and validated include:
 
-- Cost basis method (PMC default; FIFO/LIFO supported)
-- Data provider preferences (Yahoo default, EUR)
-- TAA parameters
-- Core/satellite target ratios
-- TUI preferences
-- Yahoo credential slot
+- Yahoo Finance API credentials (`credentials.yahoo`)
+- Portfolio base currency (`portfolio.base_currency`, default EUR)
 
 ## Key Features
 
@@ -117,7 +113,7 @@ Settings seeded and validated include:
 
 ### Analytics and Accounting
 
-- Configurable cost basis policy in PostgreSQL (`PMC`, `FIFO`, `LIFO`)
+- Weighted average cost accounting (`PMC`)
 - Time-Weighted Return (TWR) engine with sub-period geometric chaining
 - Corporate actions handling: splits and dividends
 - Realized PnL tracking with tax-lot links

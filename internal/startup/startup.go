@@ -110,6 +110,35 @@ func runTUI(ctx context.Context, args []string) error {
 	logCh := signals.NewLogChannel()
 	slog.SetDefault(slog.New(signals.NewTUIHandler(logCh)))
 
+	// Load configuration settings (base currency, Yahoo credentials, broker params).
+	var yahooAPIKey string
+	baseCurrency := "EUR"
+	brokerCfg := configuration.TAABrokerConfig{
+		TaxRate:          0.26,
+		BrokerFeePercent: 0.0019,
+		MaxBrokerFee:     18.90,
+		Buffer:           0.01,
+	}
+	if configSvc != nil {
+		if creds, err := configSvc.GetYahooCredentials(ctx); err == nil {
+			yahooAPIKey = creds.APIKey
+		} else {
+			slog.Warn("startup: could not read yahoo credentials", "error", err)
+		}
+
+		if bc, err := configSvc.GetBaseCurrency(ctx); err == nil && bc != "" {
+			baseCurrency = bc
+		} else if err != nil {
+			slog.Warn("startup: could not read base currency, defaulting to EUR", "error", err)
+		}
+
+		if bc, err := configSvc.GetBrokerConfig(ctx); err == nil {
+			brokerCfg = bc
+		} else {
+			slog.Warn("startup: could not read broker config, using defaults", "error", err)
+		}
+	}
+
 	// ML engine with 24-hour auto-scheduling, checkpoint persistence, and
 	// per-symbol conviction scoring for the TAA engine.
 	//
@@ -117,7 +146,7 @@ func runTUI(ctx context.Context, args []string) error {
 	// historical EOD data is fetched from Yahoo only once per symbol. Subsequent
 	// featurizer runs (training + inference) query the local eod_candles table
 	// and only request the delta (new days since last cache update) from Yahoo.
-	yahooProvider := data.NewYahooProvider(&http.Client{Timeout: 30 * time.Second})
+	yahooProvider := data.NewYahooProvider(&http.Client{Timeout: 30 * time.Second}).WithAPIKey(yahooAPIKey)
 	var candleProvider data.DataProvider = yahooProvider
 	if cs, ok := store.(data.CandleStorer); ok {
 		candleProvider = data.NewCachingProvider(yahooProvider, cs)
@@ -171,18 +200,8 @@ func runTUI(ctx context.Context, args []string) error {
 		}
 	}()
 
-	// Portfolio base currency — falls back to "EUR" if not configured.
-	// Resolved here so the TAA engine can stamp it onto every emitted signal.
-	baseCurrency := "EUR"
-	if configSvc != nil {
-		if bc, err := configSvc.GetBaseCurrency(ctx); err == nil && bc != "" {
-			baseCurrency = bc
-		} else if err != nil {
-			slog.Warn("startup: could not read base currency, defaulting to EUR", "error", err)
-		}
-	}
-
-	// TAA engine: 0.19 % broker fee capped at 18.90 base-currency units, evaluated every 24 h.
+	// TAA engine: friction parameters are read from the DB at startup and can be
+	// updated at runtime from the Settings tab via taaEngine.SetConfig.
 	taaEngine := taa.NewEngine(
 		store,
 		taa.NullPMCReader{},
@@ -190,10 +209,10 @@ func runTUI(ctx context.Context, args []string) error {
 		runner,
 		signalRuntime.Dispatcher,
 		taa.Config{
-			TaxRate:          0.26,
-			BrokerFeePercent: 0.0019,
-			MaxBrokerFee:     18.90,
-			Buffer:           0.01,
+			TaxRate:          brokerCfg.TaxRate,
+			BrokerFeePercent: brokerCfg.BrokerFeePercent,
+			MaxBrokerFee:     brokerCfg.MaxBrokerFee,
+			Buffer:           brokerCfg.Buffer,
 			Currency:         baseCurrency,
 		},
 	)
@@ -234,15 +253,17 @@ func runTUI(ctx context.Context, args []string) error {
 	// FX engine: resolves historical and live exchange rates via Yahoo Finance.
 	// The provider lives in the data package (shared Yahoo client — no duplication).
 	fxStore := fx.NewPostgresStore(db)
-	fxProvider := data.NewYahooFXProvider(&http.Client{Timeout: 30 * time.Second})
+	fxProvider := data.NewYahooFXProviderWithProvider(yahooProvider)
 	fxSvc := fx.NewService(fxProvider, fxStore)
 
 	// Price feed: refresh EOD quotes every 30 minutes and sync dividend income when
 	// the store supports the DividendSyncer interface (no-op otherwise).
 	// After each refresh a NAV snapshot is recorded so the TWR chart accumulates
 	// data points over time. FX service converts multi-currency NAVs to base currency.
+	// priceFeed is declared outside the if-block so it can be wired into the root model
+	// for hot-reload support (SetBaseCurrency / TriggerBackfill on settings save).
+	var priceFeed *feed.Updater
 	if priceStore != nil {
-		var priceFeed *feed.Updater
 		if ds, ok := store.(feed.DividendSyncer); ok {
 			priceFeed = feed.NewWithDividendSync(priceStore, ds, candleProvider, 30*time.Minute)
 		} else {
@@ -269,6 +290,12 @@ func runTUI(ctx context.Context, args []string) error {
 		settingsSvc = configSvc
 	}
 	rootModel := newRootModelFn(store, signalRuntime.ReadModel, runner, txStore, settingsSvc, logCh, twrEngine, baseCurrency)
+	// Wire hot-reload support when the concrete RootModel is available.
+	// In tests newRootModelFn may return a fake that does not implement these setters,
+	// in which case the type assertion returns ok=false and we skip gracefully.
+	if rm, ok := rootModel.(signals.RootModel); ok {
+		rootModel = rm.WithYahooProvider(yahooProvider).WithUpdater(priceFeed).WithTAAEngine(taaEngine)
+	}
 	program := newProgramFn(rootModel, tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		return fmt.Errorf("tui runtime failed: %w", err)

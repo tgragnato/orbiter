@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/tgragnato/orbiter/internal/portfolio"
@@ -49,12 +50,13 @@ type Config struct {
 // Engine evaluates all holdings in the store and emits TAA signals when
 // constraints are met.
 type Engine struct {
+	mu         sync.RWMutex
 	store      portfolio.HoldingsStore
 	pmc        PMCReader
 	conviction ConvictionProvider
 	symbols    SymbolProvider // optional; nil disables entry signal evaluation
 	dispatcher signal.Dispatcher
-	cfg        Config
+	cfg        Config // protected by mu
 }
 
 // NewEngine creates a TAA signal engine.
@@ -76,9 +78,28 @@ func NewEngine(
 	}
 }
 
+// SetConfig atomically replaces the engine's friction parameters.
+// Safe to call while Evaluate is running from another goroutine.
+func (e *Engine) SetConfig(cfg Config) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.cfg = cfg
+}
+
+// GetConfig returns a snapshot of the current friction parameters.
+func (e *Engine) GetConfig() Config {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.cfg
+}
+
 // Evaluate loads all holdings and dispatches appropriate TAA signals.
 // It is safe to call repeatedly (e.g. on an EOD timer).
 func (e *Engine) Evaluate(ctx context.Context) error {
+	// Snapshot the config once so the evaluation uses a consistent set of
+	// parameters even if SetConfig is called concurrently.
+	cfg := e.GetConfig()
+
 	holdings, err := e.store.ListHoldings(ctx)
 	if err != nil {
 		return fmt.Errorf("taa.Evaluate: list holdings: %w", err)
@@ -95,7 +116,7 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 	}
 
 	// Satellite holdings: portfolio-level conviction-weighted optimizer.
-	msgs := optimizeSatellite(holdings, e.conviction, e.cfg, now)
+	msgs := optimizeSatellite(holdings, e.conviction, cfg, now)
 	for i := range msgs {
 		msg := msgs[i]
 		if err := e.dispatcher.Dispatch(msg); err != nil {
@@ -113,7 +134,7 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 
 	// Entry signals: tracked symbols not yet held with strong conviction.
 	if e.symbols != nil {
-		entryMsgs := evaluateEntries(holdings, e.symbols.Symbols(), e.conviction, e.cfg, now)
+		entryMsgs := evaluateEntries(holdings, e.symbols.Symbols(), e.conviction, cfg, now)
 		for i := range entryMsgs {
 			msg := entryMsgs[i]
 			if err := e.dispatcher.Dispatch(msg); err != nil {

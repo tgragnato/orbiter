@@ -1,13 +1,18 @@
 package tui
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tgragnato/orbiter/internal/portfolio"
 	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
+	"github.com/tgragnato/orbiter/internal/portfolio/data"
+	"github.com/tgragnato/orbiter/internal/portfolio/feed"
 	innersignal "github.com/tgragnato/orbiter/internal/signal"
+	"github.com/tgragnato/orbiter/internal/signal/taa"
 )
 
 const (
@@ -34,6 +39,14 @@ type RootModel struct {
 	height          int
 
 	tabStyle stylesRoot
+
+	// Hot-reload fields — populated via WithYahooProvider / WithUpdater / WithTAAEngine after construction.
+	// All are optional; nil means the feature is disabled for that axis.
+	yahooProvider *data.YahooProvider  // receives SetAPIKey on settings save
+	updater       *feed.Updater        // receives SetBaseCurrency + TriggerBackfill on settings save
+	twrEngine     *analytics.TWREngine // used to clear snapshots before the backfill
+	taaEngine     *taa.Engine          // receives SetConfig on settings save
+	portfolioID   string               // identifies which portfolio's snapshots to clear
 }
 
 type stylesRoot struct {
@@ -79,7 +92,30 @@ func NewRootModelWithMetrics(
 			inactiveTab: lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
 			help:        lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
 		},
+		twrEngine:   twrEngine,
+		portfolioID: portfolioID,
 	}
+}
+
+// WithYahooProvider enables hot-reloading of the Yahoo API key from the Settings tab.
+// Call once after NewRootModelWithMetrics before handing the model to tea.NewProgram.
+func (m RootModel) WithYahooProvider(p *data.YahooProvider) RootModel {
+	m.yahooProvider = p
+	return m
+}
+
+// WithUpdater enables hot-reloading of the base currency from the Settings tab.
+// Call once after NewRootModelWithMetrics before handing the model to tea.NewProgram.
+func (m RootModel) WithUpdater(u *feed.Updater) RootModel {
+	m.updater = u
+	return m
+}
+
+// WithTAAEngine enables hot-reloading of the TAA broker friction parameters
+// from the Settings tab. Call once after NewRootModelWithMetrics.
+func (m RootModel) WithTAAEngine(e *taa.Engine) RootModel {
+	m.taaEngine = e
+	return m
 }
 
 func (m RootModel) Init() tea.Cmd {
@@ -132,6 +168,82 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = (m.activeTab + tabCount - 1) % tabCount
 			return m, m.initActiveTab()
 		}
+	}
+
+	// settingsSavedMsg must reach both the settings tab (UI status) and root-level
+	// hot-reload logic, so we intercept it here rather than routing to the active tab.
+	if saved, ok := msg.(settingsSavedMsg); ok {
+		// Always let the settings tab update its status line.
+		updated, settingsCmd := m.settingsTab.Update(saved)
+		if next, ok := updated.(SettingsTabModel); ok {
+			m.settingsTab = next
+		}
+
+		if saved.err != nil {
+			return m, settingsCmd
+		}
+
+		var cmds []tea.Cmd
+		if settingsCmd != nil {
+			cmds = append(cmds, settingsCmd)
+		}
+
+		// Hot-reload: propagate the new API key into the live Yahoo provider.
+		if m.yahooProvider != nil {
+			m.yahooProvider.SetAPIKey(saved.apiKey)
+		}
+
+		// Hot-reload: propagate the new base currency into the price-feed updater.
+		if m.updater != nil && saved.currency != "" {
+			m.updater.SetBaseCurrency(saved.currency)
+		}
+
+		// Reflect the new base currency in the holdings tab (currency suffix in summary bar).
+		if saved.currency != "" {
+			m.holdingsTab = m.holdingsTab.WithBaseCurrency(saved.currency)
+		}
+
+		// Hot-reload TAA broker friction parameters and base currency into the TAA engine.
+		if m.taaEngine != nil {
+			existingCfg := m.taaEngine.GetConfig()
+			newCfg := taa.Config{
+				TaxRate:          saved.brokerConfig.TaxRate,
+				BrokerFeePercent: saved.brokerConfig.BrokerFeePercent,
+				MaxBrokerFee:     saved.brokerConfig.MaxBrokerFee,
+				Buffer:           saved.brokerConfig.Buffer,
+				Currency:         saved.currency,
+			}
+			// If currency wasn't changed (empty string can't happen here since it's validated,
+			// but defensive: keep existing), preserve the current Currency.
+			if newCfg.Currency == "" {
+				newCfg.Currency = existingCfg.Currency
+			}
+			m.taaEngine.SetConfig(newCfg)
+		}
+
+		// Recreate the analytics tab so it starts fresh with the new currency context.
+		m.analyticsTab = NewAnalyticsTabModel(m.analyticsTab.engine, m.analyticsTab.portfolioID)
+		cmds = append(cmds, m.analyticsTab.Init())
+
+		// Asynchronously clear old NAV snapshots and rebuild them in the new currency.
+		// The backfill may take a while; it logs progress via slog and is idempotent.
+		if m.twrEngine != nil && m.portfolioID != "" {
+			twrEngine := m.twrEngine
+			portfolioID := m.portfolioID
+			updater := m.updater
+			cmds = append(cmds, func() tea.Msg {
+				ctx := context.Background()
+				if err := twrEngine.ClearSnapshots(ctx, portfolioID); err != nil {
+					slog.Warn("hot-reload: clear snapshots failed", "error", err)
+				}
+				if updater != nil {
+					updater.TriggerBackfill(ctx)
+				}
+				return nil
+			})
+		}
+
+		return m, tea.Batch(cmds...)
 	}
 
 	// Transactions modified in Tab 5 → refresh the holdings tab so PMC/qty stay current.

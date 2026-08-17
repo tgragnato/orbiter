@@ -138,6 +138,40 @@ func TestYahooProviderGetEODAPIErrorPayloadAndMissingResult(t *testing.T) {
 	}
 }
 
+func TestYahooProviderWithAPIKey(t *testing.T) {
+	t.Parallel()
+
+	apiKeyHeader := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiKeyHeader = r.Header.Get("X-API-KEY")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(yahooFixtureOK))
+	}))
+	defer server.Close()
+
+	provider := newYahooProviderWithBaseURL(server.Client(), server.URL).WithAPIKey("secret-api-key")
+	from := time.Unix(1704067200, 0).UTC()
+	to := time.Unix(1704239999, 0).UTC()
+
+	_, err := provider.GetEOD("VWCE.DE", from, to)
+	if err != nil {
+		t.Fatalf("GetEOD() error = %v", err)
+	}
+	if apiKeyHeader != "secret-api-key" {
+		t.Fatalf("apiKeyHeader = %q, want secret-api-key", apiKeyHeader)
+	}
+
+	// Also test FX adapter with shared provider
+	fxAdapter := NewYahooFXProviderWithProvider(provider)
+	_, err = fxAdapter.GetRates("EUR", "USD", from, to)
+	if err != nil {
+		t.Fatalf("GetRates() error = %v", err)
+	}
+	if apiKeyHeader != "secret-api-key" {
+		t.Fatalf("apiKeyHeader in FX = %q, want secret-api-key", apiKeyHeader)
+	}
+}
+
 const yahooFixtureOK = `
 {
   "chart": {

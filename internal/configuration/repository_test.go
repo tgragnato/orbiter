@@ -24,20 +24,20 @@ func TestPostgresRepositoryGet(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 
 	rows := sqlmock.NewRows([]string{"key", "scope", "description", "value_json", "created_at", "updated_at"}).
-		AddRow(KeyCostBasisMethod, "global", "desc", []byte(`{"method":"PMC"}`), now, now)
+		AddRow(KeyYahooCredentials, "credentials", "desc", []byte(`{"api_key":"test"}`), now, now)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT key, scope, description, value_json, created_at, updated_at
 		FROM app_settings
 		WHERE key = $1
-	`)).WithArgs(KeyCostBasisMethod).WillReturnRows(rows)
+	`)).WithArgs(KeyYahooCredentials).WillReturnRows(rows)
 
-	setting, err := repo.Get(context.Background(), KeyCostBasisMethod)
+	setting, err := repo.Get(context.Background(), KeyYahooCredentials)
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
-	if setting.Key != KeyCostBasisMethod {
-		t.Fatalf("setting.Key = %q, want %q", setting.Key, KeyCostBasisMethod)
+	if setting.Key != KeyYahooCredentials {
+		t.Fatalf("setting.Key = %q, want %q", setting.Key, KeyYahooCredentials)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -89,13 +89,13 @@ func TestPostgresRepositorySetCountAndList(t *testing.T) {
 			description = EXCLUDED.description,
 			value_json = EXCLUDED.value_json,
 			updated_at = NOW()
-	`)).WithArgs(KeyDataProvider, "global", "desc", []byte(`{"provider":"YAHOO","currency":"EUR"}`)).WillReturnResult(sqlmock.NewResult(1, 1))
+	`)).WithArgs(KeyPortfolioBaseCurrency, "portfolio", "desc", []byte(`{"currency":"EUR"}`)).WillReturnResult(sqlmock.NewResult(1, 1))
 
 	if err := repo.Set(context.Background(), Setting{
-		Key:         KeyDataProvider,
-		Scope:       "global",
+		Key:         KeyPortfolioBaseCurrency,
+		Scope:       "portfolio",
 		Description: "desc",
-		ValueJSON:   []byte(`{"provider":"YAHOO","currency":"EUR"}`),
+		ValueJSON:   []byte(`{"currency":"EUR"}`),
 	}); err != nil {
 		t.Fatalf("Set() error = %v", err)
 	}
@@ -111,8 +111,8 @@ func TestPostgresRepositorySetCountAndList(t *testing.T) {
 	}
 
 	rows := sqlmock.NewRows([]string{"key", "scope", "description", "value_json", "created_at", "updated_at"}).
-		AddRow(KeyCostBasisMethod, "global", "desc1", []byte(`{"method":"PMC"}`), now, now).
-		AddRow(KeyDataProvider, "global", "desc2", []byte(`{"provider":"YAHOO","currency":"EUR"}`), now, now)
+		AddRow(KeyPortfolioBaseCurrency, "portfolio", "desc1", []byte(`{"currency":"EUR"}`), now, now).
+		AddRow(KeyYahooCredentials, "credentials", "desc2", []byte(`{"api_key":"token"}`), now, now)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT key, scope, description, value_json, created_at, updated_at

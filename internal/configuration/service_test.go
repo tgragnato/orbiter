@@ -67,17 +67,30 @@ func TestSeedDefaultsIfEmpty(t *testing.T) {
 		t.Fatalf("seeded settings count = %d, want %d", len(repo.settings), len(defaultSettings))
 	}
 
-	cost, ok := repo.settings[KeyCostBasisMethod]
+	creds, ok := repo.settings[KeyYahooCredentials]
 	if !ok {
-		t.Fatalf("missing seeded key %s", KeyCostBasisMethod)
+		t.Fatalf("missing seeded key %s", KeyYahooCredentials)
 	}
 
-	var costValue CostBasisSetting
-	if err := json.Unmarshal(cost.ValueJSON, &costValue); err != nil {
-		t.Fatalf("unmarshal cost basis setting failed: %v", err)
+	var credsValue YahooCredentialsSetting
+	if err := json.Unmarshal(creds.ValueJSON, &credsValue); err != nil {
+		t.Fatalf("unmarshal yahoo credentials setting failed: %v", err)
 	}
-	if costValue.Method != CostBasisPMC {
-		t.Fatalf("default cost basis = %q, want %q", costValue.Method, CostBasisPMC)
+	if credsValue.APIKey != "" {
+		t.Fatalf("default yahoo api key = %q, want empty", credsValue.APIKey)
+	}
+
+	currency, ok := repo.settings[KeyPortfolioBaseCurrency]
+	if !ok {
+		t.Fatalf("missing seeded key %s", KeyPortfolioBaseCurrency)
+	}
+
+	var currencyValue PortfolioBaseCurrencySetting
+	if err := json.Unmarshal(currency.ValueJSON, &currencyValue); err != nil {
+		t.Fatalf("unmarshal base currency setting failed: %v", err)
+	}
+	if currencyValue.Currency != "EUR" {
+		t.Fatalf("default base currency = %q, want EUR", currencyValue.Currency)
 	}
 }
 
@@ -108,48 +121,55 @@ func TestSeedDefaultsIfEmptyCountError(t *testing.T) {
 	}
 }
 
-func TestServiceCostBasisRoundtrip(t *testing.T) {
+func TestServiceYahooCredentialsRoundtrip(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	repo := newFakeRepo()
 	svc := NewService(repo)
 
-	if err := svc.SetCostBasisMethod(ctx, CostBasisFIFO); err != nil {
-		t.Fatalf("SetCostBasisMethod() error = %v", err)
+	if err := svc.SetYahooCredentials(ctx, YahooCredentialsSetting{APIKey: "my-secret-key"}); err != nil {
+		t.Fatalf("SetYahooCredentials() error = %v", err)
 	}
 
-	method, err := svc.GetCostBasisMethod(ctx)
+	creds, err := svc.GetYahooCredentials(ctx)
 	if err != nil {
-		t.Fatalf("GetCostBasisMethod() error = %v", err)
+		t.Fatalf("GetYahooCredentials() error = %v", err)
 	}
-	if method != CostBasisFIFO {
-		t.Fatalf("method = %q, want %q", method, CostBasisFIFO)
+	if creds.APIKey != "my-secret-key" {
+		t.Fatalf("APIKey = %q, want my-secret-key", creds.APIKey)
 	}
 }
 
-func TestServiceRejectsInvalidCostBasis(t *testing.T) {
+func TestServiceBaseCurrencyRoundtrip(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	repo := newFakeRepo()
 	svc := NewService(repo)
 
-	if err := svc.SetCostBasisMethod(ctx, CostBasisMethod("INVALID")); err == nil {
-		t.Fatalf("SetCostBasisMethod() error = nil, want non-nil")
+	if err := svc.SetBaseCurrency(ctx, "USD"); err != nil {
+		t.Fatalf("SetBaseCurrency() error = %v", err)
+	}
+
+	curr, err := svc.GetBaseCurrency(ctx)
+	if err != nil {
+		t.Fatalf("GetBaseCurrency() error = %v", err)
+	}
+	if curr != "USD" {
+		t.Fatalf("currency = %q, want USD", curr)
 	}
 }
 
-func TestServiceTargetsValidation(t *testing.T) {
+func TestServiceBaseCurrencyValidation(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
 	repo := newFakeRepo()
 	svc := NewService(repo)
 
-	err := svc.SetCoreSatelliteTargets(ctx, CoreSatelliteTargetSetting{CoreRatio: 0.7, SatelliteRatio: 0.2})
-	if err == nil {
-		t.Fatalf("SetCoreSatelliteTargets() error = nil, want non-nil")
+	if err := svc.SetBaseCurrency(ctx, "INVALID"); err == nil {
+		t.Fatalf("SetBaseCurrency() error = nil for invalid currency, want non-nil")
 	}
 }
 
@@ -168,105 +188,6 @@ func TestServiceValidateRequired(t *testing.T) {
 	}
 }
 
-func TestServiceSettersAndGetters(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	repo := newFakeRepo()
-	svc := NewService(repo)
-
-	if err := svc.SetDataProvider(ctx, DataProviderSetting{Provider: "YAHOO", Currency: "EUR"}); err != nil {
-		t.Fatalf("SetDataProvider() error = %v", err)
-	}
-	provider, err := svc.GetDataProvider(ctx)
-	if err != nil {
-		t.Fatalf("GetDataProvider() error = %v", err)
-	}
-	if provider.Provider != "YAHOO" || provider.Currency != "EUR" {
-		t.Fatalf("provider = %#v, want YAHOO/EUR", provider)
-	}
-
-	if err := svc.SetTAA(ctx, TAASetting{RebalanceThreshold: 0.1}); err != nil {
-		t.Fatalf("SetTAA() error = %v", err)
-	}
-	taa, err := svc.GetTAA(ctx)
-	if err != nil {
-		t.Fatalf("GetTAA() error = %v", err)
-	}
-	if taa.RebalanceThreshold != 0.1 {
-		t.Fatalf("threshold = %v, want 0.1", taa.RebalanceThreshold)
-	}
-
-	if err := svc.SetCoreSatelliteTargets(ctx, CoreSatelliteTargetSetting{CoreRatio: 0.6, SatelliteRatio: 0.4}); err != nil {
-		t.Fatalf("SetCoreSatelliteTargets() error = %v", err)
-	}
-	targets, err := svc.GetCoreSatelliteTargets(ctx)
-	if err != nil {
-		t.Fatalf("GetCoreSatelliteTargets() error = %v", err)
-	}
-	if targets.CoreRatio != 0.6 || targets.SatelliteRatio != 0.4 {
-		t.Fatalf("targets = %#v, want 0.6/0.4", targets)
-	}
-
-	if err := svc.SetTUIPreferences(ctx, TUIPreferenceSetting{ShowPercentages: false, NumberFormat: "4dp"}); err != nil {
-		t.Fatalf("SetTUIPreferences() error = %v", err)
-	}
-	tui, err := svc.GetTUIPreferences(ctx)
-	if err != nil {
-		t.Fatalf("GetTUIPreferences() error = %v", err)
-	}
-	if tui.ShowPercentages || tui.NumberFormat != "4dp" {
-		t.Fatalf("tui = %#v, want false/4dp", tui)
-	}
-
-	if err := svc.SetYahooCredentials(ctx, YahooCredentialsSetting{APIKey: "token"}); err != nil {
-		t.Fatalf("SetYahooCredentials() error = %v", err)
-	}
-	creds, err := svc.GetYahooCredentials(ctx)
-	if err != nil {
-		t.Fatalf("GetYahooCredentials() error = %v", err)
-	}
-	if creds.APIKey != "token" {
-		t.Fatalf("api key = %q, want token", creds.APIKey)
-	}
-}
-
-func TestServiceValidationErrors(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	repo := newFakeRepo()
-	svc := NewService(repo)
-
-	if err := svc.SetDataProvider(ctx, DataProviderSetting{Provider: "", Currency: "EUR"}); err == nil {
-		t.Fatalf("SetDataProvider() error = nil, want non-nil")
-	}
-	if err := svc.SetTAA(ctx, TAASetting{RebalanceThreshold: 1.0}); err == nil {
-		t.Fatalf("SetTAA() error = nil, want non-nil")
-	}
-	if err := svc.SetTUIPreferences(ctx, TUIPreferenceSetting{NumberFormat: ""}); err == nil {
-		t.Fatalf("SetTUIPreferences() error = nil, want non-nil")
-	}
-}
-
-func TestServiceInvalidStoredSettings(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	repo := newFakeRepo()
-	svc := NewService(repo)
-
-	repo.settings[KeyCostBasisMethod] = Setting{Key: KeyCostBasisMethod, ValueJSON: []byte(`{"method":"INVALID"}`)}
-	if _, err := svc.GetCostBasisMethod(ctx); err == nil {
-		t.Fatalf("GetCostBasisMethod() error = nil, want non-nil")
-	}
-
-	repo.settings[KeyDataProvider] = Setting{Key: KeyDataProvider, ValueJSON: []byte(`not-json`)}
-	if _, err := svc.GetDataProvider(ctx); err == nil || !strings.Contains(err.Error(), "cannot decode JSON") {
-		t.Fatalf("GetDataProvider() error = %v, want decode error", err)
-	}
-}
-
 func TestServiceValidateRequiredMissing(t *testing.T) {
 	t.Parallel()
 
@@ -277,6 +198,19 @@ func TestServiceValidateRequiredMissing(t *testing.T) {
 	err := svc.ValidateRequired(ctx)
 	if err == nil {
 		t.Fatalf("ValidateRequired() error = nil, want non-nil")
+	}
+}
+
+func TestServiceInvalidStoredSettings(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repo := newFakeRepo()
+	svc := NewService(repo)
+
+	repo.settings[KeyYahooCredentials] = Setting{Key: KeyYahooCredentials, ValueJSON: []byte(`not-json`)}
+	if _, err := svc.GetYahooCredentials(ctx); err == nil || !strings.Contains(err.Error(), "cannot decode JSON") {
+		t.Fatalf("GetYahooCredentials() error = %v, want decode error", err)
 	}
 }
 

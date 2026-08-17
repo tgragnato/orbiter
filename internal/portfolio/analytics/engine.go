@@ -71,6 +71,8 @@ type Repository interface {
 	// (asset = 'AUTO') for the portfolio with the supplied set. Idempotent: safe
 	// to call on every startup.
 	BackfillTransactionFlows(ctx context.Context, portfolioID string, flows []TransactionFlow) error
+	// ClearSnapshots removes all NAV snapshots for a portfolio (e.g. before recalculating in a new base currency).
+	ClearSnapshots(ctx context.Context, portfolioID string) error
 }
 
 // TWREngine computes time-weighted return and captures snapshot/cash-flow events.
@@ -81,6 +83,11 @@ type TWREngine struct {
 // NewTWREngine creates a TWR engine.
 func NewTWREngine(repo Repository) *TWREngine {
 	return &TWREngine{repo: repo}
+}
+
+// ClearSnapshots removes all NAV snapshots for the given portfolio.
+func (e *TWREngine) ClearSnapshots(ctx context.Context, portfolioID string) error {
+	return e.repo.ClearSnapshots(ctx, portfolioID)
 }
 
 // RecordNAVSnapshot captures an explicit NAV checkpoint.
@@ -348,4 +355,10 @@ func (r *PostgresRepository) SignedCashFlowBetween(ctx context.Context, portfoli
 		return 0, nil
 	}
 	return total.Float64, nil
+}
+
+// ClearSnapshots removes all NAV snapshots for a portfolio.
+func (r *PostgresRepository) ClearSnapshots(ctx context.Context, portfolioID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM nav_snapshots WHERE portfolio_id = $1`, portfolioID)
+	return err
 }

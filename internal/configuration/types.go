@@ -2,34 +2,15 @@ package configuration
 
 import "time"
 
-// CostBasisMethod controls how realized PnL is computed from lots.
-type CostBasisMethod string
-
 const (
-	// CostBasisPMC is pooled/weighted average cost (default).
-	CostBasisPMC CostBasisMethod = "PMC"
-	// CostBasisFIFO closes lots in first-in-first-out order.
-	CostBasisFIFO CostBasisMethod = "FIFO"
-	// CostBasisLIFO closes lots in last-in-first-out order.
-	CostBasisLIFO CostBasisMethod = "LIFO"
-)
-
-const (
-	// KeyCostBasisMethod stores the selected lot accounting mode.
-	KeyCostBasisMethod = "cost_basis_method"
-	// KeyDataProvider stores market data provider settings.
-	KeyDataProvider = "data_provider"
-	// KeyTAAParameters stores tactical allocation and signal parameters.
-	KeyTAAParameters = "taa_parameters"
-	// KeyCoreSatelliteTargets stores target core/satellite portfolio ratios.
-	KeyCoreSatelliteTargets = "core_satellite_targets"
-	// KeyTUIPreferences stores terminal UI preferences.
-	KeyTUIPreferences = "tui_preferences"
 	// KeyYahooCredentials stores Yahoo provider credentials/options.
 	KeyYahooCredentials = "credentials.yahoo"
 	// KeyPortfolioBaseCurrency stores the ISO 4217 currency code used as the
 	// portfolio's base currency for NAV aggregation, TWR, and P&L reporting.
 	KeyPortfolioBaseCurrency = "portfolio.base_currency"
+	// KeyTAABrokerConfig stores the TAA engine's fiscal friction parameters
+	// (tax rate, broker fee, cap, and safety buffer).
+	KeyTAABrokerConfig = "taa.broker_config"
 )
 
 // Setting is a key-value configuration row persisted in PostgreSQL.
@@ -40,34 +21,6 @@ type Setting struct {
 	ValueJSON   []byte
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-}
-
-// CostBasisSetting persists cost basis policy.
-type CostBasisSetting struct {
-	Method CostBasisMethod `json:"method"`
-}
-
-// DataProviderSetting persists EOD provider preferences.
-type DataProviderSetting struct {
-	Provider string `json:"provider"`
-	Currency string `json:"currency"`
-}
-
-// TAASetting persists tactical allocation controls.
-type TAASetting struct {
-	RebalanceThreshold float64 `json:"rebalance_threshold"`
-}
-
-// CoreSatelliteTargetSetting persists target allocation ratios.
-type CoreSatelliteTargetSetting struct {
-	CoreRatio      float64 `json:"core_ratio"`
-	SatelliteRatio float64 `json:"satellite_ratio"`
-}
-
-// TUIPreferenceSetting persists terminal UI preferences.
-type TUIPreferenceSetting struct {
-	ShowPercentages bool   `json:"show_percentages"`
-	NumberFormat    string `json:"number_format"`
 }
 
 // YahooCredentialsSetting persists data provider credentials.
@@ -81,47 +34,25 @@ type PortfolioBaseCurrencySetting struct {
 	Currency string `json:"currency"`
 }
 
+// TAABrokerConfig holds the TAA engine's fiscal friction parameters.
+// All rate fields are stored as decimals (e.g. 0.26 for 26 %).
+type TAABrokerConfig struct {
+	// TaxRate is the effective capital-gains tax rate (e.g. 0.26 for 26 %).
+	TaxRate float64 `json:"tax_rate"`
+	// BrokerFeePercent is the broker transaction cost as a fraction (e.g. 0.0019 for 0.19 %).
+	BrokerFeePercent float64 `json:"broker_fee_percent"`
+	// MaxBrokerFee caps the broker fee in absolute base-currency units (e.g. 18.90 EUR).
+	// Zero means no cap.
+	MaxBrokerFee float64 `json:"max_broker_fee"`
+	// Buffer is an additional threshold above taxes+fees required before a trade is signalled.
+	Buffer float64 `json:"buffer"`
+}
+
 var defaultSettings = map[string]struct {
 	scope       string
 	description string
 	value       any
 }{
-	KeyCostBasisMethod: {
-		scope:       "global",
-		description: "Default cost basis method",
-		value:       CostBasisSetting{Method: CostBasisPMC},
-	},
-	KeyDataProvider: {
-		scope:       "global",
-		description: "Primary EOD data provider configuration",
-		value: DataProviderSetting{
-			Provider: "YAHOO",
-			Currency: "EUR",
-		},
-	},
-	KeyTAAParameters: {
-		scope:       "strategy",
-		description: "TAA strategy defaults",
-		value: TAASetting{
-			RebalanceThreshold: 0.05,
-		},
-	},
-	KeyCoreSatelliteTargets: {
-		scope:       "portfolio",
-		description: "Core and satellite target allocation",
-		value: CoreSatelliteTargetSetting{
-			CoreRatio:      0.8,
-			SatelliteRatio: 0.2,
-		},
-	},
-	KeyTUIPreferences: {
-		scope:       "tui",
-		description: "Terminal UI defaults",
-		value: TUIPreferenceSetting{
-			ShowPercentages: true,
-			NumberFormat:    "2dp",
-		},
-	},
 	KeyYahooCredentials: {
 		scope:       "credentials",
 		description: "Yahoo Finance credentials",
@@ -131,5 +62,15 @@ var defaultSettings = map[string]struct {
 		scope:       "portfolio",
 		description: "ISO 4217 base currency for NAV, TWR, and P&L aggregation",
 		value:       PortfolioBaseCurrencySetting{Currency: "EUR"},
+	},
+	KeyTAABrokerConfig: {
+		scope:       "taa",
+		description: "TAA engine fiscal friction parameters",
+		value: TAABrokerConfig{
+			TaxRate:          0.26,
+			BrokerFeePercent: 0.0019,
+			MaxBrokerFee:     18.90,
+			Buffer:           0.01,
+		},
 	},
 }

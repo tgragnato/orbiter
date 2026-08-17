@@ -61,6 +61,9 @@ func (p *YahooProvider) fetchFXRates(base, quote, ticker string, from, to time.T
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15")
+	if p.apiKey != "" {
+		req.Header.Set("X-API-KEY", p.apiKey)
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -147,6 +150,14 @@ type YahooFXAdapter struct {
 // provider's own default.
 func NewYahooFXProvider(client *http.Client) *YahooFXAdapter {
 	return &YahooFXAdapter{provider: NewYahooProvider(client)}
+}
+
+// NewYahooFXProviderWithProvider returns an fx.Provider backed by an existing YahooProvider instance.
+func NewYahooFXProviderWithProvider(provider *YahooProvider) *YahooFXAdapter {
+	if provider == nil {
+		provider = NewYahooProvider(nil)
+	}
+	return &YahooFXAdapter{provider: provider}
 }
 
 // GetRates implements fx.Provider by delegating to YahooProvider.GetFXRates.
