@@ -1,0 +1,134 @@
+name: Create release
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  build:
+    name: Build Executables
+    runs-on: ubuntu-latest
+
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: read
+      pull-requests: read
+
+    strategy:
+      matrix:
+        include:
+          - { go-version: 1.26, go-os: linux, go-arch: amd64 }
+          - { go-version: 1.26, go-os: linux, go-arch: 386 }
+          - { go-version: 1.26, go-os: linux, go-arch: arm64 }
+          - { go-version: 1.26, go-os: linux, go-arch: arm }
+          - { go-version: 1.26, go-os: openbsd, go-arch: amd64 }
+          - { go-version: 1.26, go-os: openbsd, go-arch: 386 }
+          - { go-version: 1.26, go-os: openbsd, go-arch: arm64 }
+          - { go-version: 1.26, go-os: openbsd, go-arch: arm }
+          - { go-version: 1.26, go-os: darwin, go-arch: arm64 }
+          - { go-version: 1.26, go-os: freebsd, go-arch: amd64 }
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        
+      - name: Set up Go ${{ matrix.go-version }}
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go-version }}
+        
+      - name: Build binary
+        run: go build -o orbiter-${{ matrix.go-os }}-${{ matrix.go-arch }} .
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.go-os }}
+          GOARCH: ${{ matrix.go-arch }}
+      
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: orbiter-${{ matrix.go-os }}-${{ matrix.go-arch }}
+          path: orbiter-${{ matrix.go-os }}-${{ matrix.go-arch }}
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440
+
+    permissions:
+        actions: read
+        contents: write
+        packages: write
+        security-events: read
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Conventional Changelog Action
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v6
+        with:
+          preset: conventionalcommits
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          git-user-name: ${{ github.actor }}
+          git-user-email: ${{ github.actor }}@users.noreply.github.com
+          input-file: '.github/CHANGELOG.md'
+          output-file: '.github/CHANGELOG.md'
+          release-count: 10000
+          skip-on-empty: false
+          skip-version-file: true
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and export to Docker
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: ghcr.io/${{ github.repository }}:test
+
+      - name: Test Docker Image
+        run: |
+          docker run --rm ghcr.io/${{ github.repository }}:test --help
+
+      - name: Build and push Docker Image
+        uses: docker/build-push-action@v7
+        with:
+          platforms: linux/amd64,linux/arm64
+          context: .
+          provenance: mode=max
+          sbom: true
+          tags: ghcr.io/${{ github.repository }}:${{ steps.changelog.outputs.tag }}, ghcr.io/${{ github.repository }}:latest
+          push: true
+
+      - name: Download workflow artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: orbiter-*-*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        if: ${{ steps.changelog.outputs.skipped == 'false' }}
+        with:
+          tag_name: ${{ steps.changelog.outputs.tag }}
+          body: ${{ steps.changelog.outputs.clean_changelog }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            orbiter-*-*/orbiter-*-*
