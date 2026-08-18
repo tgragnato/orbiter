@@ -72,7 +72,7 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 		return nil, err
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15")
 	if key := p.APIKey(); key != "" {
 		req.Header.Set("X-API-KEY", key)
 	}
