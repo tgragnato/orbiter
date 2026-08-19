@@ -3,6 +3,7 @@ package fx
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -33,61 +34,78 @@ func NewPostgresStore(db *sql.DB) *PostgresStore {
 
 // UpsertRates inserts or updates each rate row, keyed on (base, quote, date).
 func (s *PostgresStore) UpsertRates(ctx context.Context, rates []Rate) error {
-	for _, r := range rates {
-		if r.Rate <= 0 {
+	for _, fxRate := range rates {
+		if fxRate.Rate <= 0 {
 			continue
 		}
-		day := r.Date.UTC().Truncate(24 * time.Hour)
+
+		day := fxRate.Date.UTC().Truncate(hoursPerDay * time.Hour)
+
 		_, err := s.db.ExecContext(ctx, `
 			INSERT INTO fx_rates (base_currency, quote_currency, rate_date, rate)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (base_currency, quote_currency, rate_date)
 			DO UPDATE SET rate = EXCLUDED.rate
-		`, r.BaseCurrency, r.QuoteCurrency, day, r.Rate)
+		`, fxRate.BaseCurrency, fxRate.QuoteCurrency, day, fxRate.Rate)
 		if err != nil {
 			return fmt.Errorf("fx: upsert rate %s/%s %s: %w",
-				r.BaseCurrency, r.QuoteCurrency, day.Format("2006-01-02"), err)
+				fxRate.BaseCurrency, fxRate.QuoteCurrency, day.Format("2006-01-02"), err)
 		}
 	}
+
 	return nil
 }
 
 // GetRate returns the exact-date rate for a currency pair.
 // Returns (zero, false, nil) when not found.
+//
 func (s *PostgresStore) GetRate(ctx context.Context, base, quote string, date time.Time) (float64, bool, error) {
-	day := date.UTC().Truncate(24 * time.Hour)
+	day := date.UTC().Truncate(hoursPerDay * time.Hour)
+
 	var rate float64
+
 	err := s.db.QueryRowContext(ctx, `
 		SELECT rate FROM fx_rates
 		WHERE base_currency = $1 AND quote_currency = $2 AND rate_date = $3
 	`, base, quote, day).Scan(&rate)
-	if err == sql.ErrNoRows {
+
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
+
 	if err != nil {
 		return 0, false, fmt.Errorf("fx: get rate %s/%s %s: %w",
 			base, quote, day.Format("2006-01-02"), err)
 	}
+
 	return rate, true, nil
 }
 
 // GetRateOnOrBefore returns the most recent rate whose rate_date ≤ date.
 // Returns (zero, false, nil) when no row exists for the pair at all.
-func (s *PostgresStore) GetRateOnOrBefore(ctx context.Context, base, quote string, date time.Time) (float64, bool, error) {
-	day := date.UTC().Truncate(24 * time.Hour)
+//
+func (s *PostgresStore) GetRateOnOrBefore(
+	ctx context.Context, base, quote string, date time.Time,
+) (float64, bool, error) {
+	day := date.UTC().Truncate(hoursPerDay * time.Hour)
+
 	var rate float64
+
 	err := s.db.QueryRowContext(ctx, `
 		SELECT rate FROM fx_rates
 		WHERE base_currency = $1 AND quote_currency = $2 AND rate_date <= $3
 		ORDER BY rate_date DESC
 		LIMIT 1
 	`, base, quote, day).Scan(&rate)
-	if err == sql.ErrNoRows {
+
+	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, nil
 	}
+
 	if err != nil {
 		return 0, false, fmt.Errorf("fx: get rate on-or-before %s/%s %s: %w",
 			base, quote, day.Format("2006-01-02"), err)
 	}
+
 	return rate, true, nil
 }

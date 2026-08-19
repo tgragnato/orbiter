@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
+
+const isoCurrencyCodeLen = 3
 
 var (
 	// ErrSettingNotFound indicates a requested configuration key does not exist.
@@ -26,23 +29,17 @@ func NewService(repo Repository) *Service {
 
 // ValidateRequired ensures all mandatory settings are present and valid.
 func (s *Service) ValidateRequired(ctx context.Context) error {
-	if _, err := s.GetYahooCredentials(ctx); err != nil {
+	_, err := s.GetYahooCredentials(ctx)
+	if err != nil {
 		return fmt.Errorf("validate %s: %w", KeyYahooCredentials, err)
 	}
-	if _, err := s.GetBaseCurrency(ctx); err != nil {
+
+	_, err = s.GetBaseCurrency(ctx)
+	if err != nil {
 		return fmt.Errorf("validate %s: %w", KeyPortfolioBaseCurrency, err)
 	}
+
 	return nil
-}
-
-// GetYahooCredentials returns persisted Yahoo provider credentials.
-func (s *Service) GetYahooCredentials(ctx context.Context) (YahooCredentialsSetting, error) {
-	return getTyped[YahooCredentialsSetting](ctx, s.repo, KeyYahooCredentials)
-}
-
-// SetYahooCredentials updates Yahoo provider credentials.
-func (s *Service) SetYahooCredentials(ctx context.Context, value YahooCredentialsSetting) error {
-	return setTyped(ctx, s.repo, KeyYahooCredentials, defaultSettings[KeyYahooCredentials].scope, defaultSettings[KeyYahooCredentials].description, value)
 }
 
 // GetBaseCurrency returns the ISO 4217 code used as the portfolio base currency.
@@ -50,24 +47,14 @@ func (s *Service) SetYahooCredentials(ctx context.Context, value YahooCredential
 func (s *Service) GetBaseCurrency(ctx context.Context) (string, error) {
 	setting, err := getTyped[PortfolioBaseCurrencySetting](ctx, s.repo, KeyPortfolioBaseCurrency)
 	if err != nil {
-		return "EUR", nil //nolint:nilerr // missing setting is non-fatal; default is EUR
+		return defaultBaseCurrency, nil //nolint:nilerr // missing setting is non-fatal; default is EUR
 	}
-	if setting.Currency == "" {
-		return "EUR", nil
-	}
-	return setting.Currency, nil
-}
 
-// SetBaseCurrency updates the portfolio base currency.
-func (s *Service) SetBaseCurrency(ctx context.Context, currency string) error {
-	if len(currency) != 3 {
-		return fmt.Errorf("%w: base currency must be a 3-letter ISO 4217 code, got %q", ErrInvalidSetting, currency)
+	if setting.Currency == "" {
+		return defaultBaseCurrency, nil
 	}
-	return setTyped(ctx, s.repo, KeyPortfolioBaseCurrency,
-		defaultSettings[KeyPortfolioBaseCurrency].scope,
-		defaultSettings[KeyPortfolioBaseCurrency].description,
-		PortfolioBaseCurrencySetting{Currency: currency},
-	)
+
+	return setting.Currency, nil
 }
 
 // GetBrokerConfig returns the persisted TAA broker friction parameters.
@@ -75,10 +62,36 @@ func (s *Service) SetBaseCurrency(ctx context.Context, currency string) error {
 func (s *Service) GetBrokerConfig(ctx context.Context) (TAABrokerConfig, error) {
 	cfg, err := getTyped[TAABrokerConfig](ctx, s.repo, KeyTAABrokerConfig)
 	if err != nil {
-		d := defaultSettings[KeyTAABrokerConfig].value.(TAABrokerConfig)
-		return d, nil //nolint:nilerr // absent key → use defaults
+		defaultVal, ok := defaultSettings[KeyTAABrokerConfig].value.(TAABrokerConfig)
+		if !ok {
+			return TAABrokerConfig{}, fmt.Errorf("%w: broker config default has wrong type", ErrInvalidSetting)
+		}
+
+		return defaultVal, nil
 	}
+
 	return cfg, nil
+}
+
+// GetYahooCredentials returns persisted Yahoo provider credentials.
+func (s *Service) GetYahooCredentials(ctx context.Context) (YahooCredentialsSetting, error) {
+	return getTyped[YahooCredentialsSetting](ctx, s.repo, KeyYahooCredentials)
+}
+
+// SetBaseCurrency updates the portfolio base currency.
+func (s *Service) SetBaseCurrency(ctx context.Context, currency string) error {
+	if len(currency) != isoCurrencyCodeLen {
+		return fmt.Errorf("%w: base currency must be a 3-letter ISO 4217 code, got %q", ErrInvalidSetting, currency)
+	}
+
+	return setTyped(
+		ctx,
+		s.repo,
+		KeyPortfolioBaseCurrency,
+		defaultSettings[KeyPortfolioBaseCurrency].scope,
+		defaultSettings[KeyPortfolioBaseCurrency].description,
+		PortfolioBaseCurrencySetting{Currency: currency},
+	)
 }
 
 // SetBrokerConfig validates and persists the TAA broker friction parameters.
@@ -87,32 +100,51 @@ func (s *Service) SetBrokerConfig(ctx context.Context, value TAABrokerConfig) er
 	if value.TaxRate < 0 || value.TaxRate > 1 {
 		return fmt.Errorf("%w: tax_rate must be in [0, 1], got %g", ErrInvalidSetting, value.TaxRate)
 	}
+
 	if value.BrokerFeePercent < 0 || value.BrokerFeePercent > 1 {
 		return fmt.Errorf("%w: broker_fee_percent must be in [0, 1], got %g", ErrInvalidSetting, value.BrokerFeePercent)
 	}
+
 	if value.MaxBrokerFee < 0 {
 		return fmt.Errorf("%w: max_broker_fee must be >= 0, got %g", ErrInvalidSetting, value.MaxBrokerFee)
 	}
+
 	if value.Buffer < 0 || value.Buffer > 1 {
 		return fmt.Errorf("%w: buffer must be in [0, 1], got %g", ErrInvalidSetting, value.Buffer)
 	}
-	return setTyped(ctx, s.repo, KeyTAABrokerConfig,
+
+	return setTyped(
+		ctx,
+		s.repo,
+		KeyTAABrokerConfig,
 		defaultSettings[KeyTAABrokerConfig].scope,
 		defaultSettings[KeyTAABrokerConfig].description,
 		value,
 	)
 }
 
+// SetYahooCredentials updates Yahoo provider credentials.
+func (s *Service) SetYahooCredentials(ctx context.Context, value YahooCredentialsSetting) error {
+	yahooDefaults := defaultSettings[KeyYahooCredentials]
+
+	return setTyped(ctx, s.repo, KeyYahooCredentials, yahooDefaults.scope, yahooDefaults.description, value)
+}
+
+//nolint:ireturn // generic return type; T is a concrete type parameter constrained to any
 func getTyped[T any](ctx context.Context, repo Repository, key string) (T, error) {
 	setting, err := repo.Get(ctx, key)
 	if err != nil {
 		var zero T
-		return zero, err
+
+		return zero, fmt.Errorf("get setting %s: %w", key, err)
 	}
 
 	var value T
-	if err := json.Unmarshal(setting.ValueJSON, &value); err != nil {
+
+	err = json.Unmarshal(setting.ValueJSON, &value)
+	if err != nil {
 		var zero T
+
 		return zero, fmt.Errorf("%w: key %s cannot decode JSON: %w", ErrInvalidSetting, key, err)
 	}
 
@@ -125,10 +157,17 @@ func setTyped(ctx context.Context, repo Repository, key, scope, description stri
 		return fmt.Errorf("marshal setting %s: %w", key, err)
 	}
 
-	return repo.Set(ctx, Setting{
+	err = repo.Set(ctx, Setting{
 		Key:         key,
 		Scope:       scope,
 		Description: description,
 		ValueJSON:   data,
+		CreatedAt:   time.Time{},
+		UpdatedAt:   time.Time{},
 	})
+	if err != nil {
+		return fmt.Errorf("set setting %s: %w", key, err)
+	}
+
+	return nil
 }

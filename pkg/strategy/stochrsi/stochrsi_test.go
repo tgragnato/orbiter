@@ -1,4 +1,4 @@
-package stochrsi
+package stochrsi_test
 
 import (
 	"math/rand/v2"
@@ -8,12 +8,16 @@ import (
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
+
+	stochrsi "github.com/tgragnato/orbiter/pkg/strategy/stochrsi"
 )
+
+const testInstrument = "CAD/USD"
 
 func TestStochRSI_Name(t *testing.T) {
 	t.Parallel()
 
-	s := New("test")
+	s := stochrsi.New("test")
 	if strategy.NameStochRSI != s.Name() {
 		t.Fatalf("expected %q, got %q", strategy.NameStochRSI, s.Name())
 	}
@@ -22,7 +26,7 @@ func TestStochRSI_Name(t *testing.T) {
 func TestStochRSI_OnTick_NoOrders(t *testing.T) {
 	t.Parallel()
 
-	s := New("test")
+	s := stochrsi.New("test")
 	currentTick := tick.New("test", time.Now(), 100, 100)
 
 	toOpen, _, _ := s.OnTick(currentTick)
@@ -37,20 +41,21 @@ func generateSimpleCandles(isBullish bool) []*ohlc.OHLC {
 	candles := make([]*ohlc.OHLC, count)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	for i := 1; i <= count; i++ {
+	for idx := 1; idx <= count; idx++ {
 		var price float64
 		if isBullish {
-			price = float64(i)
+			price = float64(idx)
 		} else {
-			price = float64(count - i + 1)
+			price = float64(count - idx + 1)
 		}
 
-		o := ohlc.New("test", now.Add(time.Duration(i)*time.Minute), time.Minute, false)
+		o := ohlc.New("test", now.Add(time.Duration(idx)*time.Minute), time.Minute, false)
 		o.NewPrice(price, o.Start)
 		o.ForceClose()
 
-		candles[i-1] = o
+		candles[idx-1] = o
 	}
+
 	return candles
 }
 
@@ -65,19 +70,19 @@ func TestRSI_Score(t *testing.T) {
 	}{
 		{
 			name:          "Bullish Candle Series",
-			instrument:    "CAD/USD",
+			instrument:    testInstrument,
 			closedCandles: generateSimpleCandles(true),
 			want:          -1.0,
 		},
 		{
 			name:          "Bearish Candle Series",
-			instrument:    "CAD/USD",
+			instrument:    testInstrument,
 			closedCandles: generateSimpleCandles(false),
 			want:          1.0,
 		},
 		{
 			name:       "Single Candle Series",
-			instrument: "CAD/USD",
+			instrument: testInstrument,
 			closedCandles: []*ohlc.OHLC{
 				{
 					Open:  2.0,
@@ -92,20 +97,24 @@ func TestRSI_Score(t *testing.T) {
 		},
 		{
 			name:          "Empty Candle Series",
-			instrument:    "CAD/USD",
+			instrument:    testInstrument,
 			closedCandles: []*ohlc.OHLC{},
 			want:          0.0,
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := New(tt.instrument)
-			for _, c := range tt.closedCandles {
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := stochrsi.New(testCase.instrument)
+			for _, c := range testCase.closedCandles {
 				d.OnWarmUpCandle(c)
 			}
+
 			got := d.Score(nil)
-			if got != tt.want {
-				t.Errorf("Score() = %v, want %v", got, tt.want)
+			if got != testCase.want {
+				t.Errorf("Score() = %v, want %v", got, testCase.want)
 			}
 		})
 	}

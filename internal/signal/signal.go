@@ -41,17 +41,27 @@ type Dispatcher interface {
 }
 
 // NewRebalanceMessage builds a tactical rebalance signal for a Satellite holding.
-func NewRebalanceMessage(now time.Time, symbol string, conviction float64, direction string, currentWeight, targetWeight, delta float64, currency string) Message {
+func NewRebalanceMessage(
+	now time.Time,
+	symbol string,
+	conviction float64,
+	direction string,
+	currentWeight, targetWeight, delta float64,
+	currency string,
+) Message {
 	return Message{
 		Type:          TypeRebalance,
 		CreatedAt:     now,
 		Instrument:    symbol,
 		Summary:       fmt.Sprintf("Rebalance %s %s", symbol, direction),
+		OrderID:       "",
 		Conviction:    conviction,
 		CurrentWeight: currentWeight,
 		TargetWeight:  targetWeight,
 		Delta:         delta,
 		Currency:      currency,
+		MarketPrice:   0,
+		PMC:           0,
 	}
 }
 
@@ -63,15 +73,20 @@ func NewBuyMessage(now time.Time, symbol string, conviction, targetWeight, delta
 	if conviction < 0 {
 		direction = "short"
 	}
+
 	return Message{
-		Type:         TypeBuy,
-		CreatedAt:    now,
-		Instrument:   symbol,
-		Summary:      fmt.Sprintf("Entry %s %s", symbol, direction),
-		Conviction:   conviction,
-		TargetWeight: targetWeight,
-		Delta:        delta,
-		Currency:     currency,
+		Type:          TypeBuy,
+		CreatedAt:     now,
+		Instrument:    symbol,
+		Summary:       fmt.Sprintf("Entry %s %s", symbol, direction),
+		OrderID:       "",
+		Conviction:    conviction,
+		TargetWeight:  targetWeight,
+		CurrentWeight: 0,
+		Delta:         delta,
+		Currency:      currency,
+		MarketPrice:   0,
+		PMC:           0,
 	}
 }
 
@@ -83,27 +98,37 @@ func NewSellMessage(now time.Time, symbol string, conviction, currentWeight, del
 	if conviction < 0 {
 		direction = "short"
 	}
+
 	return Message{
 		Type:          TypeSell,
 		CreatedAt:     now,
 		Instrument:    symbol,
 		Summary:       fmt.Sprintf("Exit %s %s", symbol, direction),
+		OrderID:       "",
 		Conviction:    conviction,
 		CurrentWeight: currentWeight,
 		TargetWeight:  0,
 		Delta:         delta,
 		Currency:      currency,
+		MarketPrice:   0,
+		PMC:           0,
 	}
 }
 
 // NewCorePMCFloorAlert builds an alert signal when a Core holding is at or below PMC.
 func NewCorePMCFloorAlert(now time.Time, symbol string, marketPrice, pmc float64) Message {
 	return Message{
-		Type:        TypeCorePMCFloorAlert,
-		CreatedAt:   now,
-		Instrument:  symbol,
-		Summary:     fmt.Sprintf("PMC floor alert: %s", symbol),
-		MarketPrice: marketPrice,
-		PMC:         pmc,
+		Type:          TypeCorePMCFloorAlert,
+		CreatedAt:     now,
+		Instrument:    symbol,
+		Summary:       "PMC floor alert: " + symbol,
+		OrderID:       "",
+		Conviction:    0,
+		TargetWeight:  0,
+		CurrentWeight: 0,
+		Delta:         0,
+		Currency:      "",
+		MarketPrice:   marketPrice,
+		PMC:           pmc,
 	}
 }

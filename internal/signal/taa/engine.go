@@ -10,6 +10,7 @@ package taa
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -18,6 +19,9 @@ import (
 	"github.com/tgragnato/orbiter/internal/portfolio"
 	"github.com/tgragnato/orbiter/internal/signal"
 )
+
+// ErrNoPMCReader is returned by NullPMCReader when no PMC reader is configured.
+var ErrNoPMCReader = errors.New("no PMC reader configured")
 
 // PMCReader returns the weighted average purchase cost for a given symbol.
 // An error means no cost data is available; in that case the floor check is skipped.
@@ -69,6 +73,7 @@ func NewEngine(
 	cfg Config,
 ) *Engine {
 	return &Engine{
+		mu:         sync.RWMutex{},
 		store:      store,
 		pmc:        pmc,
 		conviction: conviction,
@@ -83,6 +88,7 @@ func NewEngine(
 func (e *Engine) SetConfig(cfg Config) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
 	e.cfg = cfg
 }
 
@@ -90,11 +96,14 @@ func (e *Engine) SetConfig(cfg Config) {
 func (e *Engine) GetConfig() Config {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+
 	return e.cfg
 }
 
 // Evaluate loads all holdings and dispatches appropriate TAA signals.
 // It is safe to call repeatedly (e.g. on an EOD timer).
+//
+//nolint:cyclop // inherent complexity of multi-step TAA evaluation
 func (e *Engine) Evaluate(ctx context.Context) error {
 	// Snapshot the config once so the evaluation uses a consistent set of
 	// parameters even if SetConfig is called concurrently.
@@ -112,15 +121,19 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 		if !holdings[i].TAAEnabled || holdings[i].Quantity <= 0 || holdings[i].AllocationType != portfolio.AllocationCore {
 			continue
 		}
+
 		e.evaluateCore(ctx, holdings[i], now)
 	}
 
 	// Satellite holdings: portfolio-level conviction-weighted optimizer.
 	msgs := optimizeSatellite(holdings, e.conviction, cfg, now)
+
 	for i := range msgs {
 		msg := msgs[i]
-		if err := e.dispatcher.Dispatch(msg); err != nil {
-			slog.Error("dispatch rebalance signal", "symbol", msg.Instrument, "error", err)
+
+		dispErr := e.dispatcher.Dispatch(msg)
+		if dispErr != nil {
+			slog.Error("dispatch rebalance signal", "symbol", msg.Instrument, "error", dispErr)
 		} else {
 			slog.Info("rebalance signal dispatched",
 				"symbol", msg.Instrument,
@@ -135,10 +148,13 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 	// Entry signals: tracked symbols not yet held with strong conviction.
 	if e.symbols != nil {
 		entryMsgs := evaluateEntries(holdings, e.symbols.Symbols(), e.conviction, cfg, now)
+
 		for i := range entryMsgs {
 			msg := entryMsgs[i]
-			if err := e.dispatcher.Dispatch(msg); err != nil {
-				slog.Error("dispatch entry signal", "symbol", msg.Instrument, "error", err)
+
+			dispErr := e.dispatcher.Dispatch(msg)
+			if dispErr != nil {
+				slog.Error("dispatch entry signal", "symbol", msg.Instrument, "error", dispErr)
 			} else {
 				slog.Info("entry signal dispatched",
 					"symbol", msg.Instrument,
@@ -153,39 +169,43 @@ func (e *Engine) Evaluate(ctx context.Context) error {
 	return nil
 }
 
-func (e *Engine) evaluateCore(ctx context.Context, h portfolio.Holding, now time.Time) {
-	if h.MarketPrice <= 0 {
+func (e *Engine) evaluateCore(ctx context.Context, holding portfolio.Holding, now time.Time) {
+	if holding.MarketPrice <= 0 {
 		return
 	}
 
 	// Prefer PMC embedded in the holding (computed from transaction history);
 	// fall back to the PMCReader interface (e.g. tax-lot records).
-	pmc := h.PMC
+	pmc := holding.PMC
+
 	if pmc <= 0 {
 		var err error
-		pmc, err = e.pmc.PMC(ctx, h.Symbol)
+
+		pmc, err = e.pmc.PMC(ctx, holding.Symbol)
 		if err != nil || pmc <= 0 {
 			return
 		}
 	}
 
 	// Floor triggered: current price ≤ PMC → emit alert.
-	if h.MarketPrice <= pmc {
-		msg := signal.NewCorePMCFloorAlert(now, h.Symbol, h.MarketPrice, pmc)
-		if err := e.dispatcher.Dispatch(msg); err != nil {
-			slog.Error("dispatch core PMC floor alert", "symbol", h.Symbol, "error", err)
+	if holding.MarketPrice <= pmc {
+		msg := signal.NewCorePMCFloorAlert(now, holding.Symbol, holding.MarketPrice, pmc)
+
+		err := e.dispatcher.Dispatch(msg)
+		if err != nil {
+			slog.Error("dispatch core PMC floor alert", "symbol", holding.Symbol, "error", err)
 		} else {
-			slog.Info("core PMC floor alert dispatched", "symbol", h.Symbol,
-				"market_price", h.MarketPrice, "pmc", pmc)
+			slog.Info("core PMC floor alert dispatched", "symbol", holding.Symbol,
+				"market_price", holding.MarketPrice, "pmc", pmc)
 		}
 	}
 }
-
 
 func abs(v float64) float64 {
 	if v < 0 {
 		return -v
 	}
+
 	return v
 }
 
@@ -193,7 +213,7 @@ func abs(v float64) float64 {
 // skipped when no accounting data is wired up.
 type NullPMCReader struct{}
 
+// PMC always returns ErrNoPMCReader since no PMC reader is configured.
 func (NullPMCReader) PMC(_ context.Context, _ string) (float64, error) {
-	return 0, fmt.Errorf("no PMC reader configured")
+	return 0, ErrNoPMCReader
 }
-

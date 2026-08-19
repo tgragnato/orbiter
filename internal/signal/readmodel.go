@@ -7,6 +7,8 @@ type ReadModel interface {
 }
 
 // NewReadModel creates a queue read model over a dispatcher.
+//
+//nolint:ireturn // ReadModel is an interface type by design; callers depend on the abstraction.
 func NewReadModel(dispatcher Dispatcher) ReadModel {
 	return readModel{dispatcher: dispatcher}
 }
@@ -19,6 +21,7 @@ func (r readModel) Pending() []Message {
 	if q, ok := r.dispatcher.(interface{ Messages() []Message }); ok {
 		return q.Messages()
 	}
+
 	return nil
 }
 
@@ -26,5 +29,6 @@ func (r readModel) Drain() []Message {
 	if q, ok := r.dispatcher.(interface{ Drain() []Message }); ok {
 		return q.Drain()
 	}
+
 	return nil
 }

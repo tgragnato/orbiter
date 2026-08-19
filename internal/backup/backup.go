@@ -17,10 +17,13 @@ import (
 
 const backupVersion = "1"
 
+// ErrMissingDSN is returned when no PostgreSQL DSN is provided.
+var ErrMissingDSN = errors.New("missing PostgreSQL DSN: provide --dsn or DATABASE_URL")
+
 // File is the top-level structure written to / read from the JSON backup.
 type File struct {
 	Version      string   `json:"version"`
-	CreatedAt    string   `json:"created_at"` // RFC3339
+	CreatedAt    string   `json:"createdAt"`
 	Transactions []Record `json:"transactions"`
 }
 
@@ -32,91 +35,110 @@ type Record struct {
 	Quantity       float64 `json:"quantity"`
 	Price          float64 `json:"price"`
 	Fee            float64 `json:"fee"`
-	AllocationType string  `json:"allocation_type"`
-	ExecutedAt     string  `json:"executed_at"` // RFC3339
+	AllocationType string  `json:"allocationType"`
+	ExecutedAt     string  `json:"executedAt"`
 }
 
 // RunBackup is the entry point for `orbiter backup …`.
+//
+//nolint:cyclop,funlen // complexity is inherent to the backup workflow
 func RunBackup(ctx context.Context, args []string, lookupEnv func(string) string) error {
 	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
 	dsn := fs.String("dsn", "", "PostgreSQL DSN")
 	output := fs.String("output", "transactions.json", "output file path")
-	if err := fs.Parse(args); err != nil {
-		return err
+
+	parseErr := fs.Parse(args)
+	if parseErr != nil {
+		return fmt.Errorf("parse flags: %w", parseErr)
 	}
 
 	if *dsn == "" {
 		*dsn = lookupEnv("DATABASE_URL")
 	}
+
 	if *dsn == "" {
-		return errors.New("missing PostgreSQL DSN: provide --dsn or DATABASE_URL")
+		return ErrMissingDSN
 	}
 
-	db, err := openDB(ctx, *dsn)
+	sqlDB, err := openDB(ctx, *dsn)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
-		if err := db.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "close database: %v\n", err)
+		closeErr := sqlDB.Close()
+		if closeErr != nil {
+			fmt.Fprintf(os.Stderr, "close database: %v\n", closeErr)
 		}
 	}()
 
-	store := portfolio.NewPostgresStore(db)
+	store := portfolio.NewPostgresStore(sqlDB)
+
 	txs, err := store.ListTransactions(ctx, "")
 	if err != nil {
 		return fmt.Errorf("list transactions: %w", err)
 	}
 
 	records := make([]Record, len(txs))
-	for i := range txs {
-		records[i] = Record{
-			Symbol:         txs[i].Symbol,
-			Type:           string(txs[i].Type),
-			Quantity:       txs[i].Quantity,
-			Price:          txs[i].Price,
-			Fee:            txs[i].Fee,
-			AllocationType: string(txs[i].AllocationType),
-			ExecutedAt:     txs[i].ExecutedAt.UTC().Format(time.RFC3339),
+
+	for idx := range txs {
+		records[idx] = Record{
+			Symbol:         txs[idx].Symbol,
+			Type:           string(txs[idx].Type),
+			Quantity:       txs[idx].Quantity,
+			Price:          txs[idx].Price,
+			Fee:            txs[idx].Fee,
+			AllocationType: string(txs[idx].AllocationType),
+			ExecutedAt:     txs[idx].ExecutedAt.UTC().Format(time.RFC3339),
 		}
 	}
 
-	bf := File{
+	backupFile := File{
 		Version:      backupVersion,
 		CreatedAt:    time.Now().UTC().Format(time.RFC3339),
 		Transactions: records,
 	}
 
-	f, err := os.Create(*output)
+	outputFile, err := os.Create(*output)
 	if err != nil {
 		return fmt.Errorf("create output file: %w", err)
 	}
+
 	defer func() {
-		if err := f.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "close output file: %v\n", err)
+		closeErr := outputFile.Close()
+		if closeErr != nil {
+			fmt.Fprintf(os.Stderr, "close output file: %v\n", closeErr)
 		}
 	}()
 
-	enc := json.NewEncoder(f)
+	enc := json.NewEncoder(outputFile)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(bf); err != nil {
-		return fmt.Errorf("encode backup: %w", err)
+
+	encodeErr := enc.Encode(backupFile)
+	if encodeErr != nil {
+		return fmt.Errorf("encode backup: %w", encodeErr)
 	}
 
 	fmt.Printf("backup: wrote %d transactions to %s\n", len(records), *output)
+
 	return nil
 }
 
 func openDB(ctx context.Context, dsn string) (*sql.DB, error) {
-	db, err := sql.Open("pgx", dsn)
+	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
-	if err := db.PingContext(ctx); err != nil {
-		if err := db.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "close database: %v\n", err)
+
+	pingErr := sqlDB.PingContext(ctx)
+	if pingErr != nil {
+		closeErr := sqlDB.Close()
+		if closeErr != nil {
+			fmt.Fprintf(os.Stderr, "close database: %v\n", closeErr)
 		}
-		return nil, fmt.Errorf("ping database: %w", err)
+
+		return nil, fmt.Errorf("ping database: %w", pingErr)
 	}
-	return db, nil
+
+	return sqlDB, nil
 }

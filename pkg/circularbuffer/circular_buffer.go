@@ -10,10 +10,21 @@
 package circularbuffer
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 )
 
+// ErrNotEnoughData is returned when fewer than minSize elements have been inserted.
+var ErrNotEnoughData = errors.New("not enough data")
+
+// ErrInvalidQuantile is returned when the quantile argument is outside [0, 1].
+var ErrInvalidQuantile = errors.New("quantile needs to be between 0 and 1")
+
+const medianQuantile = 0.5
+
+// CircularBuffer is a fixed-capacity ring buffer of float64 values with
+// built-in statistical methods (Average, Median, Quantile, Min, Max).
 type CircularBuffer struct {
 	records       []float64
 	sortedRecords []float64
@@ -37,7 +48,20 @@ func New(minSize, maxSize int) *CircularBuffer {
 		maxSize:       maxSize,
 		records:       make([]float64, minSize),
 		sortedRecords: make([]float64, 0, maxSize),
+		index:         0,
+		enoughData:    false,
+		isDirty:       false,
+		sum:           0,
 	}
+}
+
+// Average returns the arithmetic mean of stored values in the buffer in O(1).
+func (cb *CircularBuffer) Average() (float64, error) {
+	if !cb.enoughData {
+		return 0, fmt.Errorf("not enough data, have %d, need %d: %w", cb.index, cb.minSize, ErrNotEnoughData)
+	}
+
+	return cb.sum / float64(len(cb.records)), nil
 }
 
 // GetAll returns all currently stored elements.
@@ -45,8 +69,9 @@ func New(minSize, maxSize int) *CircularBuffer {
 // It returns an error until at least minSize elements have been inserted.
 func (cb *CircularBuffer) GetAll() ([]float64, error) {
 	if !cb.enoughData {
-		return []float64{}, fmt.Errorf("not enough data, have %d, need %d", cb.index, cb.minSize)
+		return []float64{}, fmt.Errorf("not enough data, have %d, need %d: %w", cb.index, cb.minSize, ErrNotEnoughData)
 	}
+
 	return cb.records, nil
 }
 
@@ -76,6 +101,45 @@ func (cb *CircularBuffer) Insert(value float64) {
 	cb.isDirty = true
 }
 
+// Max returns the largest stored value in the buffer.
+func (cb *CircularBuffer) Max() (float64, error) {
+	return cb.Quantile(1)
+}
+
+// Median returns the median of stored values in the buffer.
+func (cb *CircularBuffer) Median() (float64, error) {
+	return cb.Quantile(medianQuantile)
+}
+
+// Min returns the smallest stored value in the buffer.
+func (cb *CircularBuffer) Min() (float64, error) {
+	return cb.Quantile(0)
+}
+
+// Quantile returns the value at the provided quantile in [0, 1].
+//
+// It returns an error if quantile is outside [0, 1] or if there is not enough
+// data yet.
+func (cb *CircularBuffer) Quantile(quantile float64) (float64, error) {
+	if !cb.enoughData {
+		return 0, fmt.Errorf("not enough data, have %d, need %d: %w", cb.index, cb.minSize, ErrNotEnoughData)
+	}
+
+	if quantile > 1 || quantile < 0 {
+		return 0, fmt.Errorf("quantile needs to be between 0 and 1, but is %f: %w", quantile, ErrInvalidQuantile)
+	}
+
+	// Sort only if necessary
+	cb.ensureSorted()
+
+	i := float64(len(cb.sortedRecords)) * quantile
+	if i > 0 {
+		i--
+	}
+
+	return cb.sortedRecords[int(i)], nil
+}
+
 // ensureSorted makes sure that sortedRecords is aligned with records.
 // It is executed only on demand (Lazy) and reuses existing memory.
 func (cb *CircularBuffer) ensureSorted() {
@@ -87,50 +151,4 @@ func (cb *CircularBuffer) ensureSorted() {
 	cb.sortedRecords = append(cb.sortedRecords[:0], cb.records...)
 	sort.Float64s(cb.sortedRecords)
 	cb.isDirty = false
-}
-
-// Min returns the smallest stored value in the buffer.
-func (cb *CircularBuffer) Min() (float64, error) {
-	return cb.Quantile(0)
-}
-
-// Max returns the largest stored value in the buffer.
-func (cb *CircularBuffer) Max() (float64, error) {
-	return cb.Quantile(1)
-}
-
-// Median returns the median of stored values in the buffer.
-func (cb *CircularBuffer) Median() (float64, error) {
-	return cb.Quantile(0.5)
-}
-
-// Average returns the arithmetic mean of stored values in the buffer in O(1).
-func (cb *CircularBuffer) Average() (float64, error) {
-	if !cb.enoughData {
-		return 0, fmt.Errorf("not enough data, have %d, need %d", cb.index, cb.minSize)
-	}
-
-	return cb.sum / float64(len(cb.records)), nil
-}
-
-// Quantile returns the value at the provided quantile in [0, 1].
-//
-// It returns an error if quantile is outside [0, 1] or if there is not enough
-// data yet.
-func (cb *CircularBuffer) Quantile(quantile float64) (float64, error) {
-	if !cb.enoughData {
-		return 0, fmt.Errorf("not enough data, have %d, need %d", cb.index, cb.minSize)
-	}
-	if quantile > 1 || quantile < 0 {
-		return 0, fmt.Errorf("quantile needs to be between 0 and 1, but is %f", quantile)
-	}
-
-	// Sort only if necessary
-	cb.ensureSorted()
-
-	i := float64(len(cb.sortedRecords)) * quantile
-	if i > 0 {
-		i--
-	}
-	return cb.sortedRecords[int(i)], nil
 }

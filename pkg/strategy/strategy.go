@@ -8,6 +8,7 @@ import (
 	"github.com/tgragnato/orbiter/pkg/tick"
 )
 
+// Strategy name constants used to identify each trading strategy.
 const (
 	NameDOJI       = "doji"
 	NameHeikinAshi = "heikinashi"
@@ -51,7 +52,8 @@ type Strategy interface {
 	String() string
 
 	// Score returns a continuous conviction score used by the ML ensemble.
-	// Score reads from the current indicator state (populated by the most recent OnCandle/OnWarmUpCandle call) without mutating it.
+	// Score reads from the current indicator state (populated by the most recent OnCandle/OnWarmUpCandle call)
+	// without mutating it.
 	// Return range: [-1.0, +1.0]
 	//
 	//	+1.0 = maximum buy/long conviction

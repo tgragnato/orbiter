@@ -1,19 +1,21 @@
-package round
+package round_test
 
 import (
 	"testing"
 	"time"
 
+	"github.com/tgragnato/orbiter/pkg/indicator/round"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
 
+//nolint:funlen // test table is intentionally long
 func TestRoundnum_Value(t *testing.T) {
 	t.Parallel()
 
-	var now = time.Now()
-	var rn = New()
+	now := time.Now()
+	roundNum := round.New()
 
-	var testCases = []struct {
+	testCases := []struct {
 		price                  float64
 		lowerRoundNumberWeak   float64
 		lowerRoundNumberStrong float64
@@ -57,30 +59,35 @@ func TestRoundnum_Value(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testCases {
-		o := ohlc.New("test", now, time.Minute, false)
-		o.NewPrice(tc.price, o.Start)
-		o.ForceClose()
-		rn.Insert(o)
+	for _, testCase := range testCases {
+		candle := ohlc.New("test", now, time.Minute, false)
+		candle.NewPrice(testCase.price, candle.Start)
+		candle.ForceClose()
+		roundNum.Insert(candle)
 
-		rnValue, err := rn.Value()
+		rnValue, err := roundNum.Value()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+
 		if len(rnValue) != 4 {
 			t.Fatalf("expected %d, got %d", 4, len(rnValue))
 		}
-		if tc.lowerRoundNumberWeak != rnValue[LowerRoundNumberWeak] {
-			t.Fatalf("expected %v, got %v", tc.lowerRoundNumberWeak, rnValue[LowerRoundNumberWeak])
+
+		if testCase.lowerRoundNumberWeak != rnValue[round.LowerRoundNumberWeak] {
+			t.Fatalf("expected %v, got %v", testCase.lowerRoundNumberWeak, rnValue[round.LowerRoundNumberWeak])
 		}
-		if tc.lowerRoundNumberStrong != rnValue[LowerRoundNumberStrong] {
-			t.Fatalf("expected %v, got %v", tc.lowerRoundNumberStrong, rnValue[LowerRoundNumberStrong])
+
+		if testCase.lowerRoundNumberStrong != rnValue[round.LowerRoundNumberStrong] {
+			t.Fatalf("expected %v, got %v", testCase.lowerRoundNumberStrong, rnValue[round.LowerRoundNumberStrong])
 		}
-		if tc.upperRoundNumberWeak != rnValue[UpperRoundNumberWeak] {
-			t.Fatalf("expected %v, got %v", tc.upperRoundNumberWeak, rnValue[UpperRoundNumberWeak])
+
+		if testCase.upperRoundNumberWeak != rnValue[round.UpperRoundNumberWeak] {
+			t.Fatalf("expected %v, got %v", testCase.upperRoundNumberWeak, rnValue[round.UpperRoundNumberWeak])
 		}
-		if tc.upperRoundNumberStrong != rnValue[UpperRoundNumberStrong] {
-			t.Fatalf("expected %v, got %v", tc.upperRoundNumberStrong, rnValue[UpperRoundNumberStrong])
+
+		if testCase.upperRoundNumberStrong != rnValue[round.UpperRoundNumberStrong] {
+			t.Fatalf("expected %v, got %v", testCase.upperRoundNumberStrong, rnValue[round.UpperRoundNumberStrong])
 		}
 	}
 }

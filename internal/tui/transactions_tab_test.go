@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported tui symbols (txsLoadedMsg, txAddedMsg, txDisplayEntry, fakeEditor)
 package tui
 
 import (

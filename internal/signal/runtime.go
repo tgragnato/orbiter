@@ -9,6 +9,7 @@ type Runtime struct {
 // NewRuntime creates a shared signal queue and read model for trader plus TUI.
 func NewRuntime() Runtime {
 	dispatcher := NewMemoryDispatcher()
+
 	return Runtime{
 		Dispatcher: dispatcher,
 		ReadModel:  NewReadModel(dispatcher),

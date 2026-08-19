@@ -20,7 +20,13 @@ const (
 	formFieldFee
 	formFieldDate  // YYYY-MM-DD execution date
 	formFieldAlloc // CORE / SATELLITE toggle
-	formFieldCount = 7
+)
+
+const formFieldCount = 7
+
+const (
+	formLabelWidth = 14
+	formDividerLen = 44
 )
 
 // txFormResultMsg is produced by the form when the user confirms or cancels.
@@ -32,6 +38,8 @@ type txFormResultMsg struct {
 // transactionFormModel is a self-contained BubbleTea sub-model for entering
 // a single trade. It is embedded in the holdings Model and rendered as an
 // overlay when mode == modeAddTx. When txID != 0, the form is in edit mode.
+//
+//nolint:recvcheck // tea.Model interface requires value receivers; blurCurrent/focusCurrent use pointer
 type transactionFormModel struct {
 	symbolInput      textinput.Model
 	qtyInput         textinput.Model
@@ -63,11 +71,12 @@ type formStyles struct {
 
 func newFormStyles() formStyles {
 	return formStyles{
-		title:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33")),
-		divider:    lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
-		label:      lipgloss.NewStyle().Width(14).Foreground(lipgloss.Color("252")),
-		focused:    lipgloss.NewStyle().Foreground(lipgloss.Color("33")),
-		unfocused:  lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
+		title:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33")),
+		divider:  lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		label:    lipgloss.NewStyle().Width(formLabelWidth).Foreground(lipgloss.Color("252")),
+		focused:  lipgloss.NewStyle().Foreground(lipgloss.Color("33")),
+		unfocused: lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
+		//nolint:lll // style chain is naturally long; splitting across lines hurts readability
 		toggleOn:   lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Background(lipgloss.Color("28")).Padding(0, 1),
 		toggleOff:  lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Padding(0, 1),
 		errorStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("196")),
@@ -105,302 +114,362 @@ func newTransactionForm(knownSymbols []string) (transactionFormModel, tea.Cmd) {
 	date.Width = 12
 	date.SetValue(time.Now().Format("2006-01-02"))
 
-	f := transactionFormModel{
-		symbolInput:  sym,
-		qtyInput:     qty,
-		priceInput:   price,
-		feeInput:     fee,
-		dateInput:    date,
-		txType:       portfolio.TransactionBuy,
-		allocType:    portfolio.AllocationSatellite,
-		focused:      formFieldSymbol,
-		formStyles:   newFormStyles(),
-		knownSymbols: knownSymbols,
+	form := transactionFormModel{
+		symbolInput:      sym,
+		qtyInput:         qty,
+		priceInput:       price,
+		feeInput:         fee,
+		dateInput:        date,
+		txType:           portfolio.TransactionBuy,
+		allocType:        portfolio.AllocationSatellite,
+		focused:          formFieldSymbol,
+		errMsg:           "",
+		autocompleteHint: "",
+		txID:             0,
+		formStyles:       newFormStyles(),
+		knownSymbols:     knownSymbols,
 	}
-	cmd := f.symbolInput.Focus()
-	return f, cmd
+	cmd := form.symbolInput.Focus()
+
+	return form, cmd
 }
 
-// withUpdatedAutocomplete returns a copy of f with the autocompleteHint
-// recalculated from the current symbol input value.
-func (f transactionFormModel) withUpdatedAutocomplete() transactionFormModel {
-	prefix := strings.ToUpper(strings.TrimSpace(f.symbolInput.Value()))
-	f.autocompleteHint = ""
-	if prefix == "" || len(f.knownSymbols) == 0 {
-		return f
-	}
-	for _, sym := range f.knownSymbols {
-		if strings.HasPrefix(sym, prefix) && sym != prefix {
-			f.autocompleteHint = sym
-			return f
-		}
-	}
-	return f
+// newTransactionFormEditing creates a form pre-filled with the values of an
+// existing transaction for editing. On submit, txFormResultMsg.tx.ID is set.
+func newTransactionFormEditing(
+	transaction portfolio.Transaction, knownSymbols []string,
+) (transactionFormModel, tea.Cmd) {
+	form, cmd := newTransactionForm(knownSymbols)
+	form.txID = transaction.ID
+	form.txType = transaction.Type
+	form.allocType = transaction.AllocationType
+	form.symbolInput.SetValue(transaction.Symbol)
+	form.qtyInput.SetValue(fmt.Sprintf("%g", transaction.Quantity))
+	form.priceInput.SetValue(fmt.Sprintf("%g", transaction.Price))
+	form.feeInput.SetValue(fmt.Sprintf("%g", transaction.Fee))
+	form.dateInput.SetValue(transaction.ExecutedAt.Format("2006-01-02"))
+
+	return form, cmd
 }
 
-func (f transactionFormModel) jumpToQty() (transactionFormModel, tea.Cmd) {
-	f.blurCurrent()
-	f.focused = formFieldQty
-	cmd := f.focusCurrent()
-	return f, cmd
-}
-
-func (f transactionFormModel) Update(msg tea.Msg) (transactionFormModel, tea.Cmd) {
+// Update handles incoming messages for the transaction form.
+//
+//nolint:gocognit,cyclop,funlen // form logic has inherent branches for each field + action; extracting adds no clarity
+func (form transactionFormModel) Update(msg tea.Msg) (transactionFormModel, tea.Cmd) {
+	//nolint:nestif // complex autocomplete + form-field dispatch; all branches required
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
 		case "esc":
-			if f.focused == formFieldSymbol && f.autocompleteHint != "" {
-				f.autocompleteHint = ""
-				return f, nil
+			if form.focused == formFieldSymbol && form.autocompleteHint != "" {
+				form.autocompleteHint = ""
+
+				return form, nil
 			}
-			return f, func() tea.Msg { return txFormResultMsg{cancelled: true} }
+
+			return form, func() tea.Msg { return txFormResultMsg{cancelled: true, tx: nil} }
 
 		case "enter":
-			if f.focused == formFieldSymbol && f.autocompleteHint != "" {
-				f.symbolInput.SetValue(f.autocompleteHint)
-				f.autocompleteHint = ""
-				return f.jumpToQty()
+			if form.focused == formFieldSymbol && form.autocompleteHint != "" {
+				form.symbolInput.SetValue(form.autocompleteHint)
+				form.autocompleteHint = ""
+
+				return form.jumpToQty()
 			}
-			tx, errMsg := f.buildTx()
+
+			builtTx, errMsg := form.buildTx()
 			if errMsg != "" {
-				f.errMsg = errMsg
-				return f, nil
+				form.errMsg = errMsg
+
+				return form, nil
 			}
-			return f, func() tea.Msg { return txFormResultMsg{tx: &tx} }
+
+			return form, func() tea.Msg { return txFormResultMsg{tx: &builtTx, cancelled: false} }
 
 		case "tab":
-			if f.focused == formFieldSymbol && f.autocompleteHint != "" {
-				f.symbolInput.SetValue(f.autocompleteHint)
-				f.autocompleteHint = ""
-				return f.jumpToQty()
+			if form.focused == formFieldSymbol && form.autocompleteHint != "" {
+				form.symbolInput.SetValue(form.autocompleteHint)
+				form.autocompleteHint = ""
+
+				return form.jumpToQty()
 			}
-			return f.moveFocus(1)
+
+			return form.moveFocus(1)
 
 		case "shift+tab":
-			if f.focused == formFieldSymbol {
-				f.autocompleteHint = ""
+			if form.focused == formFieldSymbol {
+				form.autocompleteHint = ""
 			}
-			return f.moveFocus(-1)
 
-		case "down":
-			if f.focused == formFieldSymbol && f.autocompleteHint != "" {
-				f.symbolInput.SetValue(f.autocompleteHint)
-				f.autocompleteHint = ""
-				return f, nil
+			return form.moveFocus(-1)
+
+		case keyDown:
+			if form.focused == formFieldSymbol && form.autocompleteHint != "" {
+				form.symbolInput.SetValue(form.autocompleteHint)
+				form.autocompleteHint = ""
+
+				return form, nil
 			}
 
 		case " ":
-			switch f.focused {
+			switch form.focused {
 			case formFieldType:
-				if f.txType == portfolio.TransactionBuy {
-					f.txType = portfolio.TransactionSell
+				if form.txType == portfolio.TransactionBuy {
+					form.txType = portfolio.TransactionSell
 				} else {
-					f.txType = portfolio.TransactionBuy
+					form.txType = portfolio.TransactionBuy
 				}
-				return f, nil
+
+				return form, nil
 			case formFieldAlloc:
-				if f.allocType == portfolio.AllocationCore {
-					f.allocType = portfolio.AllocationSatellite
+				if form.allocType == portfolio.AllocationCore {
+					form.allocType = portfolio.AllocationSatellite
 				} else {
-					f.allocType = portfolio.AllocationCore
+					form.allocType = portfolio.AllocationCore
 				}
-				return f, nil
+
+				return form, nil
 			}
 			// For text inputs, fall through to updateFocusedInput below.
 		}
 	}
 
-	result, cmd := f.updateFocusedInput(msg)
+	result, cmd := form.updateFocusedInput(msg)
 	if result.focused == formFieldSymbol {
 		result = result.withUpdatedAutocomplete()
 	}
+
 	return result, cmd
 }
 
-func (f transactionFormModel) moveFocus(delta int) (transactionFormModel, tea.Cmd) {
-	f.blurCurrent()
-	f.focused = ((f.focused+delta)%formFieldCount + formFieldCount) % formFieldCount
-	cmd := f.focusCurrent()
-	return f, cmd
+// View renders the transaction form overlay.
+func (form transactionFormModel) View() string {
+	styles := form.formStyles
+	divider := styles.divider.Render(strings.Repeat("─", formDividerLen))
+
+	title := "Add Transaction"
+	if form.txID != 0 {
+		title = "Edit Transaction"
+	}
+
+	lines := []string{
+		styles.title.Render(title),
+		divider,
+		form.renderInput("Symbol:      ", form.symbolInput, form.focused == formFieldSymbol),
+	}
+	if form.focused == formFieldSymbol && form.autocompleteHint != "" {
+		lines = append(lines, styles.hint.Render("  → "+form.autocompleteHint+" (↓/tab: accept)"))
+	}
+
+	lines = append(lines,
+		form.renderToggle("Type:        ", "BUY", "SELL",
+			form.txType == portfolio.TransactionBuy, form.focused == formFieldType),
+		form.renderInput("Quantity:    ", form.qtyInput, form.focused == formFieldQty),
+		form.renderInput("Price:       ", form.priceInput, form.focused == formFieldPrice),
+		form.renderInput("Fee:         ", form.feeInput, form.focused == formFieldFee),
+		form.renderInput("Date:        ", form.dateInput, form.focused == formFieldDate),
+		form.renderToggle("Allocation:  ", "CORE", "SAT",
+			form.allocType == portfolio.AllocationCore, form.focused == formFieldAlloc),
+		"",
+	)
+
+	if form.errMsg != "" {
+		lines = append(lines, styles.errorStyle.Render("  Error: "+form.errMsg))
+	}
+
+	lines = append(lines, styles.hint.Render("  tab: next · space: toggle · enter: confirm · esc: cancel"))
+
+	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-func (f *transactionFormModel) blurCurrent() {
-	switch f.focused {
+// withUpdatedAutocomplete returns a copy of form with the autocompleteHint
+// recalculated from the current symbol input value.
+func (form transactionFormModel) withUpdatedAutocomplete() transactionFormModel {
+	prefix := strings.ToUpper(strings.TrimSpace(form.symbolInput.Value()))
+
+	form.autocompleteHint = ""
+	if prefix == "" || len(form.knownSymbols) == 0 {
+		return form
+	}
+
+	for _, sym := range form.knownSymbols {
+		if strings.HasPrefix(sym, prefix) && sym != prefix {
+			form.autocompleteHint = sym
+
+			return form
+		}
+	}
+
+	return form
+}
+
+func (form transactionFormModel) jumpToQty() (transactionFormModel, tea.Cmd) {
+	form.blurCurrent()
+	form.focused = formFieldQty
+	cmd := form.focusCurrent()
+
+	return form, cmd
+}
+
+func (form transactionFormModel) moveFocus(delta int) (transactionFormModel, tea.Cmd) {
+	form.blurCurrent()
+	form.focused = ((form.focused+delta)%formFieldCount + formFieldCount) % formFieldCount
+	cmd := form.focusCurrent()
+
+	return form, cmd
+}
+
+func (form *transactionFormModel) blurCurrent() {
+	switch form.focused {
 	case formFieldSymbol:
-		f.symbolInput.Blur()
+		form.symbolInput.Blur()
 	case formFieldQty:
-		f.qtyInput.Blur()
+		form.qtyInput.Blur()
 	case formFieldPrice:
-		f.priceInput.Blur()
+		form.priceInput.Blur()
 	case formFieldFee:
-		f.feeInput.Blur()
+		form.feeInput.Blur()
 	case formFieldDate:
-		f.dateInput.Blur()
+		form.dateInput.Blur()
 	}
 }
 
-func (f *transactionFormModel) focusCurrent() tea.Cmd {
-	switch f.focused {
+func (form *transactionFormModel) focusCurrent() tea.Cmd {
+	switch form.focused {
 	case formFieldSymbol:
-		return f.symbolInput.Focus()
+		return form.symbolInput.Focus()
 	case formFieldQty:
-		return f.qtyInput.Focus()
+		return form.qtyInput.Focus()
 	case formFieldPrice:
-		return f.priceInput.Focus()
+		return form.priceInput.Focus()
 	case formFieldFee:
-		return f.feeInput.Focus()
+		return form.feeInput.Focus()
 	case formFieldDate:
-		return f.dateInput.Focus()
+		return form.dateInput.Focus()
 	}
+
 	return nil
 }
 
-func (f transactionFormModel) updateFocusedInput(msg tea.Msg) (transactionFormModel, tea.Cmd) {
+func (form transactionFormModel) updateFocusedInput(msg tea.Msg) (transactionFormModel, tea.Cmd) {
 	var cmd tea.Cmd
-	switch f.focused {
+
+	switch form.focused {
 	case formFieldSymbol:
-		f.symbolInput, cmd = f.symbolInput.Update(msg)
+		form.symbolInput, cmd = form.symbolInput.Update(msg)
 	case formFieldQty:
-		f.qtyInput, cmd = f.qtyInput.Update(msg)
+		form.qtyInput, cmd = form.qtyInput.Update(msg)
 	case formFieldPrice:
-		f.priceInput, cmd = f.priceInput.Update(msg)
+		form.priceInput, cmd = form.priceInput.Update(msg)
 	case formFieldFee:
-		f.feeInput, cmd = f.feeInput.Update(msg)
+		form.feeInput, cmd = form.feeInput.Update(msg)
 	case formFieldDate:
-		f.dateInput, cmd = f.dateInput.Update(msg)
+		form.dateInput, cmd = form.dateInput.Update(msg)
 	}
-	return f, cmd
+
+	return form, cmd
 }
 
 // buildTx validates form inputs and returns a ready-to-persist Transaction or
 // an error message string if validation fails.
-func (f transactionFormModel) buildTx() (tx portfolio.Transaction, errMsg string) {
-	symbol := strings.ToUpper(strings.TrimSpace(f.symbolInput.Value()))
+//
+//nolint:cyclop,funlen // validation necessarily checks each field independently; splitting adds no value
+func (form transactionFormModel) buildTx() (portfolio.Transaction, string) {
+	emptyTx := portfolio.Transaction{
+		ID:             0,
+		Symbol:         "",
+		Type:           "",
+		Quantity:       0,
+		Price:          0,
+		Fee:            0,
+		AllocationType: "",
+		Currency:       "",
+		ExecutedAt:     time.Time{},
+		CreatedAt:      time.Time{},
+	}
+
+	symbol := strings.ToUpper(strings.TrimSpace(form.symbolInput.Value()))
 	if symbol == "" {
-		return portfolio.Transaction{}, "symbol is required"
+		return emptyTx, "symbol is required"
 	}
 
-	qty, err := strconv.ParseFloat(strings.TrimSpace(f.qtyInput.Value()), 64)
+	qty, err := strconv.ParseFloat(strings.TrimSpace(form.qtyInput.Value()), 64)
 	if err != nil || qty <= 0 {
-		return portfolio.Transaction{}, "quantity must be a positive number"
+		return emptyTx, "quantity must be a positive number"
 	}
 
-	price, err := strconv.ParseFloat(strings.TrimSpace(f.priceInput.Value()), 64)
-	if err != nil || price <= 0 {
-		return portfolio.Transaction{}, "price must be a positive number"
+	priceVal, err := strconv.ParseFloat(strings.TrimSpace(form.priceInput.Value()), 64)
+	if err != nil || priceVal <= 0 {
+		return emptyTx, "price must be a positive number"
 	}
 
-	feeStr := strings.TrimSpace(f.feeInput.Value())
+	feeStr := strings.TrimSpace(form.feeInput.Value())
 	if feeStr == "" {
 		feeStr = "0"
 	}
-	fee, err := strconv.ParseFloat(feeStr, 64)
-	if err != nil || fee < 0 {
-		return portfolio.Transaction{}, "fee must be >= 0"
+
+	feeVal, err := strconv.ParseFloat(feeStr, 64)
+	if err != nil || feeVal < 0 {
+		return emptyTx, "fee must be >= 0"
 	}
 
-	dateStr := strings.TrimSpace(f.dateInput.Value())
+	dateStr := strings.TrimSpace(form.dateInput.Value())
+
 	var executedAt time.Time
 	if dateStr == "" {
 		executedAt = time.Now().UTC()
 	} else {
 		parsed, parseErr := time.Parse("2006-01-02", dateStr)
 		if parseErr != nil {
-			return portfolio.Transaction{}, "date must be YYYY-MM-DD"
+			return emptyTx, "date must be YYYY-MM-DD"
 		}
+
 		executedAt = parsed.UTC()
 	}
 
 	return portfolio.Transaction{
-		ID:             f.txID,
+		ID:             form.txID,
 		Symbol:         symbol,
-		Type:           f.txType,
+		Type:           form.txType,
 		Quantity:       qty,
-		Price:          price,
-		Fee:            fee,
-		AllocationType: f.allocType,
+		Price:          priceVal,
+		Fee:            feeVal,
+		AllocationType: form.allocType,
+		Currency:       "",
 		ExecutedAt:     executedAt,
+		CreatedAt:      time.Time{},
 	}, ""
 }
 
-// newTransactionFormEditing creates a form pre-filled with the values of an
-// existing transaction for editing. On submit, txFormResultMsg.tx.ID is set.
-func newTransactionFormEditing(tx portfolio.Transaction, knownSymbols []string) (transactionFormModel, tea.Cmd) {
-	f, cmd := newTransactionForm(knownSymbols)
-	f.txID = tx.ID
-	f.txType = tx.Type
-	f.allocType = tx.AllocationType
-	f.symbolInput.SetValue(tx.Symbol)
-	f.qtyInput.SetValue(fmt.Sprintf("%g", tx.Quantity))
-	f.priceInput.SetValue(fmt.Sprintf("%g", tx.Price))
-	f.feeInput.SetValue(fmt.Sprintf("%g", tx.Fee))
-	f.dateInput.SetValue(tx.ExecutedAt.Format("2006-01-02"))
-	return f, cmd
-}
-
-func (f transactionFormModel) View() string {
-	st := f.formStyles
-	divider := st.divider.Render(strings.Repeat("─", 44))
-
-	title := "Add Transaction"
-	if f.txID != 0 {
-		title = "Edit Transaction"
-	}
-
-	lines := []string{
-		st.title.Render(title),
-		divider,
-		f.renderInput("Symbol:      ", f.symbolInput, f.focused == formFieldSymbol),
-	}
-	if f.focused == formFieldSymbol && f.autocompleteHint != "" {
-		lines = append(lines, st.hint.Render("  → "+f.autocompleteHint+" (↓/tab: accept)"))
-	}
-	lines = append(lines,
-		f.renderToggle("Type:        ", "BUY", "SELL",
-			f.txType == portfolio.TransactionBuy, f.focused == formFieldType),
-		f.renderInput("Quantity:    ", f.qtyInput, f.focused == formFieldQty),
-		f.renderInput("Price:       ", f.priceInput, f.focused == formFieldPrice),
-		f.renderInput("Fee:         ", f.feeInput, f.focused == formFieldFee),
-		f.renderInput("Date:        ", f.dateInput, f.focused == formFieldDate),
-		f.renderToggle("Allocation:  ", "CORE", "SAT",
-			f.allocType == portfolio.AllocationCore, f.focused == formFieldAlloc),
-		"",
-	)
-
-	if f.errMsg != "" {
-		lines = append(lines, st.errorStyle.Render(fmt.Sprintf("  Error: %s", f.errMsg)))
-	}
-	lines = append(lines, st.hint.Render("  tab: next · space: toggle · enter: confirm · esc: cancel"))
-
-	return lipgloss.JoinVertical(lipgloss.Left, lines...)
-}
-
-func (f transactionFormModel) renderInput(label string, inp textinput.Model, isFocused bool) string {
-	lStyle := f.formStyles.label
+func (form transactionFormModel) renderInput(label string, inp textinput.Model, isFocused bool) string {
+	lStyle := form.formStyles.label
 	if isFocused {
 		lStyle = lStyle.Foreground(lipgloss.Color("33"))
 	}
+
 	return lStyle.Render(label) + inp.View()
 }
 
-func (f transactionFormModel) renderToggle(label, optA, optB string, aSelected, isFocused bool) string {
-	st := f.formStyles
-	lStyle := st.label
+func (form transactionFormModel) renderToggle(label, optA, optB string, aSelected, isFocused bool) string {
+	styles := form.formStyles
+
+	lStyle := styles.label
 	if isFocused {
 		lStyle = lStyle.Foreground(lipgloss.Color("33"))
 	}
 
 	var rendA, rendB string
 	if aSelected {
-		rendA = st.toggleOn.Render(optA)
-		rendB = st.toggleOff.Render(optB)
+		rendA = styles.toggleOn.Render(optA)
+		rendB = styles.toggleOff.Render(optB)
 	} else {
-		rendA = st.toggleOff.Render(optA)
-		rendB = st.toggleOn.Render(optB)
+		rendA = styles.toggleOff.Render(optA)
+		rendB = styles.toggleOn.Render(optB)
 	}
+
 	focusHint := ""
 	if isFocused {
-		focusHint = st.hint.Render(" (space: toggle)")
+		focusHint = styles.hint.Render(" (space: toggle)")
 	}
+
 	return lStyle.Render(label) + rendA + " " + rendB + focusHint
 }

@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const logChannelBufferSize = 256
+
 // LogEntry is a single captured slog record.
 type LogEntry struct {
 	Time    time.Time
@@ -19,7 +21,7 @@ type LogChannel chan LogEntry
 
 // NewLogChannel creates a buffered channel for log entries.
 func NewLogChannel() LogChannel {
-	return make(LogChannel, 256)
+	return make(LogChannel, logChannelBufferSize)
 }
 
 // TUIHandler is a slog.Handler that forwards records to a LogChannel.
@@ -32,34 +34,51 @@ type TUIHandler struct {
 
 // NewTUIHandler returns a handler that sends records to ch.
 func NewTUIHandler(ch LogChannel) *TUIHandler {
-	return &TUIHandler{ch: ch}
+	return &TUIHandler{
+		ch:    ch,
+		attrs: nil,
+		group: "",
+	}
 }
 
+// Enabled always returns true — all levels are captured for the log view.
 func (h *TUIHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
 
-func (h *TUIHandler) Handle(_ context.Context, r slog.Record) error {
+// Handle forwards the record to the log channel, dropping it when the buffer is full.
+func (h *TUIHandler) Handle(_ context.Context, record slog.Record) error {
 	entry := LogEntry{
-		Time:    r.Time,
-		Level:   r.Level,
-		Message: r.Message,
+		Time:    record.Time,
+		Level:   record.Level,
+		Message: record.Message,
+		Attrs:   nil,
 	}
-	r.Attrs(func(a slog.Attr) bool {
-		entry.Attrs = append(entry.Attrs, a)
+	record.Attrs(func(attr slog.Attr) bool {
+		entry.Attrs = append(entry.Attrs, attr)
+
 		return true
 	})
+
 	select {
 	case h.ch <- entry:
 	default:
 	}
+
 	return nil
 }
 
+// WithAttrs returns a new handler that prepends attrs to every record.
 func (h *TUIHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	next := &TUIHandler{ch: h.ch, group: h.group}
+	next := &TUIHandler{
+		ch:    h.ch,
+		group: h.group,
+		attrs: nil,
+	}
 	next.attrs = append(append([]slog.Attr(nil), h.attrs...), attrs...)
+
 	return next
 }
 
+// WithGroup returns a new handler scoped to the given group name.
 func (h *TUIHandler) WithGroup(name string) slog.Handler {
 	return &TUIHandler{ch: h.ch, attrs: h.attrs, group: name}
 }

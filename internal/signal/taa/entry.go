@@ -22,6 +22,8 @@ type SymbolProvider interface {
 // open this position, it should represent X% of your satellite NAV.
 //
 // Only symbols with abs(conviction) > friction are emitted as TypeBuy signals.
+//
+//nolint:cyclop,funlen // inherent complexity of portfolio-consistent entry evaluation
 func evaluateEntries(
 	holdings []portfolio.Holding,
 	tracked []string,
@@ -38,14 +40,17 @@ func evaluateEntries(
 	//   - TAAEnabled=true, Quantity>0: already held; rebalance optimizer handles it
 	suppressed := map[string]struct{}{}
 	totalSatelliteNAV := 0.0
-	for _, h := range holdings {
-		if h.AllocationType != portfolio.AllocationSatellite || !h.TAAEnabled {
-			suppressed[h.Symbol] = struct{}{}
+
+	for _, holding := range holdings {
+		if holding.AllocationType != portfolio.AllocationSatellite || !holding.TAAEnabled {
+			suppressed[holding.Symbol] = struct{}{}
+
 			continue
 		}
-		if h.Quantity > 0 {
-			suppressed[h.Symbol] = struct{}{}
-			totalSatelliteNAV += h.NAV()
+
+		if holding.Quantity > 0 {
+			suppressed[holding.Symbol] = struct{}{}
+			totalSatelliteNAV += holding.NAV()
 		}
 	}
 
@@ -57,16 +62,20 @@ func evaluateEntries(
 	}
 
 	var candidates []candidate
+
 	for _, sym := range tracked {
 		if _, ok := suppressed[sym]; ok {
 			continue // already held; handled by the satellite rebalance optimizer
 		}
-		c := conviction.Conviction(sym)
-		raw := 1 + c
+
+		conv := conviction.Conviction(sym)
+		raw := 1 + conv
+
 		if raw < 0 {
 			raw = 0
 		}
-		candidates = append(candidates, candidate{symbol: sym, conviction: c, rawWeight: raw})
+
+		candidates = append(candidates, candidate{symbol: sym, conviction: conv, rawWeight: raw})
 	}
 
 	if len(candidates) == 0 {
@@ -79,35 +88,46 @@ func evaluateEntries(
 		symbol    string
 		rawWeight float64
 	}
+
 	var heldWeights []heldWeight
-	for _, h := range holdings {
-		if !h.TAAEnabled || h.Quantity <= 0 || h.AllocationType != portfolio.AllocationSatellite {
+
+	for _, holding := range holdings {
+		if !holding.TAAEnabled || holding.Quantity <= 0 || holding.AllocationType != portfolio.AllocationSatellite {
 			continue
 		}
-		c := conviction.Conviction(h.Symbol)
+
+		c := conviction.Conviction(holding.Symbol)
 		raw := 1 + c
+
 		if raw < 0 {
 			raw = 0
 		}
-		heldWeights = append(heldWeights, heldWeight{symbol: h.Symbol, rawWeight: raw})
+
+		heldWeights = append(heldWeights, heldWeight{symbol: holding.Symbol, rawWeight: raw})
 	}
 
 	totalRaw := 0.0
+
 	for _, hw := range heldWeights {
 		totalRaw += hw.rawWeight
 	}
+
 	for _, cand := range candidates {
 		totalRaw += cand.rawWeight
 	}
+
 	if totalRaw == 0 {
 		eq := 1.0 / float64(len(candidates)+len(heldWeights))
+
 		for i := range candidates {
 			candidates[i].rawWeight = eq
 		}
+
 		totalRaw = 1.0
 	}
 
 	var msgs []signal.Message
+
 	for _, cand := range candidates {
 		// Per-candidate friction: without a position value we fall back to
 		// BrokerFeePercent (cannot apply the EUR cap without knowing order size).

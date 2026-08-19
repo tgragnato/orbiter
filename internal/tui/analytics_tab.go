@@ -13,6 +13,17 @@ import (
 	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
 )
 
+const (
+	pctMultiplier      = 100.0
+	hoursPerYear       = 365.25 * 24
+	minTWRDataPoints   = 2
+	graphWidthOffset   = 15
+	graphMinWidth      = 20
+	chartHeightDivisor = 3
+	chartHeightOffset  = 14
+	chartMinHeight     = 4
+)
+
 type analyticsLoadedMsg struct {
 	twrData      []float64
 	sortinoData  []float64
@@ -28,6 +39,7 @@ type analyticsLoadedMsg struct {
 	err      error
 }
 
+// AnalyticsTabModel renders portfolio performance charts and statistics in Tab 6.
 type AnalyticsTabModel struct {
 	engine      *analytics.TWREngine
 	portfolioID string
@@ -52,104 +64,39 @@ type AnalyticsTabModel struct {
 	styles lipgloss.Style
 }
 
+// NewAnalyticsTabModel creates a new AnalyticsTabModel wired to the given engine.
 func NewAnalyticsTabModel(engine *analytics.TWREngine, portfolioID string) AnalyticsTabModel {
 	return AnalyticsTabModel{
-		engine:      engine,
-		portfolioID: portfolioID,
-		loading:     true,
-		styles:      lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")),
+		engine:         engine,
+		portfolioID:    portfolioID,
+		twrData:        nil,
+		sortinoData:    nil,
+		drawdownData:   nil,
+		totalReturn:    0,
+		annualizedRet:  0,
+		maxDrawdown:    0,
+		currentSortino: 0,
+		dataFrom:       time.Time{},
+		dataTo:         time.Time{},
+		loading:        true,
+		err:            nil,
+		width:          0,
+		height:         0,
+		quit:           false,
+		styles:         lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")),
 	}
 }
 
+// Init starts the analytics data load if an engine is configured.
 func (m AnalyticsTabModel) Init() tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
+
 	return m.loadDataCmd()
 }
 
-func (m AnalyticsTabModel) loadDataCmd() tea.Cmd {
-	return func() tea.Msg {
-		ctx := context.Background()
-
-		// Use a far-past From so every snapshot ever recorded is included.
-		// The actual visible range is derived from the returned periods.
-		tr := analytics.TimeRange{
-			From: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
-			To:   time.Now().UTC(),
-		}
-
-		result, err := m.engine.CalculateTWR(ctx, m.portfolioID, tr)
-		if err != nil {
-			return analyticsLoadedMsg{err: err}
-		}
-		if len(result.Periods) == 0 {
-			return analyticsLoadedMsg{}
-		}
-
-		var (
-			twrSeries      []float64
-			sortinoSeries  []float64
-			drawdownSeries []float64
-			returns        []float64
-		)
-
-		cumulativeTWR := 1.0
-		peakTWR := 1.0
-
-		for _, p := range result.Periods {
-			cumulativeTWR *= (1 + p.Return)
-			twrPct := (cumulativeTWR - 1) * 100
-			twrSeries = append(twrSeries, twrPct)
-
-			if cumulativeTWR > peakTWR {
-				peakTWR = cumulativeTWR
-			}
-			dd := 0.0
-			if peakTWR > 0 {
-				dd = (cumulativeTWR - peakTWR) / peakTWR * 100
-			}
-			drawdownSeries = append(drawdownSeries, dd)
-
-			returns = append(returns, p.Return)
-			sortinoSeries = append(sortinoSeries, ml.Sortino(returns))
-		}
-
-		totalReturn := cumulativeTWR - 1
-		maxDD := 0.0
-		for _, d := range drawdownSeries {
-			if d < maxDD {
-				maxDD = d
-			}
-		}
-
-		dataFrom := result.Periods[0].StartAt
-		dataTo := result.Periods[len(result.Periods)-1].EndAt
-		years := dataTo.Sub(dataFrom).Hours() / (365.25 * 24)
-		annualized := 0.0
-		if years > 0 && cumulativeTWR > 0 {
-			annualized = math.Pow(cumulativeTWR, 1.0/years) - 1
-		}
-
-		currentSortino := 0.0
-		if len(returns) > 0 {
-			currentSortino = ml.Sortino(returns)
-		}
-
-		return analyticsLoadedMsg{
-			twrData:        twrSeries,
-			sortinoData:    sortinoSeries,
-			drawdownData:   drawdownSeries,
-			totalReturn:    totalReturn,
-			annualizedRet:  annualized,
-			maxDrawdown:    maxDD,
-			currentSortino: currentSortino,
-			dataFrom:       dataFrom,
-			dataTo:         dataTo,
-		}
-	}
-}
-
+// Update handles incoming messages for the analytics tab.
 func (m AnalyticsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.quit {
 		return m, nil
@@ -157,9 +104,9 @@ func (m AnalyticsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "r":
+		if msg.String() == "r" {
 			m.loading = true
+
 			return m, m.loadDataCmd()
 		}
 	case tea.WindowSizeMsg:
@@ -178,9 +125,13 @@ func (m AnalyticsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dataFrom = msg.dataFrom
 		m.dataTo = msg.dataTo
 	}
+
 	return m, nil
 }
 
+// View renders the analytics tab content.
+//
+//nolint:funlen // View lays out many chart sections; splitting into helpers would reduce clarity
 func (m AnalyticsTabModel) View() string {
 	if m.quit {
 		return ""
@@ -193,28 +144,33 @@ func (m AnalyticsTabModel) View() string {
 			m.dataTo.Format("2006-01-02"),
 		)
 	}
+
 	title := m.styles.Render(fmt.Sprintf("Tab 6 - Portfolio Analytics (%s)", dateRange))
 
 	if m.loading {
 		return lipgloss.JoinVertical(lipgloss.Left, title, "\n  Loading analytics from database...")
 	}
+
 	if m.err != nil {
 		return lipgloss.JoinVertical(lipgloss.Left, title, fmt.Sprintf("\n  Error: %v", m.err))
 	}
-	if len(m.twrData) < 2 {
-		return lipgloss.JoinVertical(lipgloss.Left, title, "\n  Not enough NAV snapshots to compute analytics.\n  NAV history is being built in the background — check back soon.")
+
+	if len(m.twrData) < minTWRDataPoints {
+		return lipgloss.JoinVertical(lipgloss.Left, title,
+			"\n  Not enough NAV snapshots to compute analytics.\n"+
+				"  NAV history is being built in the background — check back soon.")
 	}
 
-	graphWidth := max(m.width-15, 20)
+	graphWidth := max(m.width-graphWidthOffset, graphMinWidth)
 	// Reserve space for title + stats bar + 3 chart areas + hint
-	chartRows := max((m.height-14)/3, 4)
+	chartRows := max((m.height-chartHeightOffset)/chartHeightDivisor, chartMinHeight)
 
 	// Summary stats bar
 	statStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("24")).Padding(0, 1)
 	stats := statStyle.Render(fmt.Sprintf(
 		"TWR: %+.2f%%  |  CAGR: %+.2f%%  |  Max DD: %.2f%%  |  Sortino: %.2f",
-		m.totalReturn*100,
-		m.annualizedRet*100,
+		m.totalReturn*pctMultiplier,
+		m.annualizedRet*pctMultiplier,
 		m.maxDrawdown,
 		m.currentSortino,
 	))
@@ -250,4 +206,117 @@ func (m AnalyticsTabModel) View() string {
 // into its global help line when the Analytics tab is active.
 func (m AnalyticsTabModel) NavHint() string {
 	return "r: reload data"
+}
+
+// loadDataCmd fetches TWR, sortino, and drawdown series from the analytics engine.
+//
+//nolint:cyclop,funlen // complex financial computation that cannot be meaningfully split
+func (m AnalyticsTabModel) loadDataCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+
+		// Use a far-past From so every snapshot ever recorded is included.
+		// The actual visible range is derived from the returned periods.
+		tr := analytics.TimeRange{
+			From: time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
+			To:   time.Now().UTC(),
+		}
+
+		result, err := m.engine.CalculateTWR(ctx, m.portfolioID, tr)
+		if err != nil {
+			return analyticsLoadedMsg{
+				err:            err,
+				twrData:        nil,
+				sortinoData:    nil,
+				drawdownData:   nil,
+				totalReturn:    0,
+				annualizedRet:  0,
+				maxDrawdown:    0,
+				currentSortino: 0,
+				dataFrom:       time.Time{},
+				dataTo:         time.Time{},
+			}
+		}
+
+		if len(result.Periods) == 0 {
+			return analyticsLoadedMsg{
+				err:            nil,
+				twrData:        nil,
+				sortinoData:    nil,
+				drawdownData:   nil,
+				totalReturn:    0,
+				annualizedRet:  0,
+				maxDrawdown:    0,
+				currentSortino: 0,
+				dataFrom:       time.Time{},
+				dataTo:         time.Time{},
+			}
+		}
+
+		var (
+			twrSeries      []float64
+			sortinoSeries  []float64
+			drawdownSeries []float64
+			returns        []float64
+		)
+
+		cumulativeTWR := 1.0
+		peakTWR := 1.0
+
+		for _, period := range result.Periods {
+			cumulativeTWR *= (1 + period.Return)
+			twrPct := (cumulativeTWR - 1) * pctMultiplier
+			twrSeries = append(twrSeries, twrPct)
+
+			if cumulativeTWR > peakTWR {
+				peakTWR = cumulativeTWR
+			}
+
+			dd := 0.0
+			if peakTWR > 0 {
+				dd = (cumulativeTWR - peakTWR) / peakTWR * pctMultiplier
+			}
+
+			drawdownSeries = append(drawdownSeries, dd)
+
+			returns = append(returns, period.Return)
+			sortinoSeries = append(sortinoSeries, ml.Sortino(returns))
+		}
+
+		totalReturn := cumulativeTWR - 1
+
+		maxDD := 0.0
+		for _, drawdown := range drawdownSeries {
+			if drawdown < maxDD {
+				maxDD = drawdown
+			}
+		}
+
+		dataFrom := result.Periods[0].StartAt
+		dataTo := result.Periods[len(result.Periods)-1].EndAt
+		years := dataTo.Sub(dataFrom).Hours() / hoursPerYear
+
+		annualized := 0.0
+		if years > 0 && cumulativeTWR > 0 {
+			annualized = math.Pow(cumulativeTWR, 1.0/years) - 1
+		}
+
+		currentSortino := 0.0
+		if len(returns) > 0 {
+			currentSortino = ml.Sortino(returns)
+		}
+
+		return analyticsLoadedMsg{
+			twrData:        twrSeries,
+			sortinoData:    sortinoSeries,
+			drawdownData:   drawdownSeries,
+			totalReturn:    totalReturn,
+			annualizedRet:  annualized,
+			maxDrawdown:    maxDD,
+			currentSortino: currentSortino,
+			dataFrom:       dataFrom,
+			dataTo:         dataTo,
+			err:            nil,
+		}
+	}
 }

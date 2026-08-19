@@ -28,15 +28,50 @@ import (
 	signals "github.com/tgragnato/orbiter/internal/tui"
 )
 
+// Sentinel errors for configuration parsing.
+var (
+	// ErrUnexpectedArgs is returned when unexpected positional arguments are passed.
+	ErrUnexpectedArgs = errors.New("unexpected positional arguments")
+	// ErrMissingDSN is returned when no PostgreSQL DSN is provided.
+	ErrMissingDSN = errors.New("missing PostgreSQL DSN: provide --dsn or DATABASE_URL")
+)
+
+// Default broker configuration values.
+const (
+	defaultTaxRate          = 0.26
+	defaultBrokerFeePercent = 0.0019
+	defaultMaxBrokerFee     = 18.90
+	defaultBuffer           = 0.01
+)
+
+// Default ML walk-forward configuration values.
+const (
+	mlTrainSize        = 1250
+	mlTestSize         = 60
+	mlEmbargo          = 10
+	mlLabelHorizon     = 5
+	mlNTrees           = 50
+	mlFeaturesPerSplit = 12
+	mlMaxDepth         = 5
+	mlMinSamples       = 10
+)
+
+// priceFeedInterval is the interval between price feed refresh runs.
+const priceFeedInterval = 30 * time.Minute
+
+// httpClientTimeout is the timeout for the Yahoo Finance HTTP client.
+const httpClientTimeout = 30 * time.Second
+
 type config struct {
 	dsn string
 }
 
+//nolint:gochecknoglobals // test injection points; replaced in tests via t.Cleanup
 var (
 	openPostgresFn = openPostgres
 	bootstrapFn    = configuration.Bootstrap
 	newSignalRTFn  = signal.NewRuntime
-	newStoreFn     = func(db *sql.DB) portfolio.HoldingsStore { return portfolio.NewPostgresStore(db) }
+	newStoreFn     = func(sqlDB *sql.DB) portfolio.HoldingsStore { return portfolio.NewPostgresStore(sqlDB) }
 	newRootModelFn = func(
 		store portfolio.HoldingsStore,
 		readModel signal.ReadModel,
@@ -47,7 +82,9 @@ var (
 		twrEngine *analytics.TWREngine,
 		baseCurrency string,
 	) tea.Model {
-		return signals.NewRootModelWithMetrics(store, readModel, "MAIN", mlEngine, txStore, configSvc, logCh, twrEngine, baseCurrency)
+		return signals.NewRootModelWithMetrics(
+			store, readModel, "MAIN", mlEngine, txStore, configSvc, logCh, twrEngine, baseCurrency,
+		)
 	}
 	newProgramFn = func(model tea.Model, options ...tea.ProgramOption) programRunner {
 		return tea.NewProgram(model, options...)
@@ -63,27 +100,40 @@ func Run(ctx context.Context, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "backup":
-			return backup.RunBackup(ctx, args[1:], os.Getenv)
+			err := backup.RunBackup(ctx, args[1:], os.Getenv)
+			if err != nil {
+				return fmt.Errorf("backup: %w", err)
+			}
+
+			return nil
 		case "restore":
-			return backup.RunRestore(ctx, args[1:], os.Getenv)
+			err := backup.RunRestore(ctx, args[1:], os.Getenv)
+			if err != nil {
+				return fmt.Errorf("restore: %w", err)
+			}
+
+			return nil
 		}
 	}
+
 	return runTUI(ctx, args)
 }
 
+//nolint:gocognit,gocyclo,cyclop,nestif,funlen,maintidx // startup wiring; inherent complexity
 func runTUI(ctx context.Context, args []string) error {
 	conf, err := parseConfig(args, os.Getenv)
 	if err != nil {
 		return err
 	}
 
-	db, err := openPostgresFn(ctx, conf.dsn)
+	sqlDB, err := openPostgresFn(ctx, conf.dsn)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
 
-	configSvc, err := bootstrapFn(ctx, db)
+	defer func() { _ = sqlDB.Close() }()
+
+	configSvc, err := bootstrapFn(ctx, sqlDB)
 	if err != nil {
 		return fmt.Errorf("configuration bootstrap failed: %w", err)
 	}
@@ -93,15 +143,18 @@ func runTUI(ctx context.Context, args []string) error {
 	defer cancel()
 
 	signalRuntime := newSignalRTFn()
-	store := newStoreFn(db)
+	store := newStoreFn(sqlDB)
 
 	// *portfolio.PostgresStore implements both TransactionStore and feed.PriceStore.
 	// In tests the injected fake may not, so we guard with type assertions.
 	var txStore portfolio.TransactionStore
+
 	if ts, ok := store.(portfolio.TransactionStore); ok {
 		txStore = ts
 	}
+
 	var priceStore feed.PriceStore
+
 	if ps, ok := store.(feed.PriceStore); ok {
 		priceStore = ps
 	}
@@ -112,30 +165,35 @@ func runTUI(ctx context.Context, args []string) error {
 
 	// Load configuration settings (base currency, Yahoo credentials, broker params).
 	var yahooAPIKey string
+
 	baseCurrency := "EUR"
 	brokerCfg := configuration.TAABrokerConfig{
-		TaxRate:          0.26,
-		BrokerFeePercent: 0.0019,
-		MaxBrokerFee:     18.90,
-		Buffer:           0.01,
+		TaxRate:          defaultTaxRate,
+		BrokerFeePercent: defaultBrokerFeePercent,
+		MaxBrokerFee:     defaultMaxBrokerFee,
+		Buffer:           defaultBuffer,
 	}
+
 	if configSvc != nil {
-		if creds, err := configSvc.GetYahooCredentials(ctx); err == nil {
+		creds, credErr := configSvc.GetYahooCredentials(ctx)
+		if credErr == nil {
 			yahooAPIKey = creds.APIKey
 		} else {
-			slog.Warn("startup: could not read yahoo credentials", "error", err)
+			slog.Warn("startup: could not read yahoo credentials", "error", credErr)
 		}
 
-		if bc, err := configSvc.GetBaseCurrency(ctx); err == nil && bc != "" {
+		bc, bcErr := configSvc.GetBaseCurrency(ctx)
+		if bcErr == nil && bc != "" {
 			baseCurrency = bc
-		} else if err != nil {
-			slog.Warn("startup: could not read base currency, defaulting to EUR", "error", err)
+		} else if bcErr != nil {
+			slog.Warn("startup: could not read base currency, defaulting to EUR", "error", bcErr)
 		}
 
-		if bc, err := configSvc.GetBrokerConfig(ctx); err == nil {
-			brokerCfg = bc
+		fetchedBrokerCfg, brokerErr := configSvc.GetBrokerConfig(ctx)
+		if brokerErr == nil {
+			brokerCfg = fetchedBrokerCfg
 		} else {
-			slog.Warn("startup: could not read broker config, using defaults", "error", err)
+			slog.Warn("startup: could not read broker config, using defaults", "error", brokerErr)
 		}
 	}
 
@@ -146,52 +204,67 @@ func runTUI(ctx context.Context, args []string) error {
 	// historical EOD data is fetched from Yahoo only once per symbol. Subsequent
 	// featurizer runs (training + inference) query the local eod_candles table
 	// and only request the delta (new days since last cache update) from Yahoo.
-	yahooProvider := data.NewYahooProvider(&http.Client{Timeout: 30 * time.Second}).WithAPIKey(yahooAPIKey)
+	yahooProvider := data.NewYahooProvider(&http.Client{
+		Timeout:       httpClientTimeout,
+		Transport:     nil,
+		CheckRedirect: nil,
+		Jar:           nil,
+	}).WithAPIKey(yahooAPIKey)
+
 	var candleProvider data.DataProvider = yahooProvider
+
 	if cs, ok := store.(data.CandleStorer); ok {
 		candleProvider = data.NewCachingProvider(yahooProvider, cs)
 	}
-	ckpt := ml.NewCheckpoint(db)
+
+	ckpt := ml.NewCheckpoint(sqlDB)
+
 	runner := newMLRunner(ml.NewEngine(), func() []ml.Sample {
-		samples, err := featurizer.ExtractMLSamples(ctx, store, candleProvider)
-		if err != nil {
-			slog.Warn("ml: sample extraction failed", "error", err)
+		samples, sampleErr := featurizer.ExtractMLSamples(ctx, store, candleProvider)
+		if sampleErr != nil {
+			slog.Warn("ml: sample extraction failed", "error", sampleErr)
+
 			return nil
 		}
+
 		return samples
 	}, ml.WalkForwardConfig{
-		TrainSize:        1250,
-		TestSize:         60,
-		Embargo:          10,
-		LabelHorizon:     5,
-		NTrees:           50,
-		FeaturesPerSplit: 12,
-		MaxDepth:         5,
-		MinSamples:       10,
-	}, ckpt, func(ctx context.Context) (map[string]ml.Sample, error) {
-		return featurizer.CurrentSamples(ctx, store, candleProvider)
+		TrainSize:        mlTrainSize,
+		TestSize:         mlTestSize,
+		Embargo:          mlEmbargo,
+		LabelHorizon:     mlLabelHorizon,
+		NTrees:           mlNTrees,
+		FeaturesPerSplit: mlFeaturesPerSplit,
+		MaxDepth:         mlMaxDepth,
+		MinSamples:       mlMinSamples,
+	}, ckpt, func(innerCtx context.Context) (map[string]ml.Sample, error) {
+		return featurizer.CurrentSamples(innerCtx, store, candleProvider)
 	})
+
 	go runner.run(ctx)
 
 	// Bridge ML engine raw log lines into the shared TUI log channel so they
 	// appear in the Logs tab. This runs independently of any TUI component and
 	// owns the drain loop for the lifetime of the process.
 	go func() {
-		ch := runner.LogsChan()
+		logsCh := runner.LogsChan()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case line, ok := <-ch:
+			case line, ok := <-logsCh:
 				if !ok {
 					return
 				}
+
 				entry := signals.LogEntry{
 					Time:    time.Now(),
 					Level:   slog.LevelInfo,
 					Message: line,
 					Attrs:   []slog.Attr{slog.String("source", "ml-engine")},
 				}
+
 				select {
 				case logCh <- entry:
 				default:
@@ -224,24 +297,28 @@ func runTUI(ctx context.Context, args []string) error {
 	<-runner.convictionReady
 
 	go func() {
-		if err := taaEngine.Evaluate(ctx); err != nil {
-			slog.Warn("taa initial evaluation failed", "error", err)
+		evalErr := taaEngine.Evaluate(ctx)
+		if evalErr != nil {
+			slog.Warn("taa initial evaluation failed", "error", evalErr)
 		}
+
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := taaEngine.Evaluate(ctx); err != nil {
-					slog.Warn("taa periodic evaluation failed", "error", err)
+				periodicErr := taaEngine.Evaluate(ctx)
+				if periodicErr != nil {
+					slog.Warn("taa periodic evaluation failed", "error", periodicErr)
 				}
 			}
 		}
 	}()
 
-	analyticsRepo := analytics.NewPostgresRepository(db)
+	analyticsRepo := analytics.NewPostgresRepository(sqlDB)
 	twrEngine := analytics.NewTWREngine(analyticsRepo)
 
 	// Enable live cash-flow recording so TWR stays correct within the current
@@ -252,7 +329,7 @@ func runTUI(ctx context.Context, args []string) error {
 
 	// FX engine: resolves historical and live exchange rates via Yahoo Finance.
 	// The provider lives in the data package (shared Yahoo client — no duplication).
-	fxStore := fx.NewPostgresStore(db)
+	fxStore := fx.NewPostgresStore(sqlDB)
 	fxProvider := data.NewYahooFXProviderWithProvider(yahooProvider)
 	fxSvc := fx.NewService(fxProvider, fxStore)
 
@@ -263,42 +340,55 @@ func runTUI(ctx context.Context, args []string) error {
 	// priceFeed is declared outside the if-block so it can be wired into the root model
 	// for hot-reload support (SetBaseCurrency / TriggerBackfill on settings save).
 	var priceFeed *feed.Updater
+
 	if priceStore != nil {
 		if ds, ok := store.(feed.DividendSyncer); ok {
-			priceFeed = feed.NewWithDividendSync(priceStore, ds, candleProvider, 30*time.Minute)
+			priceFeed = feed.NewWithDividendSync(priceStore, ds, candleProvider, priceFeedInterval)
 		} else {
-			priceFeed = feed.New(priceStore, candleProvider, 30*time.Minute)
+			priceFeed = feed.New(priceStore, candleProvider, priceFeedInterval)
 		}
+
 		priceFeed.WithNAVSnapshot(store, twrEngine, "MAIN")
 		priceFeed.WithFXService(fxSvc, baseCurrency)
+
 		if bf, ok := store.(feed.NAVBackfiller); ok {
 			priceFeed.WithNAVBackfill(bf)
 			priceFeed.WithCashFlowRecorder(twrEngine)
 		}
+
 		if sp, ok := store.(feed.SplitPersister); ok {
 			priceFeed.WithSplitPersister(sp)
 		}
+
 		if ws, ok := store.(feed.WatchlistPriceStore); ok {
 			priceFeed.WithWatchlistUpdater(ws)
 		}
+
 		go priceFeed.Run(ctx)
 	}
 
 	// Wrap configSvc in an interface to avoid a non-nil interface holding a nil pointer.
 	var settingsSvc signals.SettingsService
+
 	if configSvc != nil {
 		settingsSvc = configSvc
 	}
-	rootModel := newRootModelFn(store, signalRuntime.ReadModel, runner, txStore, settingsSvc, logCh, twrEngine, baseCurrency)
+
+	rootModel := newRootModelFn(
+		store, signalRuntime.ReadModel, runner, txStore, settingsSvc, logCh, twrEngine, baseCurrency,
+	)
 	// Wire hot-reload support when the concrete RootModel is available.
 	// In tests newRootModelFn may return a fake that does not implement these setters,
 	// in which case the type assertion returns ok=false and we skip gracefully.
 	if rm, ok := rootModel.(signals.RootModel); ok {
 		rootModel = rm.WithYahooProvider(yahooProvider).WithUpdater(priceFeed).WithTAAEngine(taaEngine)
 	}
+
 	program := newProgramFn(rootModel, tea.WithAltScreen())
-	if _, err := program.Run(); err != nil {
-		return fmt.Errorf("tui runtime failed: %w", err)
+
+	_, runErr := program.Run()
+	if runErr != nil {
+		return fmt.Errorf("tui runtime failed: %w", runErr)
 	}
 
 	return nil
@@ -307,35 +397,42 @@ func runTUI(ctx context.Context, args []string) error {
 func parseConfig(args []string, lookupEnv func(string) string) (config, error) {
 	var conf config
 
-	fs := flag.NewFlagSet("orbiter", flag.ContinueOnError)
-	fs.StringVar(&conf.dsn, "dsn", "", "PostgreSQL DSN")
+	flagSet := flag.NewFlagSet("orbiter", flag.ContinueOnError)
+	flagSet.StringVar(&conf.dsn, "dsn", "", "PostgreSQL DSN")
 
-	if err := fs.Parse(args); err != nil {
-		return config{}, err
+	parseErr := flagSet.Parse(args)
+	if parseErr != nil {
+		return config{}, fmt.Errorf("parse flags: %w", parseErr)
 	}
-	if len(fs.Args()) > 0 {
-		return config{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(fs.Args(), " "))
+
+	if len(flagSet.Args()) > 0 {
+		return config{}, fmt.Errorf("%w: %s", ErrUnexpectedArgs, strings.Join(flagSet.Args(), " "))
 	}
 
 	conf.dsn = strings.TrimSpace(conf.dsn)
 	if conf.dsn == "" {
 		conf.dsn = strings.TrimSpace(lookupEnv("DATABASE_URL"))
 	}
+
 	if conf.dsn == "" {
-		return config{}, errors.New("missing PostgreSQL DSN: provide --dsn or DATABASE_URL")
+		return config{}, ErrMissingDSN
 	}
 
 	return conf, nil
 }
 
 func openPostgres(ctx context.Context, dsn string) (*sql.DB, error) {
-	db, err := sql.Open("pgx", dsn)
+	sqlDB, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("failed to ping database with DSN %q: %w", dsn, err)
+
+	pingErr := sqlDB.PingContext(ctx)
+	if pingErr != nil {
+		_ = sqlDB.Close()
+
+		return nil, fmt.Errorf("failed to ping database with DSN %q: %w", dsn, pingErr)
 	}
-	return db, nil
+
+	return sqlDB, nil
 }

@@ -1,3 +1,4 @@
+// Package eo implements Environment Overlays that adapt strategy setup towards market current momentum.
 package eo
 
 import (
@@ -6,9 +7,6 @@ import (
 	"github.com/tgragnato/orbiter/pkg/helper"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 )
-
-// Environment Overlays
-// Adapt strategy setup towards market current momentum
 
 // floatRing is a fixed-capacity FIFO queue that preserves insertion order.
 // When full, the oldest element is dropped to make room for the new one.
@@ -34,24 +32,45 @@ func (r *floatRing) values() []float64 {
 	return r.buf
 }
 
+// EnvironmentOverlay tracks market candles and price change percentiles
+// to determine the current risk level for strategy adaptation.
 type EnvironmentOverlay struct {
 	candles             floatRing
 	priceChangesPercent floatRing
 }
 
+// RiskLevel represents the current market risk classification.
 type RiskLevel int
 
-const (
-	minCandles = 50
+const minCandles = 50
 
+// Risk level constants ordered from lowest to highest risk.
+const (
 	RLow RiskLevel = iota
 	RModerate
 	RHigh
 	RExtreme
-
-	DefaultRisk = RModerate
 )
 
+// DefaultRisk is the risk level used when insufficient data is available.
+const DefaultRisk = RModerate
+
+const (
+	percentileQ1 = 25
+	percentileQ2 = 50
+	percentileQ3 = 75
+
+	rsiUpperLow      = 80.0
+	rsiLowerLow      = 20.0
+	rsiUpperModerate = 85.0
+	rsiLowerModerate = 15.0
+	rsiUpperHigh     = 90.0
+	rsiLowerHigh     = 10.0
+	rsiUpperExtreme  = 95.0
+	rsiLowerExtreme  = 5.0
+)
+
+// New creates a new EnvironmentOverlay with a default candle buffer.
 func New() *EnvironmentOverlay {
 	return &EnvironmentOverlay{
 		candles:             newFloatRing(minCandles),
@@ -59,6 +78,7 @@ func New() *EnvironmentOverlay {
 	}
 }
 
+// AddCandle records a new OHLC candle into the overlay buffers.
 func (eo *EnvironmentOverlay) AddCandle(candle *ohlc.OHLC) {
 	eo.candles.push(candle.Close)
 
@@ -66,21 +86,42 @@ func (eo *EnvironmentOverlay) AddCandle(candle *ohlc.OHLC) {
 	eo.priceChangesPercent.push(perfPercent)
 }
 
+// RSI returns the upper and lower RSI thresholds based on the current risk level.
+//
+func (eo *EnvironmentOverlay) RSI() (float64, float64) {
+	var riskLevel = eo.riskLevel()
+
+	switch riskLevel {
+	case RLow:
+		return rsiUpperLow, rsiLowerLow
+	case RModerate:
+		return rsiUpperModerate, rsiLowerModerate
+	case RHigh:
+		return rsiUpperHigh, rsiLowerHigh
+	case RExtreme:
+		return rsiUpperExtreme, rsiLowerExtreme
+	default:
+		return rsiUpperModerate, rsiLowerModerate
+	}
+}
+
 func (eo *EnvironmentOverlay) riskLevel() RiskLevel {
 	var prices = eo.candles.values()
+
 	var priceChangesPercent = eo.priceChangesPercent.values()
 	if len(prices) < minCandles || len(priceChangesPercent) < minCandles {
 		return DefaultRisk
 	}
 
 	var lastPriceChange = priceChangesPercent[len(prices)-1]
+
 	var sortedPriceChanges = priceChangesPercent
 	sort.Float64s(sortedPriceChanges)
 
 	var (
-		priceChangeQ1 = helper.GetPercentile(sortedPriceChanges, 25)
-		priceChangeQ2 = helper.GetPercentile(sortedPriceChanges, 50)
-		priceChangeQ3 = helper.GetPercentile(sortedPriceChanges, 75)
+		priceChangeQ1 = helper.GetPercentile(sortedPriceChanges, percentileQ1)
+		priceChangeQ2 = helper.GetPercentile(sortedPriceChanges, percentileQ2)
+		priceChangeQ3 = helper.GetPercentile(sortedPriceChanges, percentileQ3)
 	)
 
 	switch {
@@ -92,22 +133,5 @@ func (eo *EnvironmentOverlay) riskLevel() RiskLevel {
 		return RHigh
 	default:
 		return RExtreme
-	}
-}
-
-func (eo *EnvironmentOverlay) RSI() (upperThreshold, lowerThreshold float64) {
-	var riskLevel = eo.riskLevel()
-
-	switch riskLevel {
-	case RLow:
-		return 80, 20
-	case RModerate:
-		return 85, 15
-	case RHigh:
-		return 90, 10
-	case RExtreme:
-		return 95, 5
-	default:
-		return 85, 15
 	}
 }

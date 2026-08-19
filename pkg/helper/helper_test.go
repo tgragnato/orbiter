@@ -1,9 +1,10 @@
-package helper
+package helper_test
 
 import (
 	"testing"
 
 	"github.com/tgragnato/orbiter/pkg/broker"
+	"github.com/tgragnato/orbiter/pkg/helper"
 )
 
 func TestCalcStopLossPriceByPercentage(t *testing.T) {
@@ -13,13 +14,13 @@ func TestCalcStopLossPriceByPercentage(t *testing.T) {
 	stopLossPercentage := 20.0
 
 	// Long
-	stopPrice := CalcStopLossPriceByPercentage(price, stopLossPercentage, broker.BuyDirectionLong)
+	stopPrice := helper.CalcStopLossPriceByPercentage(price, stopLossPercentage, broker.BuyDirectionLong)
 	if stopPrice != 80 {
 		t.Fatalf("expected %v, got %v", 80, stopPrice)
 	}
 
 	// Short
-	stopPrice = CalcStopLossPriceByPercentage(price, stopLossPercentage, broker.BuyDirectionShort)
+	stopPrice = helper.CalcStopLossPriceByPercentage(price, stopLossPercentage, broker.BuyDirectionShort)
 	if stopPrice != 120 {
 		t.Fatalf("expected %v, got %v", 120, stopPrice)
 	}
@@ -32,13 +33,13 @@ func TestTargetPriceByPercentage(t *testing.T) {
 	targetPercentage := 20.0
 
 	// Long
-	targetPrice := CalcTargetPriceByPercentage(price, targetPercentage, broker.BuyDirectionLong)
+	targetPrice := helper.CalcTargetPriceByPercentage(price, targetPercentage, broker.BuyDirectionLong)
 	if targetPrice != 120 {
 		t.Fatalf("expected %v, got %v", 120, targetPrice)
 	}
 
 	// Short
-	targetPrice = CalcTargetPriceByPercentage(price, targetPercentage, broker.BuyDirectionShort)
+	targetPrice = helper.CalcTargetPriceByPercentage(price, targetPercentage, broker.BuyDirectionShort)
 	if targetPrice != 80 {
 		t.Fatalf("expected %v, got %v", 80, targetPrice)
 	}
@@ -62,11 +63,14 @@ func TestGetPercentile(t *testing.T) {
 		{"25th percentile", []float64{10.0, 20.0, 30.0, 40.0}, 25, 10.0},
 		{"75th percentile", []float64{10.0, 20.0, 30.0, 40.0}, 75, 30.0},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := GetPercentile(tt.n, tt.percentile)
-			if got != tt.want {
-				t.Errorf("GetPercentile() = %v, want %v", got, tt.want)
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := helper.GetPercentile(testCase.n, testCase.percentile)
+			if got != testCase.want {
+				t.Errorf("GetPercentile() = %v, want %v", got, testCase.want)
 			}
 		})
 	}

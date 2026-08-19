@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported tui symbols (TUIHandler fields)
 package tui
 
 import (

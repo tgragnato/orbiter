@@ -5,6 +5,7 @@ package featurizer
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 
@@ -30,9 +31,18 @@ import (
 )
 
 const (
-	historyYears = 8  // years of EOD history requested per symbol (~2016 bars, ~11 walk-forward folds with TrainSize=1250)
-	warmupBars   = 40 // leading bars consumed for indicator convergence and discarded
-	forwardDays  = 5  // label horizon: 5-trading-day forward log-return (improves SNR over 1-day)
+	historyYears    = 8     // years of EOD history requested per symbol (~2016 bars)
+	warmupBars      = 40    // leading bars consumed for indicator convergence and discarded
+	forwardDays     = 5     // label horizon: 5-trading-day forward log-return (improves SNR over 1-day)
+	eodHours        = 24    // hours in one EOD bar duration
+	indicatorPeriod = 14    // shared RSI / ADX / StochRSI look-back period
+	smaPeriod       = 10    // SMA look-back period
+	stochSmooth     = 3     // StochRSI smoothing period
+	scalerLookback  = 99    // maximum candle look-back window passed to strategy Score()
+	indicatorScale  = 100.0 // indicator values are in 0-100; divide to normalise to 0-1
+	return20Days    = 20    // 20-bar log-return and z-score look-back period
+	haOHLCDivisor   = 4.0   // Heikin-Ashi close = (O+H+L+C) / 4
+	haMidDivisor    = 2.0   // Heikin-Ashi open = (prevHaO + prevHaC) / 2
 )
 
 // watchlistLister is satisfied by any store that exposes watchlist symbol access.
@@ -50,58 +60,87 @@ type watchlistLister interface {
 //
 // If the store also implements watchlistLister, watchlist symbols are included
 // so the TAA engine can emit TypeBuy signals for assets not yet held.
-func CurrentSamples(ctx context.Context, store portfolio.HoldingsStore, provider data.DataProvider) (map[string]ml.Sample, error) {
+//
+func CurrentSamples(
+	ctx context.Context,
+	store portfolio.HoldingsStore,
+	provider data.DataProvider,
+) (map[string]ml.Sample, error) {
 	holdings, err := store.ListHoldings(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list holdings: %w", err)
 	}
 
 	now := time.Now().UTC()
 	from := now.AddDate(-historyYears, 0, 0)
 
 	result := make(map[string]ml.Sample)
-	seen := make(map[string]bool)
-	for _, h := range holdings {
-		if !h.TAAEnabled || seen[h.Symbol] {
-			continue
-		}
-		seen[h.Symbol] = true
 
-		candles, err := provider.GetEOD(h.Symbol, from, now)
-		if err != nil || len(candles) < warmupBars+forwardDays+1 {
+	seen := make(map[string]bool)
+
+	for _, holding := range holdings {
+		if !holding.TAAEnabled || seen[holding.Symbol] {
 			continue
 		}
-		samples := samplesFromCandles(h.Symbol, candles)
+
+		seen[holding.Symbol] = true
+
+		candles, fetchErr := provider.GetEOD(holding.Symbol, from, now)
+		if fetchErr != nil || len(candles) < warmupBars+forwardDays+1 {
+			continue
+		}
+
+		samples := samplesFromCandles(holding.Symbol, candles)
 		if len(samples) == 0 {
 			continue
 		}
-		result[h.Symbol] = samples[len(samples)-1]
+
+		result[holding.Symbol] = samples[len(samples)-1]
 	}
 
 	// Also score watchlist symbols so the TAA entry path can emit TypeBuy
 	// signals for assets not yet in the portfolio.
-	if wl, ok := store.(watchlistLister); ok {
-		syms, err := wl.ListWatchlistSymbols(ctx)
-		if err == nil {
-			for _, sym := range syms {
-				if seen[sym] {
-					continue
-				}
-				seen[sym] = true
-				candles, err := provider.GetEOD(sym, from, now)
-				if err != nil || len(candles) < warmupBars+forwardDays+1 {
-					continue
-				}
-				samples := samplesFromCandles(sym, candles)
-				if len(samples) == 0 {
-					continue
-				}
-				result[sym] = samples[len(samples)-1]
-			}
-		}
+	if lister, ok := store.(watchlistLister); ok {
+		addCurrentWatchlistSamples(ctx, lister, provider, from, now, seen, result)
 	}
 
 	return result, nil
+}
+
+// addCurrentWatchlistSamples extends result with current-bar feature vectors
+// for any watchlist symbol not already represented in seen.
+func addCurrentWatchlistSamples(
+	ctx context.Context,
+	lister watchlistLister,
+	provider data.DataProvider,
+	from, now time.Time,
+	seen map[string]bool,
+	result map[string]ml.Sample,
+) {
+	syms, err := lister.ListWatchlistSymbols(ctx)
+	if err != nil {
+		return
+	}
+
+	for _, sym := range syms {
+		if seen[sym] {
+			continue
+		}
+
+		seen[sym] = true
+
+		candles, fetchErr := provider.GetEOD(sym, from, now)
+		if fetchErr != nil || len(candles) < warmupBars+forwardDays+1 {
+			continue
+		}
+
+		samples := samplesFromCandles(sym, candles)
+		if len(samples) == 0 {
+			continue
+		}
+
+		result[sym] = samples[len(samples)-1]
+	}
 }
 
 // ExtractMLSamples fetches historyYears of EOD candles for every active
@@ -111,76 +150,108 @@ func CurrentSamples(ctx context.Context, store portfolio.HoldingsStore, provider
 //
 // If the store also implements watchlistLister, watchlist symbols are included
 // in the training set so the model learns their patterns before entry.
-func ExtractMLSamples(ctx context.Context, store portfolio.HoldingsStore, provider data.DataProvider) ([]ml.Sample, error) {
+//
+func ExtractMLSamples(
+	ctx context.Context,
+	store portfolio.HoldingsStore,
+	provider data.DataProvider,
+) ([]ml.Sample, error) {
 	holdings, err := store.ListHoldings(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list holdings: %w", err)
 	}
 
 	now := time.Now().UTC()
 	from := now.AddDate(-historyYears, 0, 0)
 
 	seen := make(map[string]bool)
-	var all []ml.Sample
-	for _, h := range holdings {
-		if h.Quantity <= 0 || seen[h.Symbol] {
-			continue
-		}
-		seen[h.Symbol] = true
 
-		candles, err := provider.GetEOD(h.Symbol, from, now)
-		if err != nil || len(candles) < warmupBars+forwardDays+1 {
+	var all []ml.Sample
+
+	for _, holding := range holdings {
+		if holding.Quantity <= 0 || seen[holding.Symbol] {
 			continue
 		}
-		all = append(all, samplesFromCandles(h.Symbol, candles)...)
+
+		seen[holding.Symbol] = true
+
+		candles, fetchErr := provider.GetEOD(holding.Symbol, from, now)
+		if fetchErr != nil || len(candles) < warmupBars+forwardDays+1 {
+			continue
+		}
+
+		all = append(all, samplesFromCandles(holding.Symbol, candles)...)
 	}
 
 	// Include watchlist symbols in the training corpus so the model learns
 	// their feature distributions before the user opens a position.
-	if wl, ok := store.(watchlistLister); ok {
-		syms, err := wl.ListWatchlistSymbols(ctx)
-		if err == nil {
-			for _, sym := range syms {
-				if seen[sym] {
-					continue
-				}
-				seen[sym] = true
-				candles, err := provider.GetEOD(sym, from, now)
-				if err != nil || len(candles) < warmupBars+forwardDays+1 {
-					continue
-				}
-				all = append(all, samplesFromCandles(sym, candles)...)
-			}
-		}
+	if lister, ok := store.(watchlistLister); ok {
+		all = appendWatchlistSamples(ctx, lister, provider, from, now, seen, all)
 	}
 
 	return all, nil
 }
 
+// appendWatchlistSamples extends all with training samples for any watchlist
+// symbol not already represented in seen.
+func appendWatchlistSamples(
+	ctx context.Context,
+	lister watchlistLister,
+	provider data.DataProvider,
+	from, now time.Time,
+	seen map[string]bool,
+	all []ml.Sample,
+) []ml.Sample {
+	syms, err := lister.ListWatchlistSymbols(ctx)
+	if err != nil {
+		return all
+	}
+
+	for _, sym := range syms {
+		if seen[sym] {
+			continue
+		}
+
+		seen[sym] = true
+
+		candles, fetchErr := provider.GetEOD(sym, from, now)
+		if fetchErr != nil || len(candles) < warmupBars+forwardDays+1 {
+			continue
+		}
+
+		all = append(all, samplesFromCandles(sym, candles)...)
+	}
+
+	return all
+}
+
 // candleToOHLC converts a data.Candle (float64 fields) to *ohlc.OHLC
 // (float64 fields) so strategy indicators can consume it.
 // The resulting candle is treated as a closed EOD bar.
-func candleToOHLC(c data.Candle, symbol string) *ohlc.OHLC {
-	price := c.AdjustedClose
+func candleToOHLC(candle data.Candle, symbol string) *ohlc.OHLC {
+	price := candle.AdjustedClose
 	if price <= 0 {
-		price = c.Close
+		price = candle.Close
 	}
-	o := ohlc.New(symbol, c.Time, 24*time.Hour, false)
-	o.Open = c.Open
-	o.High = c.High
-	o.Low = c.Low
-	o.Close = price
+
+	ohlcBar := ohlc.New(symbol, candle.Time, eodHours*time.Hour, false)
+	ohlcBar.Open = candle.Open
+	ohlcBar.High = candle.High
+	ohlcBar.Low = candle.Low
+	ohlcBar.Close = price
 	// EOD bars are always closed; ForceClose is required so pkg/indicator
 	// implementations (rsi, adx, sma, stoch, stochrsi) don't silently drop
 	// the bar when checking o.Closed().
-	o.ForceClose()
-	return o
+	ohlcBar.ForceClose()
+
+	return ohlcBar
 }
 
 // newScoredStrategies instantiates one of each ScoredStrategy implementation.
 // All use 24 h as the candle duration (EOD data).
 func newScoredStrategies(symbol string) []strategy.Strategy {
-	dur := 24 * time.Hour
+	dur := eodHours * time.Hour
+
 	return []strategy.Strategy{
 		stratdoji.New(symbol),
 		stratengulf.New(symbol, dur),
@@ -199,33 +270,38 @@ func newScoredStrategies(symbol string) []strategy.Strategy {
 // into ml.Sample vectors. warmupBars leading bars are consumed by the
 // indicators and discarded; the final bar is reserved as the label for the
 // preceding row, so it is not itself turned into a sample.
+//
+//nolint:cyclop,funlen // inherent algorithmic complexity; extraction would obscure the feature-vector construction
 func samplesFromCandles(symbol string, candles []data.Candle) []ml.Sample {
-	n := len(candles)
-	opens := make([]float64, n)
-	highs := make([]float64, n)
-	lows := make([]float64, n)
-	closes := make([]float64, n)
-	for i, c := range candles {
-		opens[i] = c.Open
-		highs[i] = c.High
-		lows[i] = c.Low
-		closes[i] = c.AdjustedClose
-		if closes[i] <= 0 {
-			closes[i] = c.Close
+	numCandles := len(candles)
+
+	opens := make([]float64, numCandles)
+	highs := make([]float64, numCandles)
+	lows := make([]float64, numCandles)
+	closes := make([]float64, numCandles)
+
+	for barIdx, candle := range candles {
+		opens[barIdx] = candle.Open
+		highs[barIdx] = candle.High
+		lows[barIdx] = candle.Low
+		closes[barIdx] = candle.AdjustedClose
+
+		if closes[barIdx] <= 0 {
+			closes[barIdx] = candle.Close
 		}
 	}
 
-	rsiSeries := talib.Rsi(closes, 14)
-	adxSeries := talib.Adx(highs, lows, closes, 14)
-	sma10Series := talib.Sma(closes, 10)
-	stochK, _ := talib.StochRsi(closes, 14, 14, 3, talib.SMA)
+	rsiSeries := talib.Rsi(closes, indicatorPeriod)
+	adxSeries := talib.Adx(highs, lows, closes, indicatorPeriod)
+	sma10Series := talib.Sma(closes, smaPeriod)
+	stochK, _ := talib.StochRsi(closes, indicatorPeriod, indicatorPeriod, stochSmooth, talib.SMA)
 	engulf := engulfingSignals(opens, closes)
 	harami := haramiSignals(opens, closes)
 	hammer := hammerSignals(opens, highs, lows, closes)
 	haSignals := heikinAshiSignals(opens, highs, lows, closes)
 
 	// Convert all candles to *ohlc.OHLC once for strategy consumption.
-	ohlcSlice := make([]*ohlc.OHLC, n)
+	ohlcSlice := make([]*ohlc.OHLC, numCandles)
 	for i, c := range candles {
 		ohlcSlice[i] = candleToOHLC(c, symbol)
 	}
@@ -234,78 +310,90 @@ func samplesFromCandles(symbol string, candles []data.Candle) []ml.Sample {
 	// the warm-up window. OnWarmUpCandle / Insert on every bar keeps state
 	// current without triggering any broker logic.
 	strats := newScoredStrategies(symbol)
-	stochInd := stoch.New(14, 3)
+	stochInd := stoch.New(indicatorPeriod, stochSmooth)
 	roundInd := round.New()
-	for i := 0; i < warmupBars && i < n; i++ {
+
+	for warmIdx := 0; warmIdx < warmupBars && warmIdx < numCandles; warmIdx++ {
 		for _, s := range strats {
-			s.OnWarmUpCandle(ohlcSlice[i])
+			s.OnWarmUpCandle(ohlcSlice[warmIdx])
 		}
-		stochInd.Insert(ohlcSlice[i])
-		roundInd.Insert(ohlcSlice[i])
+
+		stochInd.Insert(ohlcSlice[warmIdx])
+		roundInd.Insert(ohlcSlice[warmIdx])
 	}
 
 	var samples []ml.Sample
-	for i := warmupBars; i < n-forwardDays; i++ {
-		// Update all incremental state with bar i before reading any value.
-		for _, s := range strats {
-			s.OnWarmUpCandle(ohlcSlice[i])
-		}
-		stochInd.Insert(ohlcSlice[i])
-		roundInd.Insert(ohlcSlice[i])
 
-		c, cnext := closes[i], closes[i+forwardDays]
-		if c <= 0 || cnext <= 0 {
+	for barIdx := warmupBars; barIdx < numCandles-forwardDays; barIdx++ {
+		// Update all incremental state with bar barIdx before reading any value.
+		for _, s := range strats {
+			s.OnWarmUpCandle(ohlcSlice[barIdx])
+		}
+
+		stochInd.Insert(ohlcSlice[barIdx])
+		roundInd.Insert(ohlcSlice[barIdx])
+
+		closeVal, closeFwd := closes[barIdx], closes[barIdx+forwardDays]
+		if closeVal <= 0 || closeFwd <= 0 {
 			continue
 		}
 
 		// Build a candle window for strategies that inspect recent bars
 		// directly (scalper needs 10, HeikinAshi needs 3, others ignore it).
-		winStart := max(i-99, 0)
-		window := ohlcSlice[winStart : i+1]
+		winStart := max(barIdx-scalerLookback, 0)
+		window := ohlcSlice[winStart : barIdx+1]
 
-		var s ml.Sample
-		s.Features[ml.FeatRSI] = rsiSeries[i] / 100.0
-		s.Features[ml.FeatStochRSI] = stochK[i] / 100.0
-		s.Features[ml.FeatRSIADX] = (rsiSeries[i] / 100.0) * (adxSeries[i] / 100.0)
-		s.Features[ml.FeatSMA10] = relToSMA(c, sma10Series[i])
-		s.Features[ml.FeatLowCandle] = hammer[i] / 100.0
-		s.Features[ml.FeatEngulfing] = engulf[i] / 100.0
-		s.Features[ml.FeatHarami] = harami[i] / 100.0
-		s.Features[ml.FeatHA] = haSignals[i]
-		s.Features[ml.FeatScalper] = bodyRatio(opens[i], highs[i], lows[i], c)
-		s.Features[ml.FeatReturn1] = logRet(closes, i, 1)
-		s.Features[ml.FeatReturn5] = logRet(closes, i, 5)
-		s.Features[ml.FeatReturn20] = logRet(closes, i, 20)
-		s.Features[ml.FeatZScore20] = returnZScore(closes, i, 20)
+		var sample ml.Sample
+
+		sample.Features[ml.FeatRSI] = rsiSeries[barIdx] / indicatorScale
+		sample.Features[ml.FeatStochRSI] = stochK[barIdx] / indicatorScale
+		sample.Features[ml.FeatRSIADX] = (rsiSeries[barIdx] / indicatorScale) * (adxSeries[barIdx] / indicatorScale)
+		sample.Features[ml.FeatSMA10] = relToSMA(closeVal, sma10Series[barIdx])
+		sample.Features[ml.FeatLowCandle] = hammer[barIdx] / indicatorScale
+		sample.Features[ml.FeatEngulfing] = engulf[barIdx] / indicatorScale
+		sample.Features[ml.FeatHarami] = harami[barIdx] / indicatorScale
+		sample.Features[ml.FeatHA] = haSignals[barIdx]
+		sample.Features[ml.FeatScalper] = bodyRatio(opens[barIdx], highs[barIdx], lows[barIdx], closeVal)
+		sample.Features[ml.FeatReturn1] = logRet(closes, barIdx, 1)
+		sample.Features[ml.FeatReturn5] = logRet(closes, barIdx, forwardDays)
+		sample.Features[ml.FeatReturn20] = logRet(closes, barIdx, return20Days)
+		sample.Features[ml.FeatZScore20] = returnZScore(closes, barIdx, return20Days)
 		// Strategy conviction scores (indices 13–22): each Score() reads the
 		// indicator state already updated by OnWarmUpCandle above, so there
-		// is no lookahead — all scores are based strictly on bars 0..i.
-		s.Features[ml.FeatScoreDoji] = strats[0].Score(window)
-		s.Features[ml.FeatScoreEngulf] = strats[1].Score(window)
-		s.Features[ml.FeatScoreHarami] = strats[2].Score(window)
-		s.Features[ml.FeatScoreHA] = strats[3].Score(window)
-		s.Features[ml.FeatScoreLowCand] = strats[4].Score(window)
-		s.Features[ml.FeatScoreRSI] = strats[5].Score(window)
-		s.Features[ml.FeatScoreRSIADX] = strats[6].Score(window)
-		s.Features[ml.FeatScoreScalper] = strats[7].Score(window)
-		s.Features[ml.FeatScoreSMA10] = strats[8].Score(window)
-		s.Features[ml.FeatScoreStochRSI] = strats[9].Score(window)
+		// is no lookahead — all scores are based strictly on bars 0..barIdx.
+		sample.Features[ml.FeatScoreDoji] = strats[0].Score(window)
+		sample.Features[ml.FeatScoreEngulf] = strats[1].Score(window)
+		sample.Features[ml.FeatScoreHarami] = strats[2].Score(window)
+		sample.Features[ml.FeatScoreHA] = strats[3].Score(window)
+		sample.Features[ml.FeatScoreLowCand] = strats[4].Score(window)
+		sample.Features[ml.FeatScoreRSI] = strats[5].Score(window)
+		sample.Features[ml.FeatScoreRSIADX] = strats[6].Score(window)
+		sample.Features[ml.FeatScoreScalper] = strats[7].Score(window)
+		sample.Features[ml.FeatScoreSMA10] = strats[8].Score(window)
+		sample.Features[ml.FeatScoreStochRSI] = strats[9].Score(window)
 		// Fast Stochastic %K and %D from pkg/indicator/stoch (indices 23–24).
-		if vals, err := stochInd.Value(); err == nil {
-			s.Features[ml.FeatStochK] = vals[stoch.ValueK] / 100.0
-			s.Features[ml.FeatStochD] = vals[stoch.ValueD] / 100.0
+		stochVals, stochErr := stochInd.Value()
+		if stochErr == nil {
+			sample.Features[ml.FeatStochK] = stochVals[stoch.ValueK] / indicatorScale
+			sample.Features[ml.FeatStochD] = stochVals[stoch.ValueD] / indicatorScale
 		}
+
 		// Round-number proximity: position of close within the weak round band (index 25).
-		if vals, err := roundInd.Value(); err == nil {
-			lower := vals[round.LowerRoundNumberWeak]
-			upper := vals[round.UpperRoundNumberWeak]
+		roundVals, roundErr := roundInd.Value()
+		if roundErr == nil {
+			lower := roundVals[round.LowerRoundNumberWeak]
+			upper := roundVals[round.UpperRoundNumberWeak]
+
 			if band := upper - lower; band > 0 {
-				s.Features[ml.FeatRoundWeak] = (c - lower) / band
+				sample.Features[ml.FeatRoundWeak] = (closeVal - lower) / band
 			}
 		}
-		s.Label = math.Log(cnext / c)
-		samples = append(samples, s)
+
+		sample.Label = math.Log(closeFwd / closeVal)
+
+		samples = append(samples, sample)
 	}
+
 	return samples
 }
 
@@ -314,38 +402,47 @@ func relToSMA(price, sma float64) float64 {
 	if sma == 0 {
 		return 0
 	}
+
 	return (price - sma) / sma
 }
 
-// logRet returns the log-return of closes[i] relative to closes[i-k].
-func logRet(closes []float64, i, k int) float64 {
-	if i < k || closes[i-k] <= 0 {
+// logRet returns the log-return of closes[barIdx] relative to closes[barIdx-k].
+func logRet(closes []float64, barIdx, k int) float64 {
+	if barIdx < k || closes[barIdx-k] <= 0 {
 		return 0
 	}
-	return math.Log(closes[i] / closes[i-k])
+
+	return math.Log(closes[barIdx] / closes[barIdx-k])
 }
 
 // returnZScore computes the z-score of the current 1-day log-return against
 // the rolling window of the preceding `window` 1-day log-returns.
 // Uses only past data so there is no lookahead bias.
-func returnZScore(closes []float64, i, window int) float64 {
-	if i < window+1 {
+func returnZScore(closes []float64, barIdx, window int) float64 {
+	if barIdx < window+1 {
 		return 0
 	}
+
 	rets := make([]float64, window)
-	for j := range window {
-		idx := i - window + j
+
+	for retIdx := range window {
+		idx := barIdx - window + retIdx
 		if closes[idx] <= 0 || closes[idx+1] <= 0 {
 			return 0
 		}
-		rets[j] = math.Log(closes[idx+1] / closes[idx])
+
+		rets[retIdx] = math.Log(closes[idx+1] / closes[idx])
 	}
+
 	mean := features.Mean(rets)
+
 	std := features.StdDev(rets, mean)
 	if std == 0 {
 		return 0
 	}
-	curr := logRet(closes, i, 1)
+
+	curr := logRet(closes, barIdx, 1)
+
 	return (curr - mean) / std
 }
 
@@ -356,27 +453,33 @@ func bodyRatio(open, high, low, closePrice float64) float64 {
 	if rangeHL == 0 {
 		return 0
 	}
+
 	return (closePrice - open) / rangeHL
 }
 
 // hammerSignals returns +1 when bar i is a hammer (small body at top, lower
-// shadow > 2× body, upper shadow < body), -1 for an inverted hammer, 0 otherwise.
+// shadow > 2x body, upper shadow < body), -1 for an inverted hammer, 0 otherwise.
 func hammerSignals(opens, highs, lows, closes []float64) []float64 {
 	n := len(closes)
+
 	out := make([]float64, n)
-	for i := range n {
-		body := math.Abs(closes[i] - opens[i])
-		lowerShadow := math.Min(opens[i], closes[i]) - lows[i]
-		upperShadow := highs[i] - math.Max(opens[i], closes[i])
+
+	for barIdx := range n {
+		body := math.Abs(closes[barIdx] - opens[barIdx])
+		lowerShadow := math.Min(opens[barIdx], closes[barIdx]) - lows[barIdx]
+		upperShadow := highs[barIdx] - math.Max(opens[barIdx], closes[barIdx])
+
 		if body == 0 {
 			continue
 		}
+
 		if lowerShadow > 2*body && upperShadow < body {
-			out[i] = 1
+			out[barIdx] = 1
 		} else if upperShadow > 2*body && lowerShadow < body {
-			out[i] = -1
+			out[barIdx] = -1
 		}
 	}
+
 	return out
 }
 
@@ -384,18 +487,22 @@ func hammerSignals(opens, highs, lows, closes []float64) []float64 {
 // a bullish bar whose body completely contains the prior body), -1 for bearish.
 func engulfingSignals(opens, closes []float64) []float64 {
 	n := len(closes)
+
 	out := make([]float64, n)
-	for i := 1; i < n; i++ {
-		prevBody := closes[i-1] - opens[i-1]
-		currBody := closes[i] - opens[i]
+
+	for barIdx := 1; barIdx < n; barIdx++ {
+		prevBody := closes[barIdx-1] - opens[barIdx-1]
+		currBody := closes[barIdx] - opens[barIdx]
+
 		if prevBody < 0 && currBody > 0 &&
-			closes[i] >= opens[i-1] && opens[i] <= closes[i-1] {
-			out[i] = 1
+			closes[barIdx] >= opens[barIdx-1] && opens[barIdx] <= closes[barIdx-1] {
+			out[barIdx] = 1
 		} else if prevBody > 0 && currBody < 0 &&
-			closes[i] <= opens[i-1] && opens[i] >= closes[i-1] {
-			out[i] = -1
+			closes[barIdx] <= opens[barIdx-1] && opens[barIdx] >= closes[barIdx-1] {
+			out[barIdx] = -1
 		}
 	}
+
 	return out
 }
 
@@ -403,40 +510,50 @@ func engulfingSignals(opens, closes []float64) []float64 {
 // small bullish bar whose body fits inside the prior body), -1 for bearish.
 func haramiSignals(opens, closes []float64) []float64 {
 	n := len(closes)
+
 	out := make([]float64, n)
-	for i := 1; i < n; i++ {
-		prevLo := math.Min(opens[i-1], closes[i-1])
-		prevHi := math.Max(opens[i-1], closes[i-1])
-		currLo := math.Min(opens[i], closes[i])
-		currHi := math.Max(opens[i], closes[i])
-		prevBearish := closes[i-1] < opens[i-1]
-		currBullish := closes[i] > opens[i]
+
+	for barIdx := 1; barIdx < n; barIdx++ {
+		prevLo := math.Min(opens[barIdx-1], closes[barIdx-1])
+		prevHi := math.Max(opens[barIdx-1], closes[barIdx-1])
+		currLo := math.Min(opens[barIdx], closes[barIdx])
+		currHi := math.Max(opens[barIdx], closes[barIdx])
+		prevBearish := closes[barIdx-1] < opens[barIdx-1]
+		currBullish := closes[barIdx] > opens[barIdx]
+
 		if prevBearish && currBullish && currLo >= prevLo && currHi <= prevHi {
-			out[i] = 1
+			out[barIdx] = 1
 		} else if !prevBearish && !currBullish && currLo >= prevLo && currHi <= prevHi {
-			out[i] = -1
+			out[barIdx] = -1
 		}
 	}
+
 	return out
 }
 
 // heikinAshiSignals computes (haClose - haOpen) / haOpen for each bar.
 // The result is 0 for the first bar (no prior HA candle available).
 func heikinAshiSignals(opens, highs, lows, closes []float64) []float64 {
-	n := len(closes)
-	signals := make([]float64, n)
-	if n == 0 {
+	numCandles := len(closes)
+
+	signals := make([]float64, numCandles)
+
+	if numCandles == 0 {
 		return signals
 	}
+
 	haO := opens[0]
-	haC := (opens[0] + highs[0] + lows[0] + closes[0]) / 4.0
-	for i := 1; i < n; i++ {
+	haC := (opens[0] + highs[0] + lows[0] + closes[0]) / haOHLCDivisor
+
+	for barIdx := 1; barIdx < numCandles; barIdx++ {
 		prevHaO, prevHaC := haO, haC
-		haC = (opens[i] + highs[i] + lows[i] + closes[i]) / 4.0
-		haO = (prevHaO + prevHaC) / 2.0
+		haC = (opens[barIdx] + highs[barIdx] + lows[barIdx] + closes[barIdx]) / haOHLCDivisor
+		haO = (prevHaO + prevHaC) / haMidDivisor
+
 		if haO > 0 {
-			signals[i] = (haC - haO) / haO
+			signals[barIdx] = (haC - haO) / haO
 		}
 	}
+
 	return signals
 }

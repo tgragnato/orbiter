@@ -1,6 +1,15 @@
 package ml
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrInvalidConfig is returned when WalkForwardConfig has invalid field values.
+var ErrInvalidConfig = errors.New("invalid walk-forward config")
+
+// ErrInsufficientSamples is returned when the sample set is too small for the requested windows.
+var ErrInsufficientSamples = errors.New("insufficient samples for walk-forward CV")
 
 // WalkForwardConfig controls the purged walk-forward cross-validation.
 type WalkForwardConfig struct {
@@ -47,77 +56,90 @@ type WalkForwardResult struct {
 // The onFold callback (if non-nil) is invoked after each fold for progress
 // reporting; it receives the fold result and returns true to continue or false
 // to abort early.
+//
+//nolint:cyclop,funlen // walk-forward CV loop requires multiple interacting conditions and is inherently long
 func WalkForwardCV(
 	samples []Sample,
 	cfg WalkForwardConfig,
 	onFold func(WalkForwardResult) bool,
 ) ([]WalkForwardResult, error) {
 	if cfg.TrainSize <= 0 || cfg.TestSize <= 0 {
-		return nil, fmt.Errorf("TrainSize and TestSize must be > 0")
+		return nil, fmt.Errorf("TrainSize and TestSize must be > 0: %w", ErrInvalidConfig)
 	}
+
 	if cfg.Embargo < 0 {
 		cfg.Embargo = 0
 	}
-	n := len(samples)
+
+	numSamples := len(samples)
 	required := cfg.TrainSize + cfg.Embargo + cfg.TestSize
-	if n < required {
-		return nil, fmt.Errorf("not enough samples: have %d, need at least %d (trainSize+embargo+testSize)", n, required)
+
+	if numSamples < required {
+		return nil, fmt.Errorf(
+			"not enough samples: have %d, need at least %d (trainSize+embargo+testSize): %w",
+			numSamples, required, ErrInsufficientSamples,
+		)
 	}
 
 	var results []WalkForwardResult
+
 	fold := 0
-	for start := 0; start+required <= n; start += cfg.TestSize {
+
+	for start := 0; start+required <= numSamples; start += cfg.TestSize {
 		trainStart := start
 		trainEnd := start + cfg.TrainSize
 		testStart := trainEnd + cfg.Embargo
 		testEnd := testStart + cfg.TestSize
-		if testEnd > n {
+
+		if testEnd > numSamples {
 			break
 		}
 
 		trainSamples := purge(samples[trainStart:trainEnd], trainStart, testStart, cfg.LabelHorizon)
 		if len(trainSamples) == 0 {
 			fold++
+
 			continue
 		}
 
-		f := NewForest(cfg.NTrees, cfg.MaxDepth, cfg.MinSamples, cfg.FeaturesPerSplit)
-		f.Fit(trainSamples, cfg.NTrees)
+		forest := NewForest(cfg.NTrees, cfg.MaxDepth, cfg.MinSamples, cfg.FeaturesPerSplit)
+		forest.Fit(trainSamples, cfg.NTrees)
 
 		preds := make([]float64, cfg.TestSize)
 		labels := make([]float64, cfg.TestSize)
 		returns := make([]float64, cfg.TestSize)
 		testSlice := samples[testStart:testEnd]
-		for i := range testSlice {
-			preds[i] = f.Predict(testSlice[i].Features)
-			labels[i] = testSlice[i].Label
+
+		for idx := range testSlice {
+			preds[idx] = forest.Predict(testSlice[idx].Features)
+			labels[idx] = testSlice[idx].Label
 			// Simulated strategy return: sign(prediction) * actual label
-			if preds[i] >= 0 {
-				returns[i] = testSlice[i].Label
+			if preds[idx] >= 0 {
+				returns[idx] = testSlice[idx].Label
 			} else {
-				returns[i] = -testSlice[i].Label
+				returns[idx] = -testSlice[idx].Label
 			}
 		}
 
-		m := Metrics{
+		metrics := Metrics{
 			Fold:    fold,
 			MSE:     MSE(preds, labels),
 			MAE:     MAE(preds, labels),
 			Sortino: Sortino(returns),
 		}
-		r := WalkForwardResult{
+		result := WalkForwardResult{
 			Fold:       fold,
 			TrainStart: trainStart,
 			TrainEnd:   trainEnd,
 			TestStart:  testStart,
 			TestEnd:    testEnd,
-			Metrics:    m,
-			Forest:     f,
+			Metrics:    metrics,
+			Forest:     forest,
 		}
-		results = append(results, r)
+		results = append(results, result)
 		fold++
 
-		if onFold != nil && !onFold(r) {
+		if onFold != nil && !onFold(result) {
 			break
 		}
 	}
@@ -134,13 +156,16 @@ func purge(trainSamples []Sample, trainStart, testStart, labelHorizon int) []Sam
 	if labelHorizon <= 0 {
 		return trainSamples
 	}
+
 	cutoff := testStart - labelHorizon - trainStart
 	if cutoff <= 0 {
 		return nil
 	}
+
 	if cutoff >= len(trainSamples) {
 		return trainSamples
 	}
+
 	return trainSamples[:cutoff]
 }
 
@@ -150,12 +175,14 @@ func BestFold(results []WalkForwardResult) *WalkForwardResult {
 	if len(results) == 0 {
 		return nil
 	}
+
 	best := &results[0]
 	for i := 1; i < len(results); i++ {
 		if results[i].Metrics.Sortino > best.Metrics.Sortino {
 			best = &results[i]
 		}
 	}
+
 	return best
 }
 
@@ -167,20 +194,31 @@ func MergeForests(results []WalkForwardResult) *Forest {
 	if len(results) == 0 {
 		return nil
 	}
-	merged := &Forest{}
-	for _, r := range results {
-		if r.Forest == nil || len(r.Forest.Trees) == 0 {
+
+	merged := &Forest{
+		Trees:      nil,
+		nFeatures:  0,
+		maxDepth:   0,
+		minSamples: 0,
+	}
+
+	for _, foldResult := range results {
+		if foldResult.Forest == nil || len(foldResult.Forest.Trees) == 0 {
 			continue
 		}
+
 		if merged.nFeatures == 0 {
-			merged.nFeatures = r.Forest.nFeatures
-			merged.maxDepth = r.Forest.maxDepth
-			merged.minSamples = r.Forest.minSamples
+			merged.nFeatures = foldResult.Forest.nFeatures
+			merged.maxDepth = foldResult.Forest.maxDepth
+			merged.minSamples = foldResult.Forest.minSamples
 		}
-		merged.Trees = append(merged.Trees, r.Forest.Trees...)
+
+		merged.Trees = append(merged.Trees, foldResult.Forest.Trees...)
 	}
+
 	if len(merged.Trees) == 0 {
 		return nil
 	}
+
 	return merged
 }

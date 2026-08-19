@@ -22,29 +22,36 @@ type DividendRecord struct {
 // (i.e. you must hold before the ex-date opens, not on the ex-date itself).
 func QuantityAtDate(txs []Transaction, date time.Time) float64 {
 	// cutoff = last nanosecond of the day before the ex-date
-	cutoff := date.UTC().Truncate(24 * time.Hour).Add(-time.Nanosecond)
+	cutoff := date.UTC().Truncate(oneDay).Add(-time.Nanosecond)
 	qty := 0.0
 	pmc := 0.0
+
 	for i := range txs {
-		tx := txs[i]
-		if tx.ExecutedAt.UTC().After(cutoff) {
+		txn := txs[i]
+
+		if txn.ExecutedAt.UTC().After(cutoff) {
 			break
 		}
-		switch tx.Type {
+
+		switch txn.Type {
 		case TransactionBuy:
-			totalCost := qty*pmc + tx.Quantity*tx.Price + tx.Fee
-			qty += tx.Quantity
+			totalCost := qty*pmc + txn.Quantity*txn.Price + txn.Fee
+
+			qty += txn.Quantity
+
 			if qty > 0 {
 				pmc = totalCost / qty
 			}
 		case TransactionSell:
-			qty -= tx.Quantity
+			qty -= txn.Quantity
+
 			if qty <= 0 {
 				qty = 0
 				pmc = 0
 			}
 		}
 	}
+
 	return qty
 }
 
@@ -54,22 +61,27 @@ func QuantityAtDate(txs []Transaction, date time.Time) float64 {
 // Only candles with CashDividend > 0 and a positive held quantity are included.
 func ComputeDividendIncomes(txs []Transaction, candles []data.Candle) []DividendRecord {
 	var records []DividendRecord
-	for _, c := range candles {
-		if c.CashDividend <= 0 {
+
+	for _, candle := range candles {
+		if candle.CashDividend <= 0 {
 			continue
 		}
-		qty := QuantityAtDate(txs, c.Time)
+
+		qty := QuantityAtDate(txs, candle.Time)
+
 		if qty <= 0 {
 			continue
 		}
+
 		records = append(records, DividendRecord{
-			Symbol:               c.Ticker,
-			ExDate:               c.Time.UTC().Truncate(24 * time.Hour), // normalise to midnight UTC
+			Symbol:               candle.Ticker,
+			ExDate:               candle.Time.UTC().Truncate(oneDay), // normalise to midnight UTC
 			Quantity:             qty,
-			CashDividendPerShare: c.CashDividend,
-			IncomeAmount:         qty * c.CashDividend,
-			Currency:             c.Currency,
+			CashDividendPerShare: candle.CashDividend,
+			IncomeAmount:         qty * candle.CashDividend,
+			Currency:             candle.Currency,
 		})
 	}
+
 	return records
 }

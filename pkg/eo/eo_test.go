@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported riskLevel method
 package eo
 
 import (
@@ -16,6 +17,7 @@ func Test_riskLevelHigh(t *testing.T) {
 		candle := generateCandle(float64(i))
 		overlay.AddCandle(candle)
 	}
+
 	level := overlay.riskLevel()
 	if int(RExtreme) != int(level) {
 		t.Fatalf("expected %d, got %d", int(RExtreme), int(level))
@@ -31,6 +33,7 @@ func Test_riskLevelLow(t *testing.T) {
 		candle := generateCandle(float64(i))
 		overlay.AddCandle(candle)
 	}
+
 	level := overlay.riskLevel()
 	if int(RLow) != int(level) {
 		t.Fatalf("expected %d, got %d", int(RLow), int(level))
@@ -43,5 +46,6 @@ func generateCandle(diff float64) *ohlc.OHLC {
 	candle.NewPrice(10, now)
 	candle.NewPrice(10+diff, now)
 	candle.ForceClose()
+
 	return candle
 }

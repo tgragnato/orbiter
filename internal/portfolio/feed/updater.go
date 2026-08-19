@@ -16,6 +16,10 @@ import (
 	"github.com/tgragnato/orbiter/internal/portfolio/fx"
 )
 
+// oneDay is the duration of one UTC calendar day, used for date truncation and
+// price-map lookups.
+const oneDay = 24 * time.Hour
+
 // PriceStore is the subset of portfolio.TransactionStore needed by the updater.
 type PriceStore interface {
 	ActiveSymbols(ctx context.Context) ([]string, error)
@@ -103,15 +107,52 @@ type Updater struct {
 
 // New creates a price feed updater without dividend sync.
 func New(store PriceStore, provider data.DataProvider, interval time.Duration) *Updater {
-	return &Updater{store: store, provider: provider, interval: interval}
+	return &Updater{
+		mu:               sync.RWMutex{},
+		backfilling:      atomic.Bool{},
+		store:            store,
+		divSyncer:        nil,
+		navLister:        nil,
+		navSnapper:       nil,
+		navBackfiller:    nil,
+		cashFlowRecorder: nil,
+		splitPersister:   nil,
+		watchlistStore:   nil,
+		fxService:        nil,
+		baseCurrency:     "",
+		portfolioID:      "",
+		provider:         provider,
+		interval:         interval,
+	}
 }
 
 // NewWithDividendSync creates a price feed updater that also keeps
 // dividend_income_records up to date. On first Run() it performs a full
 // historical backfill; subsequent refreshes process only the recent candles
 // already fetched for the price update.
-func NewWithDividendSync(store PriceStore, divSyncer DividendSyncer, provider data.DataProvider, interval time.Duration) *Updater {
-	return &Updater{store: store, divSyncer: divSyncer, provider: provider, interval: interval}
+func NewWithDividendSync(
+	store PriceStore,
+	divSyncer DividendSyncer,
+	provider data.DataProvider,
+	interval time.Duration,
+) *Updater {
+	return &Updater{
+		mu:               sync.RWMutex{},
+		backfilling:      atomic.Bool{},
+		store:            store,
+		divSyncer:        divSyncer,
+		navLister:        nil,
+		navSnapper:       nil,
+		navBackfiller:    nil,
+		cashFlowRecorder: nil,
+		splitPersister:   nil,
+		watchlistStore:   nil,
+		fxService:        nil,
+		baseCurrency:     "",
+		portfolioID:      "",
+		provider:         provider,
+		interval:         interval,
+	}
 }
 
 // WithNAVSnapshot enables automatic NAV snapshotting after each price refresh.
@@ -122,6 +163,7 @@ func (u *Updater) WithNAVSnapshot(lister NAVLister, snapper NAVSnapper, portfoli
 	u.navLister = lister
 	u.navSnapper = snapper
 	u.portfolioID = portfolioID
+
 	return u
 }
 
@@ -131,6 +173,7 @@ func (u *Updater) WithNAVSnapshot(lister NAVLister, snapper NAVSnapper, portfoli
 // Calling this method on a nil Updater panics.
 func (u *Updater) WithSplitPersister(persister SplitPersister) *Updater {
 	u.splitPersister = persister
+
 	return u
 }
 
@@ -141,14 +184,8 @@ func (u *Updater) WithSplitPersister(persister SplitPersister) *Updater {
 // same transaction list). Calling this method on a nil Updater panics.
 func (u *Updater) WithCashFlowRecorder(recorder CashFlowRecorder) *Updater {
 	u.cashFlowRecorder = recorder
-	return u
-}
 
-// getBaseCurrency returns the current base currency in a thread-safe way.
-func (u *Updater) getBaseCurrency() string {
-	u.mu.RLock()
-	defer u.mu.RUnlock()
-	return u.baseCurrency
+	return u
 }
 
 // SetBaseCurrency updates the ISO 4217 base currency used for multi-currency NAV
@@ -158,6 +195,7 @@ func (u *Updater) getBaseCurrency() string {
 func (u *Updater) SetBaseCurrency(currency string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+
 	u.baseCurrency = currency
 }
 
@@ -168,6 +206,7 @@ func (u *Updater) SetBaseCurrency(currency string) {
 func (u *Updater) WithFXService(svc *fx.Service, baseCurrency string) *Updater {
 	u.fxService = svc
 	u.SetBaseCurrency(baseCurrency)
+
 	return u
 }
 
@@ -179,12 +218,16 @@ func (u *Updater) TriggerBackfill(ctx context.Context) {
 	if u.navBackfiller == nil || u.navSnapper == nil {
 		return
 	}
+
 	if !u.backfilling.CompareAndSwap(false, true) {
 		slog.Debug("price feed: backfill already in progress, skipping trigger")
+
 		return
 	}
+
 	go func() {
 		defer u.backfilling.Store(false)
+
 		u.backfillNAV(ctx)
 	}()
 }
@@ -194,6 +237,7 @@ func (u *Updater) TriggerBackfill(ctx context.Context) {
 // and persists it to the watchlist table, making prices visible in the TUI.
 func (u *Updater) WithWatchlistUpdater(ws WatchlistPriceStore) *Updater {
 	u.watchlistStore = ws
+
 	return u
 }
 
@@ -203,6 +247,7 @@ func (u *Updater) WithWatchlistUpdater(ws WatchlistPriceStore) *Updater {
 // to call on every restart. Requires WithNAVSnapshot to also be configured.
 func (u *Updater) WithNAVBackfill(backfiller NAVBackfiller) *Updater {
 	u.navBackfiller = backfiller
+
 	return u
 }
 
@@ -218,10 +263,13 @@ func (u *Updater) Run(ctx context.Context) {
 	if u.divSyncer != nil {
 		go u.backfillDividends(ctx)
 	}
+
 	if u.navBackfiller != nil && u.navSnapper != nil {
 		u.backfilling.Store(true)
+
 		go func() {
 			defer u.backfilling.Store(false)
+
 			u.backfillNAV(ctx)
 		}()
 	}
@@ -241,14 +289,25 @@ func (u *Updater) Run(ctx context.Context) {
 	}
 }
 
+// getBaseCurrency returns the current base currency in a thread-safe way.
+func (u *Updater) getBaseCurrency() string {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+
+	return u.baseCurrency
+}
+
+//nolint:gocognit,cyclop,funlen // orchestrates multiple optional sub-steps; extracting would obscure the flow.
 func (u *Updater) refresh(ctx context.Context) {
 	baseCurrency := u.getBaseCurrency()
 
 	symbols, err := u.store.ActiveSymbols(ctx)
 	if err != nil {
 		slog.Error("price feed: list active symbols", "error", err)
+
 		return
 	}
+
 	if len(symbols) == 0 {
 		return
 	}
@@ -261,30 +320,38 @@ func (u *Updater) refresh(ctx context.Context) {
 	// currenciesFound collects unique (currency, baseCurrency) pairs encountered
 	// during this refresh so FX rates can be synced in one pass afterwards.
 	type fxPair struct{ from, to string }
+
 	fxPairsNeeded := make(map[fxPair]struct{})
 
 	for _, sym := range symbols {
 		candles, err := u.provider.GetEOD(sym, from, now)
 		if err != nil {
 			slog.Warn("price feed: EOD fetch failed", "symbol", sym, "error", err)
+
 			continue
 		}
+
 		if len(candles) == 0 {
 			slog.Debug("price feed: no candles returned", "symbol", sym)
+
 			continue
 		}
 
 		last := candles[len(candles)-1]
+
 		price := last.AdjustedClose
 		if price <= 0 {
 			price = last.Close
 		}
+
 		if price <= 0 {
 			slog.Warn("price feed: zero price, skipping update", "symbol", sym)
+
 			continue
 		}
 
-		if err := u.store.UpdateMarketPrice(ctx, sym, price); err != nil {
+		err = u.store.UpdateMarketPrice(ctx, sym, price)
+		if err != nil {
 			slog.Error("price feed: update failed", "symbol", sym, "error", err)
 		} else {
 			slog.Info("price feed: updated", "symbol", sym, "price", price)
@@ -292,9 +359,11 @@ func (u *Updater) refresh(ctx context.Context) {
 
 		// Persist the asset currency discovered from the provider response.
 		if last.Currency != "" {
-			if err := u.store.UpdateHoldingCurrency(ctx, sym, last.Currency); err != nil {
+			err = u.store.UpdateHoldingCurrency(ctx, sym, last.Currency)
+			if err != nil {
 				slog.Warn("price feed: update currency failed", "symbol", sym, "error", err)
 			}
+
 			if u.fxService != nil && baseCurrency != "" && last.Currency != baseCurrency {
 				fxPairsNeeded[fxPair{from: last.Currency, to: baseCurrency}] = struct{}{}
 			}
@@ -309,7 +378,8 @@ func (u *Updater) refresh(ctx context.Context) {
 	// Sync today's FX rates for all currency pairs encountered during this refresh.
 	if u.fxService != nil {
 		for pair := range fxPairsNeeded {
-			if err := u.fxService.SyncRates(ctx, pair.from, pair.to, now, now); err != nil {
+			err = u.fxService.SyncRates(ctx, pair.from, pair.to, now, now)
+			if err != nil {
 				slog.Warn("price feed: FX sync failed", "from", pair.from, "to", pair.to, "error", err)
 			}
 		}
@@ -323,7 +393,8 @@ func (u *Updater) refresh(ctx context.Context) {
 	// After all prices are refreshed, record a NAV snapshot so the TWR chart
 	// accumulates data points over time.
 	if u.navLister != nil && u.navSnapper != nil {
-		if err := u.recordNAV(ctx); err != nil {
+		err = u.recordNAV(ctx)
+		if err != nil {
 			slog.Warn("price feed: NAV snapshot failed", "error", err)
 		}
 	}
@@ -336,8 +407,10 @@ func (u *Updater) refreshWatchlist(ctx context.Context) {
 	symbols, err := u.watchlistStore.ListWatchlistSymbols(ctx)
 	if err != nil {
 		slog.Warn("price feed: list watchlist symbols", "error", err)
+
 		return
 	}
+
 	if len(symbols) == 0 {
 		return
 	}
@@ -349,23 +422,29 @@ func (u *Updater) refreshWatchlist(ctx context.Context) {
 		candles, err := u.provider.GetEOD(sym, from, now)
 		if err != nil {
 			slog.Warn("price feed: watchlist EOD fetch failed", "symbol", sym, "error", err)
+
 			continue
 		}
+
 		if len(candles) == 0 {
 			continue
 		}
 
 		last := candles[len(candles)-1]
+
 		price := last.AdjustedClose
 		if price <= 0 {
 			price = last.Close
 		}
+
 		if price <= 0 {
 			slog.Warn("price feed: watchlist zero price, skipping", "symbol", sym)
+
 			continue
 		}
 
-		if err := u.watchlistStore.UpdateWatchlistPrice(ctx, sym, price, last.Currency); err != nil {
+		err = u.watchlistStore.UpdateWatchlistPrice(ctx, sym, price, last.Currency)
+		if err != nil {
 			slog.Warn("price feed: update watchlist price failed", "symbol", sym, "error", err)
 		} else {
 			slog.Info("price feed: watchlist updated", "symbol", sym, "price", price, "currency", last.Currency)
@@ -382,15 +461,25 @@ func (u *Updater) recordNAV(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list holdings: %w", err)
 	}
+
 	var totalNAV float64
+
 	for _, h := range holdings {
 		totalNAV += h.NAV()
 	}
+
 	if totalNAV <= 0 {
 		slog.Debug("price feed: total NAV is zero, skipping snapshot")
+
 		return nil
 	}
-	return u.navSnapper.RecordNAVSnapshot(ctx, u.portfolioID, time.Now(), totalNAV)
+
+	err = u.navSnapper.RecordNAVSnapshot(ctx, u.portfolioID, time.Now(), totalNAV)
+	if err != nil {
+		return fmt.Errorf("record NAV snapshot: %w", err)
+	}
+
+	return nil
 }
 
 // syncRecentDividends processes dividend events found in candles that were
@@ -398,12 +487,15 @@ func (u *Updater) recordNAV(ctx context.Context) error {
 // return immediately because CashDividend == 0 for all recent candles.
 func (u *Updater) syncRecentDividends(ctx context.Context, sym string, candles []data.Candle) {
 	hasDividend := false
-	for _, c := range candles {
-		if c.CashDividend > 0 {
+
+	for _, candle := range candles {
+		if candle.CashDividend > 0 {
 			hasDividend = true
+
 			break
 		}
 	}
+
 	if !hasDividend {
 		return
 	}
@@ -411,6 +503,7 @@ func (u *Updater) syncRecentDividends(ctx context.Context, sym string, candles [
 	txs, err := u.divSyncer.ListTransactions(ctx, sym)
 	if err != nil {
 		slog.Warn("price feed: list tx for dividend sync", "symbol", sym, "error", err)
+
 		return
 	}
 
@@ -419,7 +512,8 @@ func (u *Updater) syncRecentDividends(ctx context.Context, sym string, candles [
 		return
 	}
 
-	if err := u.divSyncer.UpsertDividendIncomes(ctx, records); err != nil {
+	err = u.divSyncer.UpsertDividendIncomes(ctx, records)
+	if err != nil {
 		slog.Error("price feed: upsert dividends", "symbol", sym, "error", err)
 	}
 }
@@ -435,10 +529,12 @@ func (u *Updater) backfillDividends(ctx context.Context) {
 	symbols, err := u.divSyncer.AllTransactionSymbols(ctx)
 	if err != nil {
 		slog.Error("dividend backfill: list symbols", "error", err)
+
 		return
 	}
 
 	now := time.Now().UTC()
+
 	for _, sym := range symbols {
 		if ctx.Err() != nil {
 			return
@@ -447,30 +543,36 @@ func (u *Updater) backfillDividends(ctx context.Context) {
 		firstDate, err := u.divSyncer.FirstTransactionDate(ctx, sym)
 		if err != nil {
 			slog.Warn("dividend backfill: first tx date", "symbol", sym, "error", err)
+
 			continue
 		}
 
 		candles, err := u.provider.GetEOD(sym, firstDate, now)
 		if err != nil {
 			slog.Warn("dividend backfill: fetch candles", "symbol", sym, "error", err)
+
 			continue
 		}
 
 		txs, err := u.divSyncer.ListTransactions(ctx, sym)
 		if err != nil {
 			slog.Warn("dividend backfill: list transactions", "symbol", sym, "error", err)
+
 			continue
 		}
 
 		records := portfolio.ComputeDividendIncomes(txs, candles)
 		if len(records) == 0 {
 			slog.Debug("dividend backfill: no dividends found", "symbol", sym)
+
 			continue
 		}
+
 		// Upsert only — do not delete first. Stale post-sell records are removed
 		// transactionally by cleanupStaleDividendRecords inside recalculateSymbol
 		// whenever a transaction is added, edited, or deleted.
-		if err := u.divSyncer.UpsertDividendIncomes(ctx, records); err != nil {
+		err = u.divSyncer.UpsertDividendIncomes(ctx, records)
+		if err != nil {
 			slog.Error("dividend backfill: upsert failed", "symbol", sym, "error", err)
 		} else {
 			slog.Info("dividend backfill: done", "symbol", sym, "records", len(records))
@@ -487,24 +589,29 @@ func (u *Updater) backfillDividends(ctx context.Context) {
 // this goroutine runs, which would otherwise cause the backfill to skip all
 // historical data on the very first startup.
 // Runs once asynchronously at startup.
+//
+//nolint:gocognit,cyclop,gocyclo,funlen // complex pipeline; extracting sub-steps would obscure the algorithm.
 func (u *Updater) backfillNAV(ctx context.Context) {
 	baseCurrency := u.getBaseCurrency()
 
 	allTxs, err := u.navBackfiller.ListTransactions(ctx, "")
 	if err != nil {
 		slog.Warn("nav backfill: list transactions", "error", err)
+
 		return
 	}
+
 	if len(allTxs) == 0 {
 		return
 	}
 
-	firstTxDate := allTxs[0].ExecutedAt.UTC().Truncate(24 * time.Hour)
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	firstTxDate := allTxs[0].ExecutedAt.UTC().Truncate(oneDay)
+	today := time.Now().UTC().Truncate(oneDay)
 
 	// Nothing historical to backfill if the first trade is today.
 	if !firstTxDate.Before(today) {
 		slog.Debug("nav backfill: first trade is today, nothing to backfill", "portfolio", u.portfolioID)
+
 		return
 	}
 
@@ -512,6 +619,7 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 	symbols, err := u.navBackfiller.AllTransactionSymbols(ctx)
 	if err != nil {
 		slog.Warn("nav backfill: list symbols", "error", err)
+
 		return
 	}
 
@@ -520,43 +628,56 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 	// symbolCurrency: symbol → ISO 4217 currency reported by the data provider.
 	priceMap := make(map[string]map[time.Time]float64, len(symbols))
 	splitMap := make(map[string][]portfolio.SplitEvent)
+
 	symbolCurrency := make(map[string]string, len(symbols))
+
 	for _, sym := range symbols {
 		if ctx.Err() != nil {
 			return
 		}
+
 		candles, err := u.provider.GetEOD(sym, firstTxDate, today)
 		if err != nil {
 			slog.Warn("nav backfill: fetch candles", "symbol", sym, "error", err)
+
 			continue
 		}
+
 		dayMap := make(map[time.Time]float64, len(candles))
-		for _, c := range candles {
-			d := c.Time.UTC().Truncate(24 * time.Hour)
-			price := c.AdjustedClose
+
+		for _, candle := range candles {
+			calDay := candle.Time.UTC().Truncate(oneDay)
+
+			price := candle.AdjustedClose
 			if price <= 0 {
-				price = c.Close
+				price = candle.Close
 			}
+
 			if price > 0 {
-				dayMap[d] = price
+				dayMap[calDay] = price
 			}
+
 			// Track the asset's quotation currency (last non-empty value wins).
-			if c.Currency != "" {
-				symbolCurrency[sym] = c.Currency
+			if candle.Currency != "" {
+				symbolCurrency[sym] = candle.Currency
 			}
+
 			// A SplitFactor != 1.0 (and != 0) signals a split on that day.
-			if c.SplitFactor != 0 && c.SplitFactor != 1.0 {
+			if candle.SplitFactor != 0 && candle.SplitFactor != 1.0 {
 				splitMap[sym] = append(splitMap[sym], portfolio.SplitEvent{
-					Date:   d,
-					Factor: c.SplitFactor,
+					Date:   calDay,
+					Factor: candle.SplitFactor,
 				})
+
 				if u.splitPersister != nil {
-					if pErr := u.splitPersister.UpsertSplit(ctx, sym, d, c.SplitFactor); pErr != nil {
-						slog.Warn("nav backfill: persist split", "symbol", sym, "date", d, "error", pErr)
+					pErr := u.splitPersister.UpsertSplit(ctx, sym, calDay, candle.SplitFactor)
+					if pErr != nil {
+						slog.Warn("nav backfill: persist split", "symbol", sym, "date", calDay, "error", pErr)
 					}
 				}
 			}
 		}
+
 		if len(dayMap) > 0 {
 			priceMap[sym] = dayMap
 		}
@@ -565,10 +686,13 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 	// Multi-currency: when an FX service is available, convert each symbol's
 	// prices to base currency before NAV aggregation. This keeps ComputeDailyNAVs
 	// currency-agnostic — it always sums values in a single unit.
+	//nolint:nestif // multi-currency FX sync and conversion are inherently nested; extracting would hurt readability.
 	if u.fxService != nil && baseCurrency != "" {
 		// Collect unique foreign-currency pairs to sync in one pass.
 		type fxPair struct{ from, to string }
+
 		toSync := make(map[fxPair]struct{})
+
 		for sym, currency := range symbolCurrency {
 			if currency != "" && currency != baseCurrency {
 				if _, hasData := priceMap[sym]; hasData {
@@ -576,11 +700,14 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 				}
 			}
 		}
+
 		for pair := range toSync {
 			if ctx.Err() != nil {
 				return
 			}
-			if err := u.fxService.SyncRates(ctx, pair.from, pair.to, firstTxDate, today); err != nil {
+
+			err := u.fxService.SyncRates(ctx, pair.from, pair.to, firstTxDate, today)
+			if err != nil {
 				slog.Warn("nav backfill: historical FX sync failed",
 					"from", pair.from, "to", pair.to, "error", err)
 			}
@@ -592,15 +719,18 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 			if currency == "" || currency == baseCurrency {
 				continue
 			}
-			for d, price := range dayMap {
-				converted, err := u.fxService.Convert(ctx, price, currency, baseCurrency, d)
+
+			for calDay, price := range dayMap {
+				converted, err := u.fxService.Convert(ctx, price, currency, baseCurrency, calDay)
 				if err != nil {
 					// Degrade gracefully: leave the unconverted local-currency price.
 					slog.Debug("nav backfill: FX conversion skipped, using local price",
-						"symbol", sym, "date", d, "error", err)
+						"symbol", sym, "date", calDay, "error", err)
+
 					continue
 				}
-				dayMap[d] = converted
+
+				dayMap[calDay] = converted
 			}
 		}
 	}
@@ -609,20 +739,25 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 	dailyNAVs := portfolio.ComputeDailyNAVs(allTxs, priceMap, splitMap, firstTxDate, today)
 	if len(dailyNAVs) == 0 {
 		slog.Debug("nav backfill: no data points to record", "portfolio", u.portfolioID)
+
 		return
 	}
 
 	recorded := 0
-	for _, dn := range dailyNAVs {
+
+	for _, navPoint := range dailyNAVs {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := u.navSnapper.RecordNAVSnapshot(ctx, u.portfolioID, dn.Date, dn.NAV); err != nil {
-			slog.Warn("nav backfill: record snapshot", "date", dn.Date, "error", err)
+
+		err := u.navSnapper.RecordNAVSnapshot(ctx, u.portfolioID, navPoint.Date, navPoint.NAV)
+		if err != nil {
+			slog.Warn("nav backfill: record snapshot", "date", navPoint.Date, "error", err)
 		} else {
 			recorded++
 		}
 	}
+
 	slog.Info("nav backfill: done", "portfolio", u.portfolioID, "snapshots", recorded)
 
 	// Cash flows are computed here (not in a separate goroutine) so they use the
@@ -633,7 +768,9 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 	// negative TWR in periods around each purchase.
 	if u.cashFlowRecorder != nil {
 		flows := buildAdjustedFlows(allTxs, priceMap)
-		if err := u.cashFlowRecorder.BackfillTransactionFlows(ctx, u.portfolioID, flows); err != nil {
+
+		err := u.cashFlowRecorder.BackfillTransactionFlows(ctx, u.portfolioID, flows)
+		if err != nil {
 			slog.Error("nav backfill: cash flow persist failed", "error", err)
 		} else {
 			slog.Info("nav backfill: cash flows recorded", "portfolio", u.portfolioID, "count", len(flows))
@@ -651,24 +788,30 @@ func (u *Updater) backfillNAV(ctx context.Context) {
 //
 // occurred_at is midnight UTC of the transaction day so each flow falls inside
 // the correct daily sub-period used by CalculateTWR.
-func buildAdjustedFlows(txs []portfolio.Transaction, priceMap map[string]map[time.Time]float64) []analytics.TransactionFlow {
+func buildAdjustedFlows(
+	txs []portfolio.Transaction,
+	priceMap map[string]map[time.Time]float64,
+) []analytics.TransactionFlow {
 	flows := make([]analytics.TransactionFlow, 0, len(txs))
-	for _, tx := range txs {
-		day := tx.ExecutedAt.UTC().Truncate(24 * time.Hour)
-		adjPrice := lookupAdjustedPrice(priceMap[tx.Symbol], day, tx.Price)
 
-		switch tx.Type {
+	for txIdx := range txs {
+		transaction := &txs[txIdx]
+		day := transaction.ExecutedAt.UTC().Truncate(oneDay)
+		adjPrice := lookupAdjustedPrice(priceMap[transaction.Symbol], day, transaction.Price)
+
+		switch transaction.Type {
 		case portfolio.TransactionBuy:
 			flows = append(flows, analytics.TransactionFlow{
 				Type:       analytics.CashFlowDeposit,
-				Amount:     tx.Quantity*adjPrice + tx.Fee,
+				Amount:     transaction.Quantity*adjPrice + transaction.Fee,
 				OccurredAt: day,
 			})
 		case portfolio.TransactionSell:
-			amount := tx.Quantity*adjPrice - tx.Fee
+			amount := transaction.Quantity*adjPrice - transaction.Fee
 			if amount <= 0 {
 				continue
 			}
+
 			flows = append(flows, analytics.TransactionFlow{
 				Type:       analytics.CashFlowWithdrawal,
 				Amount:     amount,
@@ -676,6 +819,7 @@ func buildAdjustedFlows(txs []portfolio.Transaction, priceMap map[string]map[tim
 			})
 		}
 	}
+
 	return flows
 }
 
@@ -687,13 +831,16 @@ func lookupAdjustedPrice(dayMap map[time.Time]float64, day time.Time, fallback f
 	if p, ok := dayMap[day]; ok {
 		return p
 	}
+
 	for i := 1; i <= 3; i++ {
-		if p, ok := dayMap[day.Add(time.Duration(i)*24*time.Hour)]; ok {
+		if p, ok := dayMap[day.Add(time.Duration(i)*oneDay)]; ok {
 			return p
 		}
-		if p, ok := dayMap[day.Add(-time.Duration(i)*24*time.Hour)]; ok {
+
+		if p, ok := dayMap[day.Add(-time.Duration(i)*oneDay)]; ok {
 			return p
 		}
 	}
+
 	return fallback
 }

@@ -1,8 +1,15 @@
-package tick
+package tick_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/tgragnato/orbiter/pkg/tick"
+)
+
+const (
+	instrumentEURUSD = "EURUSD"
+	instrumentZERO   = "ZERO"
 )
 
 func TestTick_Spread(t *testing.T) {
@@ -10,8 +17,9 @@ func TestTick_Spread(t *testing.T) {
 
 	bid := 1.00
 	ask := 1.50
-	tick := New("EURUSD", time.Now(), bid, ask)
-	spread := tick.Spread()
+	tk := tick.New(instrumentEURUSD, time.Now(), bid, ask)
+
+	spread := tk.Spread()
 	if spread != 0.50 {
 		t.Fatalf("expected %v, got %v", 0.50, spread)
 	}
@@ -22,13 +30,15 @@ func TestTick_SpreadInPercent(t *testing.T) {
 
 	bid := 0.80
 	ask := 1.50
-	tick := New("EURUSD", time.Now(), bid, ask)
-	spread := tick.SpreadInPercent()
+	tk := tick.New(instrumentEURUSD, time.Now(), bid, ask)
+
+	spread := tk.SpreadInPercent()
 	if spread != 87.50 {
 		t.Fatalf("expected %v, got %v", 87.50, spread)
 	}
 }
 
+//nolint:funlen // table-driven test with many string cases
 func TestTick_String(t *testing.T) {
 	t.Parallel()
 
@@ -42,7 +52,7 @@ func TestTick_String(t *testing.T) {
 	}{
 		{
 			name:       "Tick EURUSD Standard",
-			instrument: "EURUSD",
+			instrument: instrumentEURUSD,
 			datetime:   time.Date(2023, time.October, 27, 10, 30, 0, 0, time.UTC),
 			bid:        1.2558,
 			ask:        1.2560,
@@ -74,24 +84,29 @@ func TestTick_String(t *testing.T) {
 		},
 		{
 			name:       "Tick EmptyBidAndAsk",
-			instrument: "ZERO",
+			instrument: instrumentZERO,
 			datetime:   time.Date(2025, time.April, 1, 12, 0, 0, 0, time.UTC),
 			bid:        0.0,
 			ask:        0.0,
 			want:       "{Datetime=2025-04-01 12:00:00 +0000 UTC Bid=0 Ask=0}",
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ti := New(tt.instrument, tt.datetime, tt.bid, tt.ask)
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			ti := tick.New(testCase.instrument, testCase.datetime, testCase.bid, testCase.ask)
+
 			got := ti.String()
-			if got != tt.want {
-				t.Errorf("String() = %v, want %v", got, tt.want)
+			if got != testCase.want {
+				t.Errorf("String() = %v, want %v", got, testCase.want)
 			}
 		})
 	}
 }
 
+//nolint:funlen // table-driven test with many validation cases
 func TestTick_Validate(t *testing.T) {
 	t.Parallel()
 
@@ -105,7 +120,7 @@ func TestTick_Validate(t *testing.T) {
 	}{
 		{
 			name:       "Valid Tick",
-			instrument: "EURUSD",
+			instrument: instrumentEURUSD,
 			datetime:   time.Now(),
 			bid:        1.2558,
 			ask:        1.2560,
@@ -121,7 +136,7 @@ func TestTick_Validate(t *testing.T) {
 		},
 		{
 			name:       "Zero Datetime",
-			instrument: "EURUSD",
+			instrument: instrumentEURUSD,
 			datetime:   time.Time{},
 			bid:        1.0,
 			ask:        1.1,
@@ -129,7 +144,7 @@ func TestTick_Validate(t *testing.T) {
 		},
 		{
 			name:       "Negative Bid",
-			instrument: "EURUSD",
+			instrument: instrumentEURUSD,
 			datetime:   time.Now(),
 			bid:        -1.0,
 			ask:        1.1,
@@ -137,7 +152,7 @@ func TestTick_Validate(t *testing.T) {
 		},
 		{
 			name:       "Negative Ask",
-			instrument: "EURUSD",
+			instrument: instrumentEURUSD,
 			datetime:   time.Now(),
 			bid:        -2.0,
 			ask:        -1.1,
@@ -145,7 +160,7 @@ func TestTick_Validate(t *testing.T) {
 		},
 		{
 			name:       "Ask Less Than Bid",
-			instrument: "EURUSD",
+			instrument: instrumentEURUSD,
 			datetime:   time.Now(),
 			bid:        1.2560,
 			ask:        1.2558,
@@ -153,7 +168,7 @@ func TestTick_Validate(t *testing.T) {
 		},
 		{
 			name:       "Zero Bid",
-			instrument: "ZERO",
+			instrument: instrumentZERO,
 			datetime:   time.Now(),
 			bid:        0.0,
 			ask:        0.2,
@@ -161,24 +176,30 @@ func TestTick_Validate(t *testing.T) {
 		},
 		{
 			name:       "Zero Ask",
-			instrument: "ZERO",
+			instrument: instrumentZERO,
 			datetime:   time.Now(),
 			bid:        -0.2,
 			ask:        0.0,
 			wantErr:    true,
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ti := New(tt.instrument, tt.datetime, tt.bid, tt.ask)
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			ti := tick.New(testCase.instrument, testCase.datetime, testCase.bid, testCase.ask)
+
 			gotErr := ti.Validate()
 			if gotErr != nil {
-				if !tt.wantErr {
+				if !testCase.wantErr {
 					t.Errorf("Validate() failed: %v", gotErr)
 				}
+
 				return
 			}
-			if tt.wantErr {
+
+			if testCase.wantErr {
 				t.Fatal("Validate() succeeded unexpectedly")
 			}
 		})

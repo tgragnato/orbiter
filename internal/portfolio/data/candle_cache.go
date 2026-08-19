@@ -2,8 +2,11 @@ package data
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
+
+const hoursPerDay = 24
 
 // CandleStorer is implemented by any store that can persist and retrieve EOD
 // candles. Used by CachingProvider to avoid repeated Yahoo Finance requests for
@@ -22,11 +25,11 @@ type CandleStorer interface {
 //
 // On the first GetEOD call for a symbol the full history is fetched from the
 // upstream provider and written to the store. Subsequent calls only fetch the
-// days after the last cached date (typically 1–2 trading days per day), so
+// days after the last cached date (typically 1-2 trading days per day), so
 // Yahoo Finance is never hit for data that is already local.
 //
 // All store writes are best-effort: a write failure does not surface as a
-// GetEOD error — the call returns the fresh upstream data instead.
+// GetEOD error - the call returns the fresh upstream data instead.
 type CachingProvider struct {
 	upstream DataProvider
 	store    CandleStorer
@@ -41,41 +44,54 @@ func NewCachingProvider(upstream DataProvider, store CandleStorer) *CachingProvi
 //
 //  1. Query the latest cached date for ticker.
 //  2. If nothing is cached: fetch the full range from upstream, cache it, return.
-//  3. If the cache is current (latest ≥ yesterday): return entirely from cache.
-//  4. Otherwise: fetch only the delta [latest+1, to] from upstream, cache it,
-//     then serve the full [from, to] range from the DB.
-func (c *CachingProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, error) {
+//  3. If the cache is current (latest >= yesterday): return entirely from cache.
+//  4. Otherwise: fetch only the delta [latest+1, until] from upstream, cache it,
+//     then serve the full [from, until] range from the DB.
+func (c *CachingProvider) GetEOD(ticker string, from, until time.Time) ([]Candle, error) {
 	ctx := context.Background()
 
 	latest, err := c.store.LatestCandleDate(ctx, ticker)
 	if err != nil {
-		// Cache unavailable — fall back to upstream for this call only.
-		return c.upstream.GetEOD(ticker, from, to)
+		// Cache unavailable - fall back to upstream for this call only.
+		candles, upstreamErr := c.upstream.GetEOD(ticker, from, until)
+		if upstreamErr != nil {
+			return nil, fmt.Errorf("upstream GetEOD: %w", upstreamErr)
+		}
+
+		return candles, nil
 	}
 
-	yesterday := time.Now().UTC().Truncate(24 * time.Hour).AddDate(0, 0, -1)
+	yesterday := time.Now().UTC().Truncate(hoursPerDay * time.Hour).AddDate(0, 0, -1)
 
 	if latest.IsZero() {
-		// No cached data for this symbol — full fetch from upstream.
-		candles, err := c.upstream.GetEOD(ticker, from, to)
-		if err != nil {
-			return nil, err
+		// No cached data for this symbol - full fetch from upstream.
+		candles, upstreamErr := c.upstream.GetEOD(ticker, from, until)
+		if upstreamErr != nil {
+			return nil, fmt.Errorf("upstream GetEOD: %w", upstreamErr)
 		}
+
 		if len(candles) > 0 {
 			_ = c.store.UpsertCandles(ctx, candles) // best-effort; don't fail the call
 		}
+
 		return candles, nil
 	}
 
 	// Cache exists. Fetch the incremental update when stale.
 	if latest.Before(yesterday) {
 		fetchFrom := latest.AddDate(0, 0, 1)
-		fresh, fetchErr := c.upstream.GetEOD(ticker, fetchFrom, to)
+
+		fresh, fetchErr := c.upstream.GetEOD(ticker, fetchFrom, until)
 		if fetchErr == nil && len(fresh) > 0 {
 			_ = c.store.UpsertCandles(ctx, fresh) // best-effort
 		}
 	}
 
 	// Serve entirely from the DB cache (includes newly inserted rows).
-	return c.store.GetCachedCandles(ctx, ticker, from, to)
+	cachedCandles, cacheErr := c.store.GetCachedCandles(ctx, ticker, from, until)
+	if cacheErr != nil {
+		return nil, fmt.Errorf("cache GetCachedCandles: %w", cacheErr)
+	}
+
+	return cachedCandles, nil
 }

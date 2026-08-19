@@ -24,6 +24,12 @@ const (
 	cmdCancel command = 3
 )
 
+const (
+	engineCtrlBufferSize   = 4
+	engineLogsBufferSize   = 512
+	defaultPredictionScale = 0.01
+)
+
 // TrainingResult holds the output of one completed training run.
 type TrainingResult struct {
 	// Forest is the merged ensemble of all walk-forward fold forests.
@@ -50,14 +56,23 @@ type Engine struct {
 // NewEngine allocates a new Engine. Call Start to begin training.
 func NewEngine() *Engine {
 	return &Engine{
-		ctrl:    make(chan command, 4),
-		Logs:    make(chan string, 512),
+		status:  atomic.Int32{},
+		ctrl:    make(chan command, engineCtrlBufferSize),
+		Logs:    make(chan string, engineLogsBufferSize),
 		Results: make(chan TrainingResult, 1),
 	}
 }
 
-// Status returns the current engine state (StatusIdle, Running, Paused, Done).
-func (e *Engine) Status() int32 { return e.status.Load() }
+// Cancel stops the training loop. No-op if already stopped.
+func (e *Engine) Cancel() {
+	select {
+	case e.ctrl <- cmdCancel:
+	default:
+	}
+}
+
+// LogsChan returns the channel of streaming training log lines.
+func (e *Engine) LogsChan() chan string { return e.Logs }
 
 // Pause suspends the training loop. No-op if not running.
 func (e *Engine) Pause() {
@@ -77,17 +92,6 @@ func (e *Engine) Resume() {
 	}
 }
 
-// LogsChan returns the channel of streaming training log lines.
-func (e *Engine) LogsChan() chan string { return e.Logs }
-
-// Cancel stops the training loop. No-op if already stopped.
-func (e *Engine) Cancel() {
-	select {
-	case e.ctrl <- cmdCancel:
-	default:
-	}
-}
-
 // Start launches the background training goroutine. It is safe to call Start
 // only when the engine is idle or done.
 func (e *Engine) Start(ctx context.Context, samples []Sample, cfg WalkForwardConfig) {
@@ -95,23 +99,29 @@ func (e *Engine) Start(ctx context.Context, samples []Sample, cfg WalkForwardCon
 		!e.status.CompareAndSwap(StatusDone, StatusRunning) {
 		return
 	}
+
 	go e.run(ctx, samples, cfg)
 }
 
+// Status returns the current engine state (StatusIdle, Running, Paused, Done).
+func (e *Engine) Status() int32 { return e.status.Load() }
+
+//nolint:gocognit,cyclop,funlen // engine run loop is inherently complex with pause/resume/cancel state machine
 func (e *Engine) run(ctx context.Context, samples []Sample, cfg WalkForwardConfig) {
 	defer e.status.Store(StatusDone)
 
-	e.log("training started: %d samples, trainSize=%d testSize=%d embargo=%d trees=%d",
+	e.logf("training started: %d samples, trainSize=%d testSize=%d embargo=%d trees=%d",
 		len(samples), cfg.TrainSize, cfg.TestSize, cfg.Embargo, cfg.NTrees)
 
-	results, err := WalkForwardCV(samples, cfg, func(r WalkForwardResult) bool {
+	results, err := WalkForwardCV(samples, cfg, func(result WalkForwardResult) bool {
 		select {
 		case <-ctx.Done():
 			return false
 		default:
 		}
 
-		e.log("fold %d: MSE=%.6f MAE=%.6f Sortino=%.3f", r.Fold, r.Metrics.MSE, r.Metrics.MAE, r.Metrics.Sortino)
+		e.logf("fold %d: MSE=%.6f MAE=%.6f Sortino=%.3f",
+			result.Fold, result.Metrics.MSE, result.Metrics.MAE, result.Metrics.Sortino)
 
 		// Handle pause/resume/cancel between folds.
 		for {
@@ -122,12 +132,13 @@ func (e *Engine) run(ctx context.Context, samples []Sample, cfg WalkForwardConfi
 				if !ok {
 					return false
 				}
+
 				switch cmd {
 				case cmdCancel:
 					return false
 				case cmdPause:
 					e.status.Store(StatusPaused)
-					e.log("training paused after fold %d", r.Fold)
+					e.logf("training paused after fold %d", result.Fold)
 					// Block until resumed or cancelled.
 					for {
 						select {
@@ -136,61 +147,68 @@ func (e *Engine) run(ctx context.Context, samples []Sample, cfg WalkForwardConfi
 						case cmd2 := <-e.ctrl:
 							if cmd2 == cmdResume {
 								e.status.Store(StatusRunning)
-								e.log("training resumed")
+								e.logf("training resumed")
+
 								return true
 							}
+
 							if cmd2 == cmdCancel {
 								return false
 							}
 						}
 					}
+				case cmdResume:
+					// No-op: already running.
 				}
 			default:
 				return true // no pending command, continue
 			}
 		}
 	})
-
 	if err != nil {
 		slog.Error("walk-forward CV failed", "error", err)
-		e.log("error: %s", err.Error())
+		e.logf("error: %s", err.Error())
+
 		return
 	}
 
 	ensemble := MergeForests(results)
 	if ensemble == nil {
-		e.log("no valid folds produced")
+		e.logf("no valid folds produced")
+
 		return
 	}
 
 	best := BestFold(results) // diagnostic only — not used for inference
 	scale := predictionScale(results)
-	tr := TrainingResult{
+	trainResult := TrainingResult{
 		Forest:          ensemble,
 		AllFolds:        results,
 		PredictionScale: scale,
 	}
 
 	select {
-	case e.Results <- tr:
+	case e.Results <- trainResult:
 	default:
 		// Drain stale result so the new one fits.
 		select {
 		case <-e.Results:
 		default:
 		}
-		e.Results <- tr
+
+		e.Results <- trainResult
 	}
 
 	if best != nil {
-		e.log("training done: %d folds merged, best fold %d Sortino=%.3f predScale=%.6f",
+		e.logf("training done: %d folds merged, best fold %d Sortino=%.3f predScale=%.6f",
 			len(results), best.Fold, best.Metrics.Sortino, scale)
 	}
 }
 
-func (e *Engine) log(format string, args ...any) {
+func (e *Engine) logf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	slog.Info("[ml] "+msg)
+	slog.Info("[ml] " + msg)
+
 	select {
 	case e.Logs <- msg:
 	default:
@@ -199,6 +217,7 @@ func (e *Engine) log(format string, args ...any) {
 		case <-e.Logs:
 		default:
 		}
+
 		select {
 		case e.Logs <- msg:
 		default:
@@ -212,20 +231,26 @@ func (e *Engine) log(format string, args ...any) {
 // range rather than saturating or collapsing to zero.
 func predictionScale(results []WalkForwardResult) float64 {
 	var totalMSE float64
+
 	var count int
-	for _, r := range results {
-		if r.Forest == nil {
+
+	for _, foldResult := range results {
+		if foldResult.Forest == nil {
 			continue
 		}
-		totalMSE += r.Metrics.MSE
+
+		totalMSE += foldResult.Metrics.MSE
 		count++
 	}
+
 	if count == 0 || totalMSE <= 0 {
-		return 0.01
+		return defaultPredictionScale
 	}
+
 	scale := math.Sqrt(totalMSE / float64(count))
 	if scale <= 0 {
-		return 0.01
+		return defaultPredictionScale
 	}
+
 	return scale
 }

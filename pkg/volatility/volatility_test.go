@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported field cb for white-box testing
 package volatility
 
 import (
@@ -10,25 +11,29 @@ import (
 func TestAddOHLC(t *testing.T) {
 	t.Parallel()
 
-	v := New(5, 10)
+	vol := New(5, 10)
+
 	now := time.Now()
+
 	for i := 1; i < 12; i++ {
-		o := ohlc.New("test", now, time.Minute, false)
-		o.NewPrice(1.0, o.Start)
-		o.NewPrice(float64(i)+1.0, o.Start)
-		t.Logf("ADD: %d -> %g", i, o.VolatilityInPercentage())
-		o.ForceClose()
-		v.AddOHLC(o)
+		bar := ohlc.New("test", now, time.Minute, false)
+		bar.NewPrice(1.0, bar.Start)
+		bar.NewPrice(float64(i)+1.0, bar.Start)
+		t.Logf("ADD: %d -> %g", i, bar.VolatilityInPercentage())
+		bar.ForceClose()
+		vol.AddOHLC(bar)
 	}
 
 	wantArray := []float64{11, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	isArray, err := v.cb.GetAll()
+
+	isArray, err := vol.cb.GetAll()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	for i := range wantArray {
 		want := wantArray[i] * 100
+
 		if want != isArray[i] {
 			t.Errorf("TestAddOHLC: wantArray differs: index=%d want=%.1f got=%.1f", i, want, isArray[i])
 		}
@@ -38,20 +43,23 @@ func TestAddOHLC(t *testing.T) {
 func TestMedianVolatilityInPercentage(t *testing.T) {
 	t.Parallel()
 
-	v := New(10, 10)
+	vol := New(10, 10)
+
 	now := time.Now()
+
 	for i := range 10 {
-		o := ohlc.New("EURUSD", now, time.Minute, false)
-		o.NewPrice(1.0, o.Start)
-		o.NewPrice(float64(i)+1.0, o.Start)
-		o.ForceClose()
-		v.AddOHLC(o)
+		bar := ohlc.New("EURUSD", now, time.Minute, false)
+		bar.NewPrice(1.0, bar.Start)
+		bar.NewPrice(float64(i)+1.0, bar.Start)
+		bar.ForceClose()
+		vol.AddOHLC(bar)
 	}
 
-	perf, err := v.MedianVolatilityInPercentage()
+	perf, err := vol.MedianVolatilityInPercentage()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if perf != 400 {
 		t.Fatalf("expected %v, got %v", 400, perf)
 	}
@@ -60,35 +68,41 @@ func TestMedianVolatilityInPercentage(t *testing.T) {
 func TestVolatilityInPercentageQuantile(t *testing.T) {
 	t.Parallel()
 
-	v := New(1000, 1000)
+	vol := New(1000, 1000)
+
 	now := time.Now()
+
 	for i := range 1000 {
-		o := ohlc.New("EURUSD", now, time.Minute, false)
-		o.NewPrice(1.0, o.Start)
-		o.NewPrice(float64(i)+1.0, o.End)
-		if !o.Closed() {
+		bar := ohlc.New("EURUSD", now, time.Minute, false)
+		bar.NewPrice(1.0, bar.Start)
+		bar.NewPrice(float64(i)+1.0, bar.End)
+
+		if !bar.Closed() {
 			t.Fatalf("expected true")
 		}
-		v.AddOHLC(o)
+
+		vol.AddOHLC(bar)
 	}
 
-	isArray, err := v.cb.GetAll()
+	isArray, err := vol.cb.GetAll()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	perf, err := v.VolatilityInPercentageQuantile(0)
+	perf, err := vol.VolatilityInPercentageQuantile(0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if isArray[0] != perf {
 		t.Fatalf("expected %v, got %v", isArray[0], perf)
 	}
 
-	perf, err = v.VolatilityInPercentageQuantile(1)
+	perf, err = vol.VolatilityInPercentageQuantile(1)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+
 	if isArray[len(isArray)-1] != perf {
 		t.Fatalf("expected %v, got %v", isArray[len(isArray)-1], perf)
 	}

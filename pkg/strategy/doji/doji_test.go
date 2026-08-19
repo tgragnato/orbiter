@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported fields (previousCandle)
 package doji
 
 import (
@@ -13,22 +14,23 @@ import (
 func TestDoji_Name(t *testing.T) {
 	t.Parallel()
 
-	d := New("test")
-	if strategy.NameDOJI != d.Name() {
-		t.Fatalf("expected %q, got %q", strategy.NameDOJI, d.Name())
+	dojiStrat := New("test")
+	if strategy.NameDOJI != dojiStrat.Name() {
+		t.Fatalf("expected %q, got %q", strategy.NameDOJI, dojiStrat.Name())
 	}
 }
 
 func TestDoji_OnWarmUpCandle(t *testing.T) {
 	t.Parallel()
 
-	d := New("test")
-	c := ohlc.New("test", time.Now(), time.Minute*60, false)
-	c.NewPrice(100, c.Start)
-	c.ForceClose()
+	dojiStrat := New("test")
+	candle := ohlc.New("test", time.Now(), time.Minute*60, false)
+	candle.NewPrice(100, candle.Start)
+	candle.ForceClose()
 
-	d.OnWarmUpCandle(c)
-	if d.previousCandle != c {
+	dojiStrat.OnWarmUpCandle(candle)
+
+	if dojiStrat.previousCandle != candle {
 		t.Errorf("expected previousCandle to be updated by OnWarmUpCandle")
 	}
 }
@@ -36,24 +38,25 @@ func TestDoji_OnWarmUpCandle(t *testing.T) {
 func TestDoji_OnTick_Long(t *testing.T) {
 	t.Parallel()
 
-	d := New("test")
-	// Mock a DOJI candle
+	dojiStrat := New("test")
+	// Mock a DOJI candle.
 	prevCandle := ohlc.New("test", time.Now(), time.Minute*60, false)
 	prevCandle.NewPrice(100, prevCandle.Start)
 	prevCandle.NewPrice(100.01, prevCandle.Start)
 	prevCandle.ForceClose()
 	// High: 100.01, Low: 100
 
-	d.OnCandle([]*ohlc.OHLC{prevCandle})
+	dojiStrat.OnCandle([]*ohlc.OHLC{prevCandle})
 
-	// Tick breaks high by > 2 pips (0.0002)
+	// Tick breaks high by > 2 pips (0.0002).
 	// 100.01 + 0.0002 = 100.0102
 	currentTick := tick.New("test", time.Now(), 100.0103, 100.0103)
 
-	toOpen, _, _ := d.OnTick(currentTick)
+	toOpen, _, _ := dojiStrat.OnTick(currentTick)
 	if len(toOpen) != 1 {
 		t.Fatalf("expected 1 order, got %d", len(toOpen))
 	}
+
 	if toOpen[0].Direction != broker.BuyDirectionLong {
 		t.Fatalf("expected BuyDirectionLong, got %v", toOpen[0].Direction)
 	}
@@ -62,105 +65,128 @@ func TestDoji_OnTick_Long(t *testing.T) {
 func TestDoji_OnTick_Short(t *testing.T) {
 	t.Parallel()
 
-	d := New("test")
-	// Mock a DOJI candle
+	dojiStrat := New("test")
+	// Mock a DOJI candle.
 	prevCandle := ohlc.New("test", time.Now(), time.Minute*60, false)
 	prevCandle.NewPrice(100, prevCandle.Start)
 	prevCandle.NewPrice(100.01, prevCandle.Start)
 	prevCandle.ForceClose()
 	// High: 100.01, Low: 100
 
-	d.OnCandle([]*ohlc.OHLC{prevCandle})
+	dojiStrat.OnCandle([]*ohlc.OHLC{prevCandle})
 
-	// Tick breaks low by > 2 pips (0.0002)
+	// Tick breaks low by > 2 pips (0.0002).
 	// 100 - 0.0002 = 99.9998
 	currentTick := tick.New("test", time.Now(), 99.9997, 99.9997)
 
-	toOpen, _, _ := d.OnTick(currentTick)
+	toOpen, _, _ := dojiStrat.OnTick(currentTick)
 	if len(toOpen) != 1 {
 		t.Fatalf("expected 1 order, got %d", len(toOpen))
 	}
+
 	if toOpen[0].Direction != broker.BuyDirectionShort {
 		t.Fatalf("expected BuyDirectionShort, got %v", toOpen[0].Direction)
 	}
 }
 
+//nolint:funlen // test function covers multiple subtests
 func TestDoji_Score(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Nil Previous Candle", func(t *testing.T) {
-		d := New("test")
-		got := d.Score(nil)
+		t.Parallel()
+
+		dojiStrat := New("test")
+
+		got := dojiStrat.Score(nil)
 		if got != 0.0 {
 			t.Errorf("Score() = %v, want 0.0 when previousCandle is nil", got)
 		}
 	})
 
 	t.Run("DOJI Candle Active", func(t *testing.T) {
-		d := New("test")
-		c := ohlc.New("test", time.Now(), time.Minute*60, false)
-		c.NewPrice(100, c.Start)
-		c.NewPrice(100.01, c.Start)
-		c.ForceClose()
+		t.Parallel()
 
-		d.OnWarmUpCandle(c)
+		dojiStrat := New("test")
+		candle := ohlc.New("test", time.Now(), time.Minute*60, false)
+		candle.NewPrice(100, candle.Start)
+		candle.NewPrice(100.01, candle.Start)
+		candle.ForceClose()
 
-		got := d.Score(nil)
+		dojiStrat.OnWarmUpCandle(candle)
+
+		got := dojiStrat.Score(nil)
 		if got != 0.0 {
 			t.Errorf("Score() = %v, want 0.0 when previousCandle is DOJI", got)
 		}
 	})
 
 	t.Run("Non-DOJI Normal Range", func(t *testing.T) {
-		d := New("test")
-		c := ohlc.New("test", time.Now(), time.Minute*60, false)
-		c.NewPrice(100, c.Start)
-		c.NewPrice(105, c.Start) // 5% performance, not DOJI
-		c.ForceClose()
+		t.Parallel()
 
-		d.OnWarmUpCandle(c)
+		dojiStrat := New("test")
+		candle := ohlc.New("test", time.Now(), time.Minute*60, false)
+		candle.NewPrice(100, candle.Start)
+		candle.NewPrice(105, candle.Start) // 5% performance, not DOJI
+		candle.ForceClose()
 
-		got := d.Score(nil)
+		dojiStrat.OnWarmUpCandle(candle)
+
+		got := dojiStrat.Score(nil)
 		if got != 0.0 {
 			t.Errorf("Score() = %v, want 0.0 when close is within range", got)
 		}
 	})
 
 	t.Run("Close Above High Breakout", func(t *testing.T) {
-		d := New("test")
-		c := &ohlc.OHLC{
-			Open:  100.0,
-			High:  102.0,
-			Low:   99.0,
-			Close: 103.0, // Close > High
-			Start: time.Now(),
-			End:   time.Now().Add(time.Hour),
+		t.Parallel()
+
+		dojiStrat := New("test")
+		candle := &ohlc.OHLC{
+			Instrument: "",
+			Open:       100.0,
+			High:       102.0,
+			HighTime:   time.Time{},
+			Low:        99.0,
+			LowTime:    time.Time{},
+			Close:      103.0, // Close > High
+			Start:      time.Now(),
+			End:        time.Now().Add(time.Hour),
+			Duration:   0,
+			Gaps:       false,
 		}
-		c.ForceClose()
+		candle.ForceClose()
 
-		d.OnWarmUpCandle(c)
+		dojiStrat.OnWarmUpCandle(candle)
 
-		got := d.Score(nil)
+		got := dojiStrat.Score(nil)
 		if got <= 0.0 {
 			t.Errorf("Score() = %v, want > 0.0 when Close > High", got)
 		}
 	})
 
 	t.Run("Close Below Low Breakout", func(t *testing.T) {
-		d := New("test")
-		c := &ohlc.OHLC{
-			Open:  100.0,
-			High:  101.0,
-			Low:   98.0,
-			Close: 97.0, // Close < Low
-			Start: time.Now(),
-			End:   time.Now().Add(time.Hour),
+		t.Parallel()
+
+		dojiStrat := New("test")
+		candle := &ohlc.OHLC{
+			Instrument: "",
+			Open:       100.0,
+			High:       101.0,
+			HighTime:   time.Time{},
+			Low:        98.0,
+			LowTime:    time.Time{},
+			Close:      97.0, // Close < Low
+			Start:      time.Now(),
+			End:        time.Now().Add(time.Hour),
+			Duration:   0,
+			Gaps:       false,
 		}
-		c.ForceClose()
+		candle.ForceClose()
 
-		d.OnWarmUpCandle(c)
+		dojiStrat.OnWarmUpCandle(candle)
 
-		got := d.Score(nil)
+		got := dojiStrat.Score(nil)
 		if got >= 0.0 {
 			t.Errorf("Score() = %v, want < 0.0 when Close < Low", got)
 		}

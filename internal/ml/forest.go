@@ -6,6 +6,19 @@ import (
 	"github.com/tgragnato/orbiter/internal/portfolio/features"
 )
 
+const (
+	// minReturnsForSortino is the minimum number of returns required to compute Sortino.
+	minReturnsForSortino = 2
+	// maxSortinoRatio is the capped Sortino ratio when there is no downside deviation.
+	maxSortinoRatio = 10.0
+	// tradingDaysPerYear is the annualisation factor for daily return series.
+	tradingDaysPerYear = 252
+	// lcgMultiplier is the multiplier constant for the linear congruential generator.
+	lcgMultiplier = 6364136223846793005
+	// lcgIncrement is the increment constant for the linear congruential generator.
+	lcgIncrement = 1442695040888963407
+)
+
 // Forest is a Random Forest regression ensemble. Each tree is trained on a
 // bootstrap sample of the training data and a random subset of features.
 type Forest struct {
@@ -22,42 +35,17 @@ func NewForest(nTrees, maxDepth, minSamples, featuresPerSplit int) *Forest {
 	if featuresPerSplit <= 0 {
 		featuresPerSplit = 12
 	}
+
 	if featuresPerSplit > featureCount {
 		featuresPerSplit = featureCount
 	}
+
 	return &Forest{
 		Trees:      make([]*Tree, 0, nTrees),
 		nFeatures:  featuresPerSplit,
 		maxDepth:   maxDepth,
 		minSamples: minSamples,
 	}
-}
-
-// Fit trains all trees on samples using bootstrap aggregation with random
-// feature subsets. src provides deterministic pseudo-randomness; each tree i
-// uses seed i so results are reproducible.
-func (f *Forest) Fit(samples []Sample, nTrees int) {
-	f.Trees = make([]*Tree, 0, nTrees)
-	for i := range nTrees {
-		rng := newLCG(uint64(i + 1))
-		boot := bootstrap(samples, rng)
-		mask := randomFeatureMask(featureCount, f.nFeatures, rng)
-		t := newTree(f.maxDepth, f.minSamples)
-		t.Fit(boot, mask)
-		f.Trees = append(f.Trees, t)
-	}
-}
-
-// Predict returns the average prediction across all trees.
-func (f *Forest) Predict(feat [featureCount]float64) float64 {
-	if len(f.Trees) == 0 {
-		return 0
-	}
-	sum := 0.0
-	for _, t := range f.Trees {
-		sum += t.Predict(feat)
-	}
-	return sum / float64(len(f.Trees))
 }
 
 // ConvictionScore converts the raw forest prediction (expected log-return) to
@@ -67,8 +55,40 @@ func (f *Forest) ConvictionScore(feat [featureCount]float64, scale float64) floa
 	if scale <= 0 {
 		scale = 0.01
 	}
+
 	raw := f.Predict(feat)
+
 	return math.Tanh(raw / scale)
+}
+
+// Fit trains all trees on samples using bootstrap aggregation with random
+// feature subsets. src provides deterministic pseudo-randomness; each tree i
+// uses seed i so results are reproducible.
+func (f *Forest) Fit(samples []Sample, nTrees int) {
+	f.Trees = make([]*Tree, 0, nTrees)
+
+	for i := range nTrees {
+		rng := newLCG(uint64(i + 1))
+		boot := bootstrap(samples, rng)
+		mask := randomFeatureMask(featureCount, f.nFeatures, rng)
+		treeNode := newTree(f.maxDepth, f.minSamples)
+		treeNode.Fit(boot, mask)
+		f.Trees = append(f.Trees, treeNode)
+	}
+}
+
+// Predict returns the average prediction across all trees.
+func (f *Forest) Predict(feat [featureCount]float64) float64 {
+	if len(f.Trees) == 0 {
+		return 0
+	}
+
+	sum := 0.0
+	for _, treeItem := range f.Trees {
+		sum += treeItem.Predict(feat)
+	}
+
+	return sum / float64(len(f.Trees))
 }
 
 // Metrics holds cross-validation metrics for a single walk-forward fold.
@@ -79,28 +99,33 @@ type Metrics struct {
 	Sortino float64
 }
 
-// MSE computes mean-squared error between predictions and labels.
-func MSE(preds, labels []float64) float64 {
-	if len(preds) != len(labels) || len(preds) == 0 {
-		return 0
-	}
-	sum := 0.0
-	for i := range preds {
-		d := preds[i] - labels[i]
-		sum += d * d
-	}
-	return sum / float64(len(preds))
-}
-
 // MAE computes mean-absolute error.
 func MAE(preds, labels []float64) float64 {
 	if len(preds) != len(labels) || len(preds) == 0 {
 		return 0
 	}
+
 	sum := 0.0
 	for i := range preds {
 		sum += math.Abs(preds[i] - labels[i])
 	}
+
+	return sum / float64(len(preds))
+}
+
+// MSE computes mean-squared error between predictions and labels.
+func MSE(preds, labels []float64) float64 {
+	if len(preds) != len(labels) || len(preds) == 0 {
+		return 0
+	}
+
+	sum := 0.0
+
+	for i := range preds {
+		diff := preds[i] - labels[i]
+		sum += diff * diff
+	}
+
 	return sum / float64(len(preds))
 }
 
@@ -108,27 +133,32 @@ func MAE(preds, labels []float64) float64 {
 // daily observations, 252 trading days/year). MAR is 0: only negative returns
 // contribute to downside deviation, so positive volatility is not penalised.
 func Sortino(returns []float64) float64 {
-	if len(returns) < 2 {
+	if len(returns) < minReturnsForSortino {
 		return 0
 	}
+
 	mean := features.Mean(returns)
 
 	// Downside deviation: RMS of min(0, r_t) over all observations.
 	sumSq := 0.0
-	for _, r := range returns {
-		if r < 0 {
-			sumSq += r * r
+
+	for _, ret := range returns {
+		if ret < 0 {
+			sumSq += ret * ret
 		}
 	}
-	dd := math.Sqrt(sumSq / float64(len(returns)))
 
-	if dd == 0 {
+	downsideDev := math.Sqrt(sumSq / float64(len(returns)))
+
+	if downsideDev == 0 {
 		if mean > 0 {
-			return 10.0
+			return maxSortinoRatio
 		}
+
 		return 0
 	}
-	return mean / dd * math.Sqrt(252)
+
+	return mean / downsideDev * math.Sqrt(tradingDaysPerYear)
 }
 
 // --- internal helpers ---
@@ -139,38 +169,45 @@ type lcg struct{ state uint64 }
 func newLCG(seed uint64) *lcg { return &lcg{state: seed} }
 
 func (r *lcg) next() uint64 {
-	r.state = r.state*6364136223846793005 + 1442695040888963407
+	r.state = r.state*lcgMultiplier + lcgIncrement
+
 	return r.state
 }
 
-func (r *lcg) intn(n int) int {
-	if n <= 0 {
+func (r *lcg) intn(numCandidates int) int {
+	if numCandidates <= 0 {
 		return 0
 	}
-	return int(r.next() % uint64(n)) // #nosec G115
+
+	return int(r.next() % uint64(numCandidates)) // #nosec G115
 }
 
 func bootstrap(samples []Sample, rng *lcg) []Sample {
-	n := len(samples)
-	out := make([]Sample, n)
+	numSamples := len(samples)
+	out := make([]Sample, numSamples)
+
 	for i := range out {
-		out[i] = samples[rng.intn(n)]
+		out[i] = samples[rng.intn(numSamples)]
 	}
+
 	return out
 }
 
-func randomFeatureMask(total, k int, rng *lcg) []int {
-	if k > total {
-		k = total
+func randomFeatureMask(total, numFeatures int, rng *lcg) []int {
+	if numFeatures > total {
+		numFeatures = total
 	}
+
 	indices := make([]int, total)
 	for i := range indices {
 		indices[i] = i
 	}
-	// Fisher-Yates partial shuffle for first k elements.
-	for i := 0; i < k; i++ {
+
+	// Fisher-Yates partial shuffle for first numFeatures elements.
+	for i := range numFeatures {
 		j := i + rng.intn(total-i)
 		indices[i], indices[j] = indices[j], indices[i]
 	}
-	return indices[:k]
+
+	return indices[:numFeatures]
 }

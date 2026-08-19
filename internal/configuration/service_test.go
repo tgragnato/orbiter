@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported symbols: fakeRepo, newFakeRepo, defaultSettings, setTyped
 package configuration
 
 import (
@@ -6,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRepo struct {
@@ -16,33 +18,44 @@ type fakeRepo struct {
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{settings: map[string]Setting{}}
+	return &fakeRepo{
+		settings: map[string]Setting{},
+		countErr: nil,
+		setErr:   nil,
+		getErr:   nil,
+	}
 }
 
 func (f *fakeRepo) Get(_ context.Context, key string) (Setting, error) {
 	if f.getErr != nil {
 		return Setting{}, f.getErr
 	}
-	setting, ok := f.settings[key]
-	if !ok {
+
+	stored, exists := f.settings[key]
+	if !exists {
 		return Setting{}, ErrSettingNotFound
 	}
-	return setting, nil
+
+	return stored, nil
 }
 
 func (f *fakeRepo) Set(_ context.Context, setting Setting) error {
 	if f.setErr != nil {
 		return f.setErr
 	}
+
 	f.settings[setting.Key] = setting
+
 	return nil
 }
 
 func (f *fakeRepo) List(_ context.Context) ([]Setting, error) {
 	settings := make([]Setting, 0, len(f.settings))
+
 	for _, s := range f.settings {
 		settings = append(settings, s)
 	}
+
 	return settings, nil
 }
 
@@ -50,6 +63,7 @@ func (f *fakeRepo) Count(_ context.Context) (int, error) {
 	if f.countErr != nil {
 		return 0, f.countErr
 	}
+
 	return len(f.settings), nil
 }
 
@@ -59,7 +73,8 @@ func TestSeedDefaultsIfEmpty(t *testing.T) {
 	ctx := context.Background()
 	repo := newFakeRepo()
 
-	if err := SeedDefaultsIfEmpty(ctx, repo); err != nil {
+	err := SeedDefaultsIfEmpty(ctx, repo)
+	if err != nil {
 		t.Fatalf("SeedDefaultsIfEmpty() error = %v", err)
 	}
 
@@ -67,29 +82,35 @@ func TestSeedDefaultsIfEmpty(t *testing.T) {
 		t.Fatalf("seeded settings count = %d, want %d", len(repo.settings), len(defaultSettings))
 	}
 
-	creds, ok := repo.settings[KeyYahooCredentials]
-	if !ok {
+	creds, exists := repo.settings[KeyYahooCredentials]
+	if !exists {
 		t.Fatalf("missing seeded key %s", KeyYahooCredentials)
 	}
 
 	var credsValue YahooCredentialsSetting
-	if err := json.Unmarshal(creds.ValueJSON, &credsValue); err != nil {
+
+	err = json.Unmarshal(creds.ValueJSON, &credsValue)
+	if err != nil {
 		t.Fatalf("unmarshal yahoo credentials setting failed: %v", err)
 	}
+
 	if credsValue.APIKey != "" {
 		t.Fatalf("default yahoo api key = %q, want empty", credsValue.APIKey)
 	}
 
-	currency, ok := repo.settings[KeyPortfolioBaseCurrency]
-	if !ok {
+	currency, exists := repo.settings[KeyPortfolioBaseCurrency]
+	if !exists {
 		t.Fatalf("missing seeded key %s", KeyPortfolioBaseCurrency)
 	}
 
 	var currencyValue PortfolioBaseCurrencySetting
-	if err := json.Unmarshal(currency.ValueJSON, &currencyValue); err != nil {
+
+	err = json.Unmarshal(currency.ValueJSON, &currencyValue)
+	if err != nil {
 		t.Fatalf("unmarshal base currency setting failed: %v", err)
 	}
-	if currencyValue.Currency != "EUR" {
+
+	if currencyValue.Currency != defaultBaseCurrency {
 		t.Fatalf("default base currency = %q, want EUR", currencyValue.Currency)
 	}
 }
@@ -99,11 +120,20 @@ func TestSeedDefaultsIfEmptySkipsWhenNotEmpty(t *testing.T) {
 
 	ctx := context.Background()
 	repo := newFakeRepo()
-	repo.settings["existing"] = Setting{Key: "existing", ValueJSON: []byte(`{"v":1}`)}
+	repo.settings["existing"] = Setting{
+		Key:         "existing",
+		Scope:       "",
+		Description: "",
+		ValueJSON:   []byte(`{"v":1}`),
+		CreatedAt:   time.Time{},
+		UpdatedAt:   time.Time{},
+	}
 
-	if err := SeedDefaultsIfEmpty(ctx, repo); err != nil {
+	err := SeedDefaultsIfEmpty(ctx, repo)
+	if err != nil {
 		t.Fatalf("SeedDefaultsIfEmpty() error = %v", err)
 	}
+
 	if len(repo.settings) != 1 {
 		t.Fatalf("settings size = %d, want 1", len(repo.settings))
 	}
@@ -116,7 +146,8 @@ func TestSeedDefaultsIfEmptyCountError(t *testing.T) {
 	repo := newFakeRepo()
 	repo.countErr = errors.New("boom")
 
-	if err := SeedDefaultsIfEmpty(ctx, repo); err == nil {
+	err := SeedDefaultsIfEmpty(ctx, repo)
+	if err == nil {
 		t.Fatalf("SeedDefaultsIfEmpty() error = nil, want non-nil")
 	}
 }
@@ -128,7 +159,8 @@ func TestServiceYahooCredentialsRoundtrip(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo)
 
-	if err := svc.SetYahooCredentials(ctx, YahooCredentialsSetting{APIKey: "my-secret-key"}); err != nil {
+	err := svc.SetYahooCredentials(ctx, YahooCredentialsSetting{APIKey: "my-secret-key"})
+	if err != nil {
 		t.Fatalf("SetYahooCredentials() error = %v", err)
 	}
 
@@ -136,6 +168,7 @@ func TestServiceYahooCredentialsRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetYahooCredentials() error = %v", err)
 	}
+
 	if creds.APIKey != "my-secret-key" {
 		t.Fatalf("APIKey = %q, want my-secret-key", creds.APIKey)
 	}
@@ -148,7 +181,8 @@ func TestServiceBaseCurrencyRoundtrip(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo)
 
-	if err := svc.SetBaseCurrency(ctx, "USD"); err != nil {
+	err := svc.SetBaseCurrency(ctx, "USD")
+	if err != nil {
 		t.Fatalf("SetBaseCurrency() error = %v", err)
 	}
 
@@ -156,6 +190,7 @@ func TestServiceBaseCurrencyRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetBaseCurrency() error = %v", err)
 	}
+
 	if curr != "USD" {
 		t.Fatalf("currency = %q, want USD", curr)
 	}
@@ -168,7 +203,8 @@ func TestServiceBaseCurrencyValidation(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo)
 
-	if err := svc.SetBaseCurrency(ctx, "INVALID"); err == nil {
+	err := svc.SetBaseCurrency(ctx, "INVALID")
+	if err == nil {
 		t.Fatalf("SetBaseCurrency() error = nil for invalid currency, want non-nil")
 	}
 }
@@ -178,12 +214,16 @@ func TestServiceValidateRequired(t *testing.T) {
 
 	ctx := context.Background()
 	repo := newFakeRepo()
-	if err := SeedDefaultsIfEmpty(ctx, repo); err != nil {
+
+	err := SeedDefaultsIfEmpty(ctx, repo)
+	if err != nil {
 		t.Fatalf("SeedDefaultsIfEmpty() error = %v", err)
 	}
 
 	svc := NewService(repo)
-	if err := svc.ValidateRequired(ctx); err != nil {
+
+	err = svc.ValidateRequired(ctx)
+	if err != nil {
 		t.Fatalf("ValidateRequired() error = %v", err)
 	}
 }
@@ -208,8 +248,17 @@ func TestServiceInvalidStoredSettings(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo)
 
-	repo.settings[KeyYahooCredentials] = Setting{Key: KeyYahooCredentials, ValueJSON: []byte(`not-json`)}
-	if _, err := svc.GetYahooCredentials(ctx); err == nil || !strings.Contains(err.Error(), "cannot decode JSON") {
+	repo.settings[KeyYahooCredentials] = Setting{
+		Key:         KeyYahooCredentials,
+		Scope:       "",
+		Description: "",
+		ValueJSON:   []byte(`not-json`),
+		CreatedAt:   time.Time{},
+		UpdatedAt:   time.Time{},
+	}
+
+	_, err := svc.GetYahooCredentials(ctx)
+	if err == nil || !strings.Contains(err.Error(), "cannot decode JSON") {
 		t.Fatalf("GetYahooCredentials() error = %v, want decode error", err)
 	}
 }

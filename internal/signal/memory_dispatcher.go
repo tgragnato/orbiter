@@ -10,14 +10,19 @@ type MemoryDispatcher struct {
 
 // NewMemoryDispatcher creates an empty in-memory signal queue.
 func NewMemoryDispatcher() *MemoryDispatcher {
-	return &MemoryDispatcher{}
+	return &MemoryDispatcher{
+		mu:       sync.Mutex{},
+		messages: nil,
+	}
 }
 
 // Dispatch appends one message to the queue.
 func (d *MemoryDispatcher) Dispatch(message Message) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	d.messages = append(d.messages, message)
+
 	return nil
 }
 
@@ -28,6 +33,7 @@ func (d *MemoryDispatcher) Messages() []Message {
 
 	clone := make([]Message, len(d.messages))
 	copy(clone, d.messages)
+
 	return clone
 }
 
@@ -39,5 +45,6 @@ func (d *MemoryDispatcher) Drain() []Message {
 	clone := make([]Message, len(d.messages))
 	copy(clone, d.messages)
 	d.messages = nil
+
 	return clone
 }

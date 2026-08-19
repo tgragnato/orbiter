@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported tui symbols (settingsLoadedMsg, settingsSavedMsg, fakeSettingsService)
 package tui
 
 import (
@@ -23,7 +24,9 @@ func (f *fakeSettingsService) GetYahooCredentials(_ context.Context) (configurat
 	return configuration.YahooCredentialsSetting{APIKey: f.apiKey}, f.loadErr
 }
 
-func (f *fakeSettingsService) SetYahooCredentials(_ context.Context, value configuration.YahooCredentialsSetting) error {
+func (f *fakeSettingsService) SetYahooCredentials(
+	_ context.Context, value configuration.YahooCredentialsSetting,
+) error {
 	f.apiKey = value.APIKey
 	return f.saveErr
 }
@@ -270,7 +273,11 @@ func TestSettingsTabViewContainsExpectedSections(t *testing.T) {
 	m := NewSettingsTabModel(nil)
 	view := m.View()
 
-	for _, want := range []string{"Data Provider Credentials", "Portfolio Currency", "Yahoo API Key", "Base Currency", "TAA Broker Configuration", "Tax Rate", "Broker Fee", "Max Broker Fee", "Buffer"} {
+	wantSections := []string{
+		"Data Provider Credentials", "Portfolio Currency", "Yahoo API Key",
+		"Base Currency", "TAA Broker Configuration", "Tax Rate", "Broker Fee", "Max Broker Fee", "Buffer",
+	}
+	for _, want := range wantSections {
 		if !strings.Contains(view, want) {
 			t.Errorf("View() missing %q", want)
 		}

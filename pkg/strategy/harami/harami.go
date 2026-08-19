@@ -1,3 +1,4 @@
+// Package harami implements the bullish harami candlestick pattern strategy.
 package harami
 
 import (
@@ -18,6 +19,7 @@ import (
 // Buy if current closed candle is a bullish harami candle and market is still above SMA 200
 // Source: https://www.youtube.com/watch?v=_9Bmxylp63Y
 
+// Harami is a strategy based on the bullish harami candlestick pattern.
 type Harami struct {
 	clog          *slog.Logger
 	instrument    string
@@ -29,11 +31,15 @@ type Harami struct {
 }
 
 const (
-	targetInPercent   = 5.0
-	stopLossInPercent = 0.5
-	smaCandles        = 200
+	targetInPercent      = 5.0
+	stopLossInPercent    = 0.5
+	smaCandles           = 200
+	previousCandlesCount = 7
+	defaultOrderSize     = 1.0
+	minCandlesForScore   = 2
 )
 
+// New creates a new Harami strategy instance for the given instrument and candle duration.
 func New(instrument string, candleDuration time.Duration) *Harami {
 	clog := slog.With("INSTRUMENT", instrument, "CANDLE", candleDuration)
 
@@ -41,121 +47,94 @@ func New(instrument string, candleDuration time.Duration) *Harami {
 		clog:          clog,
 		instrument:    instrument,
 		sma:           sma.New(smaCandles),
-		previousLows:  circularbuffer.New(7, 7),
-		previousHighs: circularbuffer.New(7, 7),
+		previousLows:  circularbuffer.New(previousCandlesCount, previousCandlesCount),
+		previousHighs: circularbuffer.New(previousCandlesCount, previousCandlesCount),
 		ohlcPeriod:    candleDuration,
+		openPositions: nil,
 	}
 }
 
-func (h *Harami) GetWarmUpCandleAmount() uint {
-	return smaCandles
-}
-
-func (h *Harami) OnWarmUpCandle(closedCandle *ohlc.OHLC) {
-	h.feedIndicator(closedCandle)
-}
-
-func (h *Harami) feedIndicator(closedCandle *ohlc.OHLC) {
-	var high = closedCandle.High
-	var low = closedCandle.Low
-	h.sma.Insert(closedCandle)
-	h.previousLows.Insert(low)
-	h.previousHighs.Insert(high)
-}
-
+// GetCandleDuration returns the candle duration used by this strategy.
 func (h *Harami) GetCandleDuration() time.Duration {
 	return h.ohlcPeriod
 }
 
-func (h *Harami) isBearishCandle(candle *ohlc.OHLC) bool {
-	return candle.Close < candle.Open
+// GetWarmUpCandleAmount returns the number of candles needed to warm up the strategy.
+func (h *Harami) GetWarmUpCandleAmount() uint {
+	return smaCandles
 }
 
-func (h *Harami) isBullishCandle(candle *ohlc.OHLC) bool {
-	return candle.Close > candle.Open
+// Name returns the strategy name.
+func (h *Harami) Name() string {
+	return strategy.NameHarami
 }
 
-func (h *Harami) isHaramiLong(firstCandle, secondCandle *ohlc.OHLC) bool {
-	if h.isBearishCandle(firstCandle) && h.isBullishCandle(secondCandle) &&
-		secondCandle.High < firstCandle.Open &&
-		secondCandle.Low > firstCandle.Close {
-		return true
-	}
-	return false
-}
+// OnCandle processes a closed candle and returns orders to open, close, and positions to close.
+func (h *Harami) OnCandle( //nolint:nonamedreturns // named returns used to satisfy gocritic unnamedResult
+	closedCandles []*ohlc.OHLC,
+) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
+	closedCandle := closedCandles[len(closedCandles)-1]
 
-func (h *Harami) OnPosition(_, _ []broker.Position) {}
-
-func (h *Harami) OnOrder(_ []broker.Order) {}
-
-func (h *Harami) OnTick(_ tick.Tick) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
-	return
-}
-
-func (h *Harami) OnCandle(closedCandles []*ohlc.OHLC) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
-	var closedCandle = closedCandles[len(closedCandles)-1]
-	var closePrice = closedCandle.Close
+	closePrice := closedCandle.Close
 
 	defer h.feedIndicator(closedCandle)
 
 	smaValue, err := h.sma.Value()
 	if err != nil {
 		slog.Warn("No SMA", "error", err)
-		return
+
+		return nil, nil, nil
 	}
+
 	smaPrice := smaValue[sma.Value]
 
 	if len(h.openPositions) > 0 {
 		if closePrice < smaPrice {
-			toClosePositions = h.openPositions
-			return
+			return nil, nil, h.openPositions
 		}
 
 		previousCandlesHigh, err := h.previousHighs.Max()
 		if err != nil {
-			return
+			return nil, nil, nil
 		}
+
 		if closedCandle.Close > previousCandlesHigh {
-			toClosePositions = h.openPositions
-			return
+			return nil, nil, h.openPositions
 		}
-		return
+
+		return nil, nil, nil
 	}
 
 	latestCandle := closedCandles[len(closedCandles)-1]
+
 	secondLatestCandle := closedCandles[len(closedCandles)-2]
 	if h.isHaramiLong(secondLatestCandle, latestCandle) {
-		toOpenNew := h.prepareOrder(closedCandle, broker.BuyDirectionLong, 1.00)
+		toOpenNew := h.prepareOrder(closedCandle, broker.BuyDirectionLong, defaultOrderSize)
+
 		return []broker.Order{toOpenNew}, []broker.Order{}, []broker.Position{}
 	}
 
 	h.clog.Debug("no harami long candle found", "candle", closedCandle)
-	return
+
+	return nil, nil, nil
 }
 
-func (h *Harami) prepareOrder(closedCandle *ohlc.OHLC, direction broker.BuyDirection, size float64) broker.Order {
-	var (
-		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, targetInPercent, direction)
-		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, stopLossInPercent, direction)
-	)
+// OnOrder is called when orders are updated (no-op for this strategy).
+func (h *Harami) OnOrder(_ []broker.Order) {}
 
-	h.clog.Debug("Prepare new order",
-		"Direction", direction.String(),
-		"Time", closedCandle.End,
-		"Close", closedCandle.Close,
-		"Target", targetInPercent,
-		"StopLoss", stopLossPrice,
-	)
+// OnPosition is called when positions are updated (no-op for this strategy).
+func (h *Harami) OnPosition(_, _ []broker.Position) {}
 
-	return broker.NewMarketOrder(direction, size, h.instrument, targetPrice, stopLossPrice)
+// OnTick is called on every tick (no-op for this strategy).
+func (h *Harami) OnTick( //nolint:nonamedreturns // named returns used to satisfy gocritic unnamedResult
+	_ tick.Tick,
+) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
+	return nil, nil, nil
 }
 
-func (h *Harami) Name() string {
-	return strategy.NameHarami
-}
-
-func (h *Harami) String() string {
-	return fmt.Sprintf("%s: Target=%.2f StopLoss=%.2f", h.Name(), targetInPercent, stopLossInPercent)
+// OnWarmUpCandle feeds an OHLC candle into the strategy indicators during warm-up.
+func (h *Harami) OnWarmUpCandle(closedCandle *ohlc.OHLC) {
+	h.feedIndicator(closedCandle)
 }
 
 // Score returns a continuous conviction in [-1.0, +1.0] based on the strength of the Harami pattern.
@@ -163,9 +142,10 @@ func (h *Harami) String() string {
 // A score of -1.0 indicates a strong bearish Harami (large previous candle, small current candle body).
 // A score of 0 indicates no Harami pattern is present.
 func (h *Harami) Score(closedCandles []*ohlc.OHLC) float64 {
-	if len(closedCandles) < 2 {
+	if len(closedCandles) < minCandlesForScore {
 		return 0
 	}
+
 	second := closedCandles[len(closedCandles)-2]
 	first := closedCandles[len(closedCandles)-1]
 
@@ -196,14 +176,65 @@ func (h *Harami) Score(closedCandles []*ohlc.OHLC) float64 {
 		if score > 1.0 {
 			return 1.0
 		}
+
 		return score
 	} else if first.Close < first.Open {
 		// Bearish Harami
 		if score > 1.0 {
 			return -1.0
 		}
+
 		return -score
 	}
 
 	return 0
+}
+
+// String returns a human-readable description of the strategy.
+func (h *Harami) String() string {
+	return fmt.Sprintf("%s: Target=%.2f StopLoss=%.2f", h.Name(), targetInPercent, stopLossInPercent)
+}
+
+func (h *Harami) feedIndicator(closedCandle *ohlc.OHLC) {
+	high := closedCandle.High
+
+	low := closedCandle.Low
+	h.sma.Insert(closedCandle)
+	h.previousLows.Insert(low)
+	h.previousHighs.Insert(high)
+}
+
+func (h *Harami) isBearishCandle(candle *ohlc.OHLC) bool {
+	return candle.Close < candle.Open
+}
+
+func (h *Harami) isBullishCandle(candle *ohlc.OHLC) bool {
+	return candle.Close > candle.Open
+}
+
+func (h *Harami) isHaramiLong(firstCandle, secondCandle *ohlc.OHLC) bool {
+	if h.isBearishCandle(firstCandle) && h.isBullishCandle(secondCandle) &&
+		secondCandle.High < firstCandle.Open &&
+		secondCandle.Low > firstCandle.Close {
+		return true
+	}
+
+	return false
+}
+
+func (h *Harami) prepareOrder(closedCandle *ohlc.OHLC, direction broker.BuyDirection, size float64) broker.Order {
+	var (
+		targetPrice   = helper.CalcTargetPriceByPercentage(closedCandle.Close, targetInPercent, direction)
+		stopLossPrice = helper.CalcStopLossPriceByPercentage(closedCandle.Close, stopLossInPercent, direction)
+	)
+
+	h.clog.Debug("Prepare new order",
+		"Direction", direction.String(),
+		"Time", closedCandle.End,
+		"Close", closedCandle.Close,
+		"Target", targetInPercent,
+		"StopLoss", stopLossPrice,
+	)
+
+	return broker.NewMarketOrder(direction, size, h.instrument, targetPrice, stopLossPrice)
 }

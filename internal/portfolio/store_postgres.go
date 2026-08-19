@@ -3,11 +3,20 @@ package portfolio
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 )
+
+// Sentinel errors for holding lookups.
+var (
+	ErrHoldingNotFound       = errors.New("holding not found")
+	ErrHoldingSymbolNotFound = errors.New("holding symbol not found")
+)
+
+const defaultCurrency = "EUR"
 
 // HoldingsStore is the persistence contract used by the holdings TUI.
 type HoldingsStore interface {
@@ -26,7 +35,7 @@ type PostgresStore struct {
 
 // NewPostgresStore creates a holdings store bound to PostgreSQL.
 func NewPostgresStore(db *sql.DB) *PostgresStore {
-	return &PostgresStore{db: db}
+	return &PostgresStore{db: db, portfolioID: ""}
 }
 
 // WithPortfolioID enables immediate cash-flow recording after AddTransaction.
@@ -35,6 +44,7 @@ func NewPostgresStore(db *sql.DB) *PostgresStore {
 // The next startup's backfill replaces these rows with adjusted-close prices.
 func (s *PostgresStore) WithPortfolioID(portfolioID string) *PostgresStore {
 	s.portfolioID = portfolioID
+
 	return s
 }
 
@@ -46,29 +56,39 @@ func (s *PostgresStore) ListHoldings(ctx context.Context) ([]Holding, error) {
 		ORDER BY symbol, id
 	`)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list holdings: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	holdings := make([]Holding, 0)
+
 	for rows.Next() {
-		var h Holding
+		var holding Holding
+
 		var allocation string
-		if err := rows.Scan(&h.ID, &h.Symbol, &h.Quantity, &h.MarketPrice, &h.PMC, &allocation, &h.TAAEnabled, &h.Currency); err != nil {
-			return nil, err
+
+		err = rows.Scan(
+			&holding.ID, &holding.Symbol, &holding.Quantity, &holding.MarketPrice,
+			&holding.PMC, &allocation, &holding.TAAEnabled, &holding.Currency,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan holding: %w", err)
 		}
-		h.AllocationType = parseAllocationType(allocation)
-		holdings = append(holdings, h)
+
+		holding.AllocationType = parseAllocationType(allocation)
+		holdings = append(holdings, holding)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate holdings: %w", err)
 	}
 
 	return holdings, nil
 }
 
 // ToggleAllocation swaps one holding allocation between CORE and SATELLITE.
-func (s *PostgresStore) ToggleAllocation(ctx context.Context, id int64) error {
+func (s *PostgresStore) ToggleAllocation(ctx context.Context, holdingID int64) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE holdings
 		SET allocation_type = CASE allocation_type
@@ -77,17 +97,18 @@ func (s *PostgresStore) ToggleAllocation(ctx context.Context, id int64) error {
 		END,
 		updated_at = NOW()
 		WHERE id = $1
-	`, id)
+	`, holdingID)
 	if err != nil {
-		return err
+		return fmt.Errorf("toggle allocation: %w", err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("toggle allocation rows affected: %w", err)
 	}
+
 	if rowsAffected == 0 {
-		return fmt.Errorf("holding id %d not found", id)
+		return fmt.Errorf("holding id %d: %w", holdingID, ErrHoldingNotFound)
 	}
 
 	return nil
@@ -102,15 +123,16 @@ func (s *PostgresStore) ToggleTAAEnabled(ctx context.Context, symbol string) err
 		WHERE symbol = $1
 	`, symbol)
 	if err != nil {
-		return err
+		return fmt.Errorf("toggle taa enabled: %w", err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return fmt.Errorf("toggle taa enabled rows affected: %w", err)
 	}
+
 	if rowsAffected == 0 {
-		return fmt.Errorf("holding symbol %q not found", symbol)
+		return fmt.Errorf("holding symbol %q: %w", symbol, ErrHoldingSymbolNotFound)
 	}
 
 	return nil
@@ -123,20 +145,15 @@ func (s *PostgresStore) TotalRealizedPnL(ctx context.Context) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	states := ComputeHoldingStates(txs, nil)
 	total := 0.0
-	for _, st := range states {
-		total += st.RealizedPnL
-	}
-	return total, nil
-}
 
-func parseAllocationType(value string) AllocationType {
-	upper := strings.ToUpper(strings.TrimSpace(value))
-	if upper == string(AllocationCore) {
-		return AllocationCore
+	for _, state := range states {
+		total += state.RealizedPnL
 	}
-	return AllocationSatellite
+
+	return total, nil
 }
 
 // AddTransaction inserts a trade record and immediately recalculates only the
@@ -144,209 +161,80 @@ func parseAllocationType(value string) AllocationType {
 // When WithPortfolioID has been set, it also appends a cash_flows row so TWR
 // stays approximately correct within the current session without waiting for the
 // next startup backfill.
-func (s *PostgresStore) AddTransaction(ctx context.Context, tx Transaction) error {
+func (s *PostgresStore) AddTransaction(ctx context.Context, txn Transaction) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO transactions
 			(symbol, transaction_type, quantity, price, fee, allocation_type, currency, executed_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, tx.Symbol, string(tx.Type), tx.Quantity, tx.Price, tx.Fee,
-		string(tx.AllocationType), tx.Currency, tx.ExecutedAt)
+	`, txn.Symbol, string(txn.Type), txn.Quantity, txn.Price, txn.Fee,
+		string(txn.AllocationType), txn.Currency, txn.ExecutedAt)
 	if err != nil {
 		return fmt.Errorf("insert transaction: %w", err)
 	}
-	if err := s.recalculateSymbol(ctx, tx.Symbol); err != nil {
+
+	err = s.recalculateSymbol(ctx, txn.Symbol)
+	if err != nil {
 		return err
 	}
+
 	if s.portfolioID != "" {
-		if err := s.recordLiveFlow(ctx, tx); err != nil {
+		err = s.recordLiveFlow(ctx, txn)
+		if err != nil {
 			// Non-fatal: TWR will be corrected on next startup backfill.
-			slog.Warn("portfolio: live cash-flow record failed", "symbol", tx.Symbol, "error", err)
+			slog.Warn("portfolio: live cash-flow record failed", "symbol", txn.Symbol, "error", err)
 		}
 	}
+
 	return nil
 }
 
-// recordLiveFlow inserts a single cash-flow row for a transaction executed in
-// the current session. It uses tx.Price (not Yahoo AdjustedClose) because the
-// adjusted price for today's candle is not yet available. The next startup
-// backfill will replace all asset='AUTO' rows with adjusted-price equivalents,
-// so this is only an intra-session approximation.
-func (s *PostgresStore) recordLiveFlow(ctx context.Context, tx Transaction) error {
-	var flowType string
-	var amount float64
-	day := tx.ExecutedAt.UTC().Truncate(24 * time.Hour)
-
-	switch tx.Type {
-	case TransactionBuy:
-		flowType = "DEPOSIT"
-		amount = tx.Quantity*tx.Price + tx.Fee
-	case TransactionSell:
-		flowType = "WITHDRAWAL"
-		amount = tx.Quantity*tx.Price - tx.Fee
-		if amount <= 0 {
-			return nil
-		}
-	default:
-		return nil
-	}
-
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO cash_flows (portfolio_id, flow_type, amount, asset, currency, occurred_at)
-		VALUES ($1, $2, $3, 'AUTO', $4, $5)
-	`, s.portfolioID, flowType, amount, tx.Currency, day)
-	return err
-}
-
-// UpdateTransaction overwrites a trade record identified by tx.ID and
+// UpdateTransaction overwrites a trade record identified by txn.ID and
 // recalculates the affected holding(s). If the symbol changes, both the old
 // and the new symbol's holding are recalculated.
-func (s *PostgresStore) UpdateTransaction(ctx context.Context, tx Transaction) error {
+func (s *PostgresStore) UpdateTransaction(ctx context.Context, txn Transaction) error {
 	var oldSymbol string
-	_ = s.db.QueryRowContext(ctx, `SELECT symbol FROM transactions WHERE id = $1`, tx.ID).Scan(&oldSymbol)
+
+	_ = s.db.QueryRowContext(ctx, `SELECT symbol FROM transactions WHERE id = $1`, txn.ID).Scan(&oldSymbol)
 
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE transactions
 		SET symbol = $1, transaction_type = $2, quantity = $3, price = $4,
 		    fee = $5, allocation_type = $6, executed_at = $7
 		WHERE id = $8
-	`, tx.Symbol, string(tx.Type), tx.Quantity, tx.Price, tx.Fee,
-		string(tx.AllocationType), tx.ExecutedAt, tx.ID)
+	`, txn.Symbol, string(txn.Type), txn.Quantity, txn.Price, txn.Fee,
+		string(txn.AllocationType), txn.ExecutedAt, txn.ID)
 	if err != nil {
-		return fmt.Errorf("update transaction %d: %w", tx.ID, err)
+		return fmt.Errorf("update transaction %d: %w", txn.ID, err)
 	}
-	if err := s.recalculateSymbol(ctx, tx.Symbol); err != nil {
+
+	err = s.recalculateSymbol(ctx, txn.Symbol)
+	if err != nil {
 		return err
 	}
-	if oldSymbol != "" && oldSymbol != tx.Symbol {
+
+	if oldSymbol != "" && oldSymbol != txn.Symbol {
 		return s.recalculateSymbol(ctx, oldSymbol)
 	}
+
 	return nil
 }
 
 // DeleteTransaction removes a trade record and recalculates the affected holding.
 // If the symbol had only this one transaction, the holding is removed entirely.
-func (s *PostgresStore) DeleteTransaction(ctx context.Context, id int64) error {
+func (s *PostgresStore) DeleteTransaction(ctx context.Context, txnID int64) error {
 	var symbol string
-	if err := s.db.QueryRowContext(ctx, `SELECT symbol FROM transactions WHERE id = $1`, id).Scan(&symbol); err != nil {
-		return fmt.Errorf("find transaction %d: %w", id, err)
+
+	err := s.db.QueryRowContext(ctx, `SELECT symbol FROM transactions WHERE id = $1`, txnID).Scan(&symbol)
+	if err != nil {
+		return fmt.Errorf("find transaction %d: %w", txnID, err)
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM transactions WHERE id = $1`, id); err != nil {
-		return fmt.Errorf("delete transaction %d: %w", id, err)
+
+	_, err = s.db.ExecContext(ctx, `DELETE FROM transactions WHERE id = $1`, txnID)
+	if err != nil {
+		return fmt.Errorf("delete transaction %d: %w", txnID, err)
 	}
+
 	return s.recalculateSymbol(ctx, symbol)
-}
-
-// recalculateSymbol recomputes quantity and PMC for a single symbol by replaying
-// its full transaction history. It preserves the existing market_price and
-// taa_enabled flag; closed positions (zero net quantity) are kept with qty=0.
-func (s *PostgresStore) recalculateSymbol(ctx context.Context, symbol string) error {
-	txs, err := s.ListTransactions(ctx, symbol)
-	if err != nil {
-		return err
-	}
-
-	// No transactions remain — remove the holding and all dividend records entirely.
-	if len(txs) == 0 {
-		if _, err := s.db.ExecContext(ctx, `DELETE FROM holdings WHERE symbol = $1`, symbol); err != nil {
-			return err
-		}
-		_, err = s.db.ExecContext(ctx, `DELETE FROM dividend_income_records WHERE symbol = $1`, symbol)
-		return err
-	}
-
-	splits, err := s.listSplitsForSymbol(ctx, symbol)
-	if err != nil {
-		return fmt.Errorf("list splits for %s: %w", symbol, err)
-	}
-	splitMap := map[string][]SplitEvent{symbol: splits}
-	states := ComputeHoldingStates(txs, splitMap)
-	state := states[symbol]
-
-	dbTx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin recalculate %s: %w", symbol, err)
-	}
-	defer dbTx.Rollback() //nolint:errcheck // rollback is a no-op after Commit; the Commit error is the one that matters
-
-	oldTAAEnabled := true
-	var oldPrice float64
-	var oldAllocType, oldCurrency string
-	_ = dbTx.QueryRowContext(ctx,
-		`SELECT COALESCE(market_price, 0), COALESCE(taa_enabled, true), COALESCE(allocation_type, 'SATELLITE'), COALESCE(currency, 'EUR') FROM holdings WHERE symbol = $1 LIMIT 1`,
-		symbol,
-	).Scan(&oldPrice, &oldTAAEnabled, &oldAllocType, &oldCurrency)
-
-	// If ComputeHoldingStates produced no allocation type (e.g. all SELLs), fall back to the
-	// previously stored type so the DB NOT NULL constraint is satisfied.
-	allocType := string(state.AllocationType)
-	if allocType == "" {
-		allocType = oldAllocType
-	}
-	// Preserve currency from state replay if available; otherwise keep DB value.
-	currency := state.Currency
-	if currency == "" {
-		currency = oldCurrency
-	}
-	if currency == "" {
-		currency = "EUR"
-	}
-
-	if _, err := dbTx.ExecContext(ctx, `DELETE FROM holdings WHERE symbol = $1`, symbol); err != nil {
-		return fmt.Errorf("delete holdings for %s: %w", symbol, err)
-	}
-
-	// Always re-insert: active positions get real qty/PMC; closed positions get
-	// qty=0 and pmc=0 but preserve taa_enabled, allocation_type, and currency for history.
-	if _, err := dbTx.ExecContext(ctx, `
-		INSERT INTO holdings
-			(symbol, quantity, market_price, pmc, allocation_type, taa_enabled, currency, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, symbol, state.Quantity, oldPrice, state.PMC,
-		allocType, oldTAAEnabled, currency, time.Now().UTC(),
-	); err != nil {
-		return fmt.Errorf("insert holding for %s: %w", symbol, err)
-	}
-
-	if err := dbTx.Commit(); err != nil {
-		return err
-	}
-	return s.cleanupStaleDividendRecords(ctx, symbol, txs)
-}
-
-// cleanupStaleDividendRecords deletes any dividend_income_records for the given
-// symbol whose ex_date falls in a period when the quantity held was zero (as
-// determined by replaying the current transaction history). This keeps the
-// table consistent whenever transactions are added, edited, or deleted.
-func (s *PostgresStore) cleanupStaleDividendRecords(ctx context.Context, symbol string, txs []Transaction) error {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT ex_date FROM dividend_income_records WHERE symbol = $1`, symbol)
-	if err != nil {
-		return fmt.Errorf("list dividend dates for cleanup %s: %w", symbol, err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var toDelete []time.Time
-	for rows.Next() {
-		var exDate time.Time
-		if err := rows.Scan(&exDate); err != nil {
-			return fmt.Errorf("scan ex_date for cleanup: %w", err)
-		}
-		if QuantityAtDate(txs, exDate) <= 0 {
-			toDelete = append(toDelete, exDate)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for _, d := range toDelete {
-		if _, err := s.db.ExecContext(ctx,
-			`DELETE FROM dividend_income_records WHERE symbol = $1 AND ex_date = $2`,
-			symbol, d); err != nil {
-			return fmt.Errorf("delete stale dividend %s %s: %w", symbol, d.Format("2006-01-02"), err)
-		}
-	}
-	return nil
 }
 
 // ListTransactions returns trade records ordered by execution time.
@@ -357,11 +245,15 @@ func (s *PostgresStore) ListTransactions(ctx context.Context, symbol string) ([]
 		       allocation_type, currency, executed_at, created_at
 		FROM transactions
 	`
+
 	var args []any
+
 	if symbol != "" {
 		query += " WHERE symbol = $1"
+
 		args = append(args, symbol)
 	}
+
 	query += " ORDER BY executed_at ASC"
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -371,30 +263,46 @@ func (s *PostgresStore) ListTransactions(ctx context.Context, symbol string) ([]
 	defer func() { _ = rows.Close() }()
 
 	var txs []Transaction
+
 	for rows.Next() {
-		var t Transaction
+		var transactionRecord Transaction
+
 		var txType, allocType string
-		if err := rows.Scan(
-			&t.ID, &t.Symbol, &txType, &t.Quantity, &t.Price, &t.Fee,
-			&allocType, &t.Currency, &t.ExecutedAt, &t.CreatedAt,
-		); err != nil {
+
+		err = rows.Scan(
+			&transactionRecord.ID, &transactionRecord.Symbol, &txType, &transactionRecord.Quantity,
+			&transactionRecord.Price, &transactionRecord.Fee,
+			&allocType, &transactionRecord.Currency, &transactionRecord.ExecutedAt,
+			&transactionRecord.CreatedAt,
+		)
+		if err != nil {
 			return nil, fmt.Errorf("scan transaction: %w", err)
 		}
-		t.Type = TransactionType(strings.ToUpper(txType))
-		t.AllocationType = parseAllocationType(allocType)
-		txs = append(txs, t)
+
+		transactionRecord.Type = TransactionType(strings.ToUpper(txType))
+		transactionRecord.AllocationType = parseAllocationType(allocType)
+		txs = append(txs, transactionRecord)
 	}
-	return txs, rows.Err()
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate transactions: %w", err)
+	}
+
+	return txs, nil
 }
 
 // RecalculateHoldings recomputes quantity and PMC for every symbol that has at
 // least one transaction, using the Italian weighted-average cost method. Existing
 // market_price and taa_enabled values are preserved; closed positions keep qty=0.
+//
+//nolint:cyclop,funlen // SQL transaction logic requires multiple sequential steps across all symbols
 func (s *PostgresStore) RecalculateHoldings(ctx context.Context) error {
 	txs, err := s.ListTransactions(ctx, "")
 	if err != nil {
 		return err
 	}
+
 	if len(txs) == 0 {
 		return nil
 	}
@@ -403,6 +311,7 @@ func (s *PostgresStore) RecalculateHoldings(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list all splits: %w", err)
 	}
+
 	states := ComputeHoldingStates(txs, splitMap)
 
 	dbTx, err := s.db.BeginTx(ctx, nil)
@@ -413,39 +322,52 @@ func (s *PostgresStore) RecalculateHoldings(ctx context.Context) error {
 
 	for symbol, state := range states {
 		oldTAAEnabled := true
+
 		var oldPrice float64
+
 		var oldCurrency string
+
 		_ = dbTx.QueryRowContext(ctx,
-			`SELECT COALESCE(market_price, 0), COALESCE(taa_enabled, true), COALESCE(currency, 'EUR') FROM holdings WHERE symbol = $1 LIMIT 1`,
+			`SELECT COALESCE(market_price, 0), COALESCE(taa_enabled, true), `+
+				`COALESCE(currency, 'EUR') FROM holdings WHERE symbol = $1 LIMIT 1`,
 			symbol,
 		).Scan(&oldPrice, &oldTAAEnabled, &oldCurrency)
 
 		currency := state.Currency
+
 		if currency == "" {
 			currency = oldCurrency
 		}
+
 		if currency == "" {
-			currency = "EUR"
+			currency = defaultCurrency
 		}
 
-		if _, err := dbTx.ExecContext(ctx,
+		_, err = dbTx.ExecContext(ctx,
 			`DELETE FROM holdings WHERE symbol = $1`, symbol,
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("delete holdings for %s: %w", symbol, err)
 		}
 
-		if _, err := dbTx.ExecContext(ctx, `
+		_, err = dbTx.ExecContext(ctx, `
 			INSERT INTO holdings
 				(symbol, quantity, market_price, pmc, allocation_type, taa_enabled, currency, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		`, symbol, state.Quantity, oldPrice, state.PMC,
 			string(state.AllocationType), oldTAAEnabled, currency, time.Now().UTC(),
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("insert holding for %s: %w", symbol, err)
 		}
 	}
 
-	return dbTx.Commit()
+	err = dbTx.Commit()
+	if err != nil {
+		return fmt.Errorf("commit recalculate holdings: %w", err)
+	}
+
+	return nil
 }
 
 // UpdateMarketPrice stores a fresh market quote for the named holding.
@@ -454,32 +376,40 @@ func (s *PostgresStore) UpdateMarketPrice(ctx context.Context, symbol string, pr
 		`UPDATE holdings SET market_price = $1, updated_at = NOW() WHERE symbol = $2`,
 		price, symbol,
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("update market price %s: %w", symbol, err)
+	}
+
+	return nil
 }
 
 // FirstTransactionDate returns the execution date of the earliest transaction
 // for the given symbol, used to determine the start of the candle history needed
 // for dividend backfill.
 func (s *PostgresStore) FirstTransactionDate(ctx context.Context, symbol string) (time.Time, error) {
-	var t time.Time
+	var firstDate time.Time
+
 	err := s.db.QueryRowContext(ctx,
 		`SELECT MIN(executed_at) FROM transactions WHERE symbol = $1`, symbol,
-	).Scan(&t)
+	).Scan(&firstDate)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("first transaction date for %s: %w", symbol, err)
 	}
-	return t.UTC(), nil
+
+	return firstDate.UTC(), nil
 }
 
 // UpsertDividendIncomes inserts or updates dividend income records.
 // Records are keyed on (symbol, ex_date); existing rows are overwritten so
 // that a re-run with updated quantities always reflects the current position.
 func (s *PostgresStore) UpsertDividendIncomes(ctx context.Context, records []DividendRecord) error {
-	for _, r := range records {
-		currency := r.Currency
+	for _, record := range records {
+		currency := record.Currency
+
 		if currency == "" {
-			currency = "EUR"
+			currency = defaultCurrency
 		}
+
 		_, err := s.db.ExecContext(ctx, `
 			INSERT INTO dividend_income_records
 				(symbol, ex_date, quantity, cash_dividend_per_share, income_amount, currency)
@@ -489,11 +419,16 @@ func (s *PostgresStore) UpsertDividendIncomes(ctx context.Context, records []Div
 				cash_dividend_per_share = EXCLUDED.cash_dividend_per_share,
 				income_amount           = EXCLUDED.income_amount,
 				currency                = EXCLUDED.currency
-		`, r.Symbol, r.ExDate, r.Quantity, r.CashDividendPerShare, r.IncomeAmount, currency)
+		`, record.Symbol, record.ExDate, record.Quantity,
+			record.CashDividendPerShare, record.IncomeAmount, currency)
 		if err != nil {
-			return fmt.Errorf("upsert dividend income %s %s: %w", r.Symbol, r.ExDate.Format("2006-01-02"), err)
+			return fmt.Errorf(
+				"upsert dividend income %s %s: %w",
+				record.Symbol, record.ExDate.Format("2006-01-02"), err,
+			)
 		}
 	}
+
 	return nil
 }
 
@@ -502,12 +437,14 @@ func (s *PostgresStore) UpsertDividendIncomes(ctx context.Context, records []Div
 // so no filtering by current holdings quantity is needed.
 func (s *PostgresStore) TotalDividendIncome(ctx context.Context) (float64, error) {
 	var total float64
+
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COALESCE(SUM(income_amount), 0) FROM dividend_income_records
 	`).Scan(&total)
 	if err != nil {
 		return 0, fmt.Errorf("total dividend income: %w", err)
 	}
+
 	return total, nil
 }
 
@@ -526,14 +463,27 @@ func (s *PostgresStore) ListDividendIncome(ctx context.Context) ([]DividendRecor
 	defer func() { _ = rows.Close() }()
 
 	var records []DividendRecord
+
 	for rows.Next() {
-		var r DividendRecord
-		if err := rows.Scan(&r.Symbol, &r.ExDate, &r.Quantity, &r.CashDividendPerShare, &r.IncomeAmount, &r.Currency); err != nil {
+		var record DividendRecord
+
+		err = rows.Scan(
+			&record.Symbol, &record.ExDate, &record.Quantity,
+			&record.CashDividendPerShare, &record.IncomeAmount, &record.Currency,
+		)
+		if err != nil {
 			return nil, fmt.Errorf("scan dividend income: %w", err)
 		}
-		records = append(records, r)
+
+		records = append(records, record)
 	}
-	return records, rows.Err()
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate dividend income: %w", err)
+	}
+
+	return records, nil
 }
 
 // ActiveSymbols returns the ticker symbols of all holdings with positive quantity.
@@ -547,14 +497,24 @@ func (s *PostgresStore) ActiveSymbols(ctx context.Context) ([]string, error) {
 	defer func() { _ = rows.Close() }()
 
 	var symbols []string
+
 	for rows.Next() {
 		var sym string
-		if err := rows.Scan(&sym); err != nil {
+
+		err = rows.Scan(&sym)
+		if err != nil {
 			return nil, fmt.Errorf("scan symbol: %w", err)
 		}
+
 		symbols = append(symbols, sym)
 	}
-	return symbols, rows.Err()
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate active symbols: %w", err)
+	}
+
+	return symbols, nil
 }
 
 // AllTransactionSymbols returns every symbol that has at least one transaction
@@ -570,14 +530,24 @@ func (s *PostgresStore) AllTransactionSymbols(ctx context.Context) ([]string, er
 	defer func() { _ = rows.Close() }()
 
 	var symbols []string
+
 	for rows.Next() {
 		var sym string
-		if err := rows.Scan(&sym); err != nil {
+
+		err = rows.Scan(&sym)
+		if err != nil {
 			return nil, fmt.Errorf("scan symbol: %w", err)
 		}
+
 		symbols = append(symbols, sym)
 	}
-	return symbols, rows.Err()
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate transaction symbols: %w", err)
+	}
+
+	return symbols, nil
 }
 
 // DeleteDividendIncomesBySymbol removes all dividend income records for the
@@ -589,55 +559,8 @@ func (s *PostgresStore) DeleteDividendIncomesBySymbol(ctx context.Context, symbo
 	if err != nil {
 		return fmt.Errorf("delete dividend incomes for %s: %w", symbol, err)
 	}
+
 	return nil
-}
-
-// listSplitsForSymbol returns all recorded split events for one symbol, ordered
-// by split_date ASC. Returns an empty slice (not nil) when none exist.
-func (s *PostgresStore) listSplitsForSymbol(ctx context.Context, symbol string) ([]SplitEvent, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT split_date, factor FROM stock_splits WHERE symbol = $1 ORDER BY split_date ASC`,
-		symbol,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list splits for %s: %w", symbol, err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	splits := make([]SplitEvent, 0)
-	for rows.Next() {
-		var ev SplitEvent
-		if err := rows.Scan(&ev.Date, &ev.Factor); err != nil {
-			return nil, fmt.Errorf("scan split event: %w", err)
-		}
-		ev.Date = ev.Date.UTC()
-		splits = append(splits, ev)
-	}
-	return splits, rows.Err()
-}
-
-// listAllSplits returns every recorded split event keyed by symbol. Used by
-// RecalculateHoldings to normalise the full transaction set in one pass.
-func (s *PostgresStore) listAllSplits(ctx context.Context) (map[string][]SplitEvent, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT symbol, split_date, factor FROM stock_splits ORDER BY symbol, split_date ASC`,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list all splits: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	out := make(map[string][]SplitEvent)
-	for rows.Next() {
-		var sym string
-		var ev SplitEvent
-		if err := rows.Scan(&sym, &ev.Date, &ev.Factor); err != nil {
-			return nil, fmt.Errorf("scan split row: %w", err)
-		}
-		ev.Date = ev.Date.UTC()
-		out[sym] = append(out[sym], ev)
-	}
-	return out, rows.Err()
 }
 
 // UpsertSplit persists a split event for the given symbol. It is idempotent:
@@ -647,10 +570,11 @@ func (s *PostgresStore) UpsertSplit(ctx context.Context, symbol string, splitDat
 		INSERT INTO stock_splits (symbol, split_date, factor)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (symbol, split_date) DO UPDATE SET factor = EXCLUDED.factor
-	`, symbol, splitDate.UTC().Truncate(24*time.Hour), factor)
+	`, symbol, splitDate.UTC().Truncate(oneDay), factor)
 	if err != nil {
 		return fmt.Errorf("upsert split %s %s: %w", symbol, splitDate.Format("2006-01-02"), err)
 	}
+
 	return nil
 }
 
@@ -665,15 +589,25 @@ func (s *PostgresStore) ListWatchlist(ctx context.Context) ([]WatchlistItem, err
 	defer func() { _ = rows.Close() }()
 
 	var items []WatchlistItem
+
 	for rows.Next() {
 		var item WatchlistItem
-		if err := rows.Scan(&item.ID, &item.Symbol, &item.MarketPrice, &item.Currency, &item.CreatedAt); err != nil {
+
+		err = rows.Scan(&item.ID, &item.Symbol, &item.MarketPrice, &item.Currency, &item.CreatedAt)
+		if err != nil {
 			return nil, fmt.Errorf("scan watchlist item: %w", err)
 		}
+
 		item.CreatedAt = item.CreatedAt.UTC()
 		items = append(items, item)
 	}
-	return items, rows.Err()
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate watchlist: %w", err)
+	}
+
+	return items, nil
 }
 
 // UpdateWatchlistPrice stores the latest EOD market price and quotation currency
@@ -686,6 +620,7 @@ func (s *PostgresStore) UpdateWatchlistPrice(ctx context.Context, symbol string,
 	if err != nil {
 		return fmt.Errorf("update watchlist price %s: %w", symbol, err)
 	}
+
 	return nil
 }
 
@@ -699,6 +634,7 @@ func (s *PostgresStore) AddToWatchlist(ctx context.Context, symbol string) error
 	if err != nil {
 		return fmt.Errorf("add to watchlist %s: %w", symbol, err)
 	}
+
 	return nil
 }
 
@@ -712,6 +648,7 @@ func (s *PostgresStore) RemoveFromWatchlist(ctx context.Context, symbol string) 
 	if err != nil {
 		return fmt.Errorf("remove from watchlist %s: %w", symbol, err)
 	}
+
 	return nil
 }
 
@@ -727,14 +664,24 @@ func (s *PostgresStore) ListWatchlistSymbols(ctx context.Context) ([]string, err
 	defer func() { _ = rows.Close() }()
 
 	var symbols []string
+
 	for rows.Next() {
 		var sym string
-		if err := rows.Scan(&sym); err != nil {
+
+		err = rows.Scan(&sym)
+		if err != nil {
 			return nil, fmt.Errorf("scan watchlist symbol: %w", err)
 		}
+
 		symbols = append(symbols, sym)
 	}
-	return symbols, rows.Err()
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate watchlist symbols: %w", err)
+	}
+
+	return symbols, nil
 }
 
 // UpdateHoldingCurrency sets the ISO 4217 currency for the holding identified
@@ -744,6 +691,7 @@ func (s *PostgresStore) UpdateHoldingCurrency(ctx context.Context, symbol, curre
 	if currency == "" {
 		return nil
 	}
+
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE holdings SET currency = $1, updated_at = NOW() WHERE symbol = $2`,
 		currency, symbol,
@@ -751,5 +699,268 @@ func (s *PostgresStore) UpdateHoldingCurrency(ctx context.Context, symbol, curre
 	if err != nil {
 		return fmt.Errorf("update holding currency %s: %w", symbol, err)
 	}
+
 	return nil
+}
+
+// cleanupStaleDividendRecords deletes any dividend_income_records for the given
+// symbol whose ex_date falls in a period when the quantity held was zero (as
+// determined by replaying the current transaction history). This keeps the
+// table consistent whenever transactions are added, edited, or deleted.
+func (s *PostgresStore) cleanupStaleDividendRecords(ctx context.Context, symbol string, txs []Transaction) error {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT ex_date FROM dividend_income_records WHERE symbol = $1`, symbol)
+	if err != nil {
+		return fmt.Errorf("list dividend dates for cleanup %s: %w", symbol, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var toDelete []time.Time
+
+	for rows.Next() {
+		var exDate time.Time
+
+		err = rows.Scan(&exDate)
+		if err != nil {
+			return fmt.Errorf("scan ex_date for cleanup: %w", err)
+		}
+
+		if QuantityAtDate(txs, exDate) <= 0 {
+			toDelete = append(toDelete, exDate)
+		}
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return fmt.Errorf("iterate dividend dates for cleanup: %w", err)
+	}
+
+	for _, deleteDate := range toDelete {
+		_, err = s.db.ExecContext(ctx,
+			`DELETE FROM dividend_income_records WHERE symbol = $1 AND ex_date = $2`,
+			symbol, deleteDate)
+		if err != nil {
+			return fmt.Errorf(
+				"delete stale dividend %s %s: %w", symbol, deleteDate.Format("2006-01-02"), err,
+			)
+		}
+	}
+
+	return nil
+}
+
+// listAllSplits returns every recorded split event keyed by symbol. Used by
+// RecalculateHoldings to normalise the full transaction set in one pass.
+func (s *PostgresStore) listAllSplits(ctx context.Context) (map[string][]SplitEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT symbol, split_date, factor FROM stock_splits ORDER BY symbol, split_date ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list all splits: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[string][]SplitEvent)
+
+	for rows.Next() {
+		var sym string
+
+		var splitEvt SplitEvent
+
+		err = rows.Scan(&sym, &splitEvt.Date, &splitEvt.Factor)
+		if err != nil {
+			return nil, fmt.Errorf("scan split row: %w", err)
+		}
+
+		splitEvt.Date = splitEvt.Date.UTC()
+		out[sym] = append(out[sym], splitEvt)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate splits: %w", err)
+	}
+
+	return out, nil
+}
+
+// listSplitsForSymbol returns all recorded split events for one symbol, ordered
+// by split_date ASC. Returns an empty slice (not nil) when none exist.
+func (s *PostgresStore) listSplitsForSymbol(ctx context.Context, symbol string) ([]SplitEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT split_date, factor FROM stock_splits WHERE symbol = $1 ORDER BY split_date ASC`,
+		symbol,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list splits for %s: %w", symbol, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	splits := make([]SplitEvent, 0)
+
+	for rows.Next() {
+		var splitEvt SplitEvent
+
+		err = rows.Scan(&splitEvt.Date, &splitEvt.Factor)
+		if err != nil {
+			return nil, fmt.Errorf("scan split event: %w", err)
+		}
+
+		splitEvt.Date = splitEvt.Date.UTC()
+		splits = append(splits, splitEvt)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate splits for symbol: %w", err)
+	}
+
+	return splits, nil
+}
+
+func parseAllocationType(value string) AllocationType {
+	upper := strings.ToUpper(strings.TrimSpace(value))
+
+	if upper == string(AllocationCore) {
+		return AllocationCore
+	}
+
+	return AllocationSatellite
+}
+
+// recordLiveFlow inserts a single cash-flow row for a transaction executed in
+// the current session. It uses txn.Price (not Yahoo AdjustedClose) because the
+// adjusted price for today's candle is not yet available. The next startup
+// backfill will replace all asset='AUTO' rows with adjusted-price equivalents,
+// so this is only an intra-session approximation.
+func (s *PostgresStore) recordLiveFlow(ctx context.Context, txn Transaction) error {
+	var flowType string
+
+	var amount float64
+
+	day := txn.ExecutedAt.UTC().Truncate(oneDay)
+
+	switch txn.Type {
+	case TransactionBuy:
+		flowType = "DEPOSIT"
+		amount = txn.Quantity*txn.Price + txn.Fee
+	case TransactionSell:
+		flowType = "WITHDRAWAL"
+		amount = txn.Quantity*txn.Price - txn.Fee
+
+		if amount <= 0 {
+			return nil
+		}
+	default:
+		return nil
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO cash_flows (portfolio_id, flow_type, amount, asset, currency, occurred_at)
+		VALUES ($1, $2, $3, 'AUTO', $4, $5)
+	`, s.portfolioID, flowType, amount, txn.Currency, day)
+	if err != nil {
+		return fmt.Errorf("record live flow: %w", err)
+	}
+
+	return nil
+}
+
+// recalculateSymbol recomputes quantity and PMC for a single symbol by replaying
+// its full transaction history. It preserves the existing market_price and
+// taa_enabled flag; closed positions (zero net quantity) are kept with qty=0.
+//
+//nolint:cyclop,funlen // SQL transaction logic requires multiple sequential steps; extracting helpers adds indirection
+func (s *PostgresStore) recalculateSymbol(ctx context.Context, symbol string) error {
+	txs, err := s.ListTransactions(ctx, symbol)
+	if err != nil {
+		return err
+	}
+
+	// No transactions remain — remove the holding and all dividend records entirely.
+	if len(txs) == 0 {
+		_, err = s.db.ExecContext(ctx, `DELETE FROM holdings WHERE symbol = $1`, symbol)
+		if err != nil {
+			return fmt.Errorf("delete holdings for %s: %w", symbol, err)
+		}
+
+		_, err = s.db.ExecContext(ctx, `DELETE FROM dividend_income_records WHERE symbol = $1`, symbol)
+		if err != nil {
+			return fmt.Errorf("delete dividend records for %s: %w", symbol, err)
+		}
+
+		return nil
+	}
+
+	splits, err := s.listSplitsForSymbol(ctx, symbol)
+	if err != nil {
+		return fmt.Errorf("list splits for %s: %w", symbol, err)
+	}
+
+	splitMap := map[string][]SplitEvent{symbol: splits}
+	states := ComputeHoldingStates(txs, splitMap)
+	state := states[symbol]
+
+	dbTx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin recalculate %s: %w", symbol, err)
+	}
+	defer dbTx.Rollback() //nolint:errcheck // rollback is a no-op after Commit; the Commit error is the one that matters
+
+	oldTAAEnabled := true
+
+	var oldPrice float64
+
+	var oldAllocType, oldCurrency string
+
+	_ = dbTx.QueryRowContext(ctx,
+		`SELECT COALESCE(market_price, 0), COALESCE(taa_enabled, true),`+
+			` COALESCE(allocation_type, 'SATELLITE'), COALESCE(currency, 'EUR')`+
+			` FROM holdings WHERE symbol = $1 LIMIT 1`,
+		symbol,
+	).Scan(&oldPrice, &oldTAAEnabled, &oldAllocType, &oldCurrency)
+
+	// If ComputeHoldingStates produced no allocation type (e.g. all SELLs), fall back to the
+	// previously stored type so the DB NOT NULL constraint is satisfied.
+	allocType := string(state.AllocationType)
+
+	if allocType == "" {
+		allocType = oldAllocType
+	}
+
+	// Preserve currency from state replay if available; otherwise keep DB value.
+	currency := state.Currency
+
+	if currency == "" {
+		currency = oldCurrency
+	}
+
+	if currency == "" {
+		currency = defaultCurrency
+	}
+
+	_, err = dbTx.ExecContext(ctx, `DELETE FROM holdings WHERE symbol = $1`, symbol)
+	if err != nil {
+		return fmt.Errorf("delete holdings for %s: %w", symbol, err)
+	}
+
+	// Always re-insert: active positions get real qty/PMC; closed positions get
+	// qty=0 and pmc=0 but preserve taa_enabled, allocation_type, and currency for history.
+	_, err = dbTx.ExecContext(ctx, `
+		INSERT INTO holdings
+			(symbol, quantity, market_price, pmc, allocation_type, taa_enabled, currency, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, symbol, state.Quantity, oldPrice, state.PMC,
+		allocType, oldTAAEnabled, currency, time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("insert holding for %s: %w", symbol, err)
+	}
+
+	err = dbTx.Commit()
+	if err != nil {
+		return fmt.Errorf("commit recalculate %s: %w", symbol, err)
+	}
+
+	return s.cleanupStaleDividendRecords(ctx, symbol, txs)
 }

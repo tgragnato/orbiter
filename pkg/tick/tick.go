@@ -1,3 +1,4 @@
+// Package tick provides market tick data structures and utilities.
 package tick
 
 import (
@@ -7,6 +8,16 @@ import (
 	"time"
 )
 
+// Sentinel errors for tick validation.
+var (
+	ErrEmptyInstrument = errors.New("empty instrument")
+	ErrEmptyDatetime   = errors.New("empty datetime")
+	ErrEmptyBid        = errors.New("empty bid")
+	ErrEmptyAsk        = errors.New("empty ask")
+	ErrAskLessThanBid  = errors.New("ask is less than bid")
+)
+
+// Tick represents a market data tick with bid and ask prices.
 type Tick struct {
 	// ID is for keeping the order from reading CSV file in DB because the timestamp is not precise enough.
 	// We have to deal with multiple ticks at the same time.
@@ -18,9 +29,14 @@ type Tick struct {
 	price      float64
 }
 
-// var maxSpread = 0.00025) // 2.5 pips
-const dec2 = 2.0
+// var maxSpread = 0.00025 // 2.5 pips.
+const (
+	dec2            = 2.0
+	spreadPrecision = 1e10
+	percentFactor   = 100
+)
 
+// New creates a new Tick with the given instrument, datetime, bid and ask prices.
 func New(instrument string, datetime time.Time, bid, ask float64) Tick {
 	return Tick{
 		0,
@@ -32,39 +48,50 @@ func New(instrument string, datetime time.Time, bid, ask float64) Tick {
 	}
 }
 
+// Spread returns the absolute difference between Ask and Bid prices.
 func (t *Tick) Spread() float64 {
 	return math.Abs(t.Ask - t.Bid)
 }
 
+// SpreadInPercent returns the spread as a percentage of the bid price.
 func (t *Tick) SpreadInPercent() float64 {
-	var n = (t.Ask - t.Bid) / t.Bid
-	return math.Round(math.Abs(n*100)*1e10) / 1e10
+	n := (t.Ask - t.Bid) / t.Bid
+
+	return math.Round(math.Abs(n*percentFactor)*spreadPrecision) / spreadPrecision
 }
 
+// String returns a string representation of the tick.
 func (t *Tick) String() string {
 	return fmt.Sprintf("{Datetime=%s Bid=%g Ask=%g}",
 		t.Datetime.String(), t.Bid, t.Ask)
 }
 
+// Price returns the mid price of the tick.
 func (t *Tick) Price() float64 {
 	return t.price
 }
 
+// Validate checks that the tick has valid data.
 func (t *Tick) Validate() error {
 	if t.Instrument == "" {
-		return errors.New("empty instrument")
+		return ErrEmptyInstrument
 	}
+
 	if t.Datetime.IsZero() {
-		return errors.New("empty datetime")
+		return ErrEmptyDatetime
 	}
+
 	if t.Bid == 0 {
-		return errors.New("empty bid")
+		return ErrEmptyBid
 	}
+
 	if t.Ask == 0 {
-		return errors.New("empty ask")
+		return ErrEmptyAsk
 	}
+
 	if t.Ask < t.Bid {
-		return errors.New("ask is less than bid")
+		return ErrAskLessThanBid
 	}
+
 	return nil
 }

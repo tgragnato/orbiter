@@ -5,13 +5,142 @@ run:
   allow-parallel-runners: true
 
 linters:
-  enable-all: true
+  enable:
+    - arangolint
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - canonicalheader
+    - clickhouselint
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - cyclop
+    - decorder
+    - depguard
+    - dogsled
+    - dupl
+    - dupword
+    - durationcheck
+    - embeddedstructfieldcheck
+    - err113
+    - errcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - exhaustive
+    - exhaustruct
+    - exptostd
+    - fatcontext
+    - forbidigo
+    - forcetypeassert
+    - funcorder
+    - funlen
+    - ginkgolinter
+    - gocheckcompilerdirectives
+    - gochecknoglobals
+    - gochecknoinits
+    - gochecksumtype
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godoclint
+    - godot
+    - godox
+    - goheader
+    - gomoddirectives
+    - gomodguard_v2
+    - goprintffuncname
+    - gosec
+    - gosmopolitan
+    - govet
+    - grouper
+    - iface
+    - importas
+    - inamedparam
+    - ineffassign
+    - interfacebloat
+    - intrange
+    - iotamixing
+    - ireturn
+    - lll
+    - loggercheck
+    - maintidx
+    - makezero
+    - mirror
+    - misspell
+    - mnd
+    - modernize
+    - musttag
+    - nakedret
+    - nestif
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - nlreturn
+    - noctx
+    - noinlineerr
+    - nolintlint
+    - nonamedreturns
+    - nosprintfhostport
+    - paralleltest
+    - perfsprint
+    - prealloc
+    - predeclared
+    - promlinter
+    - protogetter
+    - reassign
+    - recvcheck
+    - revive
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - staticcheck
+    - tagalign
+    - tagliatelle
+    - testableexamples
+    - testifylint
+    - testpackage
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - unqueryvet
+    - unused
+    - usestdlibvars
+    - usetesting
+    - varnamelen
+    - wastedassign
+    - whitespace
+    - wrapcheck
+    - wsl_v5
+    - zerologlint
 
   settings:
     staticcheck:
       checks:
         - all
         - -ST1000   # Package comment not required on every file
+
+    exhaustruct:
+      exclude:
+        # External library structs — we do not control their field list
+        - 'github\.com/charmbracelet/bubbles/textinput\.Model'
+        - 'github\.com/charmbracelet/bubbles/cursor\.Model'
+        - 'github\.com/charmbracelet/bubbles/table\.Model'
+        - 'github\.com/charmbracelet/lipgloss\.Style'
+
+    ireturn:
+      allow:
+        # tea.Model is the standard Bubble Tea interface; all Update methods must return it
+        - github.com/charmbracelet/bubbletea.Model
+        - anon
+        - error
+        - empty
+        - stdlib
 
     gocritic:
       enabled-tags:
@@ -20,8 +149,9 @@ linters:
         - performance
         - style
       disabled-checks:
-        - hugeParam   # False positives on intentionally large config structs
-                      # (WalkForwardConfig, taa.Config, etc.)
+        - hugeParam      # False positives on intentionally large config structs
+                         # (WalkForwardConfig, taa.Config, etc.)
+        - unnamedResult  # multi-return functions with (value, error-string) pattern are clear without names
 
     sloglint:
       no-mixed-args: true   # ban mixing positional args and key-value pairs
@@ -31,7 +161,25 @@ linters:
       rules:
         - name: exported
           arguments:
-            - disableStutteringCheck: true   # "Foo is a Foo" allowed in comments
+            - "disableStutteringCheck"   # "Foo is a Foo" allowed in comments
+
+    depguard:
+      rules:
+        Main:
+          list-mode: strict
+          allow:
+            - $gostd
+            - "github.com/charmbracelet/bubbles"
+            - "github.com/charmbracelet/bubbletea"
+            - "github.com/charmbracelet/lipgloss"
+            - "github.com/DATA-DOG/go-sqlmock"
+            - "github.com/guptarohit/asciigraph"
+            - "github.com/jackc/pgx/v5"
+            - "github.com/markcheno/go-talib"
+            - "github.com/tgragnato/orbiter"
+          deny:
+            - pkg: "$all"
+              desc: "please use the allowed packages instead of importing arbitrary packages"
 
     forbidigo:
       analyze-types: true
@@ -45,11 +193,20 @@ linters:
 
   exclusions:
     rules:
-      # Test files: relax security, errcheck, and context rules
+
       - linters:
-          - gosec
+          - err113
           - errcheck
+          - exhaustruct
+          - forcetypeassert
+          - goconst
+          - gosec
+          - mnd
+          - nlreturn
           - noctx
+          - noinlineerr
+          - varnamelen
+          - wsl_v5
         path: _test\.go$
 
       # main.go is the process boundary — os.Exit and log.Fatal are allowed

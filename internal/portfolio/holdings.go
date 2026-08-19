@@ -1,5 +1,7 @@
 package portfolio
 
+const percentMultiplier = 100
+
 // AllocationType identifies whether an asset belongs to core or satellite sleeve.
 type AllocationType string
 
@@ -39,6 +41,7 @@ func (h Holding) ToggleAllocation() AllocationType {
 	if h.AllocationType == AllocationCore {
 		return AllocationSatellite
 	}
+
 	return AllocationCore
 }
 
@@ -55,11 +58,14 @@ type Summary struct {
 // BuildSummary calculates NAV totals and allocation weights.
 func BuildSummary(holdings []Holding) Summary {
 	var summary Summary
+
 	summary.TotalHoldingsRows = len(holdings)
 
 	for _, holding := range holdings {
 		nav := holding.NAV()
+
 		summary.TotalNAV += nav
+
 		if holding.AllocationType == AllocationCore {
 			summary.CoreNAV += nav
 		} else {
@@ -68,8 +74,8 @@ func BuildSummary(holdings []Holding) Summary {
 	}
 
 	if summary.TotalNAV > 0 {
-		summary.CorePercent = summary.CoreNAV / summary.TotalNAV * 100
-		summary.SatellitePercent = summary.SatelliteNAV / summary.TotalNAV * 100
+		summary.CorePercent = summary.CoreNAV / summary.TotalNAV * percentMultiplier
+		summary.SatellitePercent = summary.SatelliteNAV / summary.TotalNAV * percentMultiplier
 	}
 
 	return summary

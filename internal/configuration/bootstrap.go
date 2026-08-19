@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 type migration struct {
@@ -17,6 +18,8 @@ type migration struct {
 // migrations is the ordered list of schema migrations. Each migration runs
 // exactly once and is recorded in schema_migrations. All migrations are
 // idempotent (IF NOT EXISTS / IF EXISTS) so partial failures are safe to retry.
+//
+//nolint:gochecknoglobals // package-level migration list is intentional; effectively read-only after init
 var migrations = []migration{
 	{
 		version: 1,
@@ -167,18 +170,23 @@ var migrations = []migration{
 }
 
 // Bootstrap runs migrations, seeds defaults, and validates required settings.
-func Bootstrap(ctx context.Context, db *sql.DB) (*Service, error) {
-	if err := RunMigrations(ctx, db); err != nil {
+func Bootstrap(ctx context.Context, sqlDB *sql.DB) (*Service, error) {
+	err := RunMigrations(ctx, sqlDB)
+	if err != nil {
 		return nil, err
 	}
 
-	repo := NewPostgresRepository(db)
-	if err := SeedDefaultsIfEmpty(ctx, repo); err != nil {
+	repo := NewPostgresRepository(sqlDB)
+
+	err = SeedDefaultsIfEmpty(ctx, repo)
+	if err != nil {
 		return nil, err
 	}
 
 	svc := NewService(repo)
-	if err := svc.ValidateRequired(ctx); err != nil {
+
+	err = svc.ValidateRequired(ctx)
+	if err != nil {
 		return nil, err
 	}
 
@@ -186,46 +194,37 @@ func Bootstrap(ctx context.Context, db *sql.DB) (*Service, error) {
 }
 
 // RunMigrations executes all known schema migrations exactly once.
-func RunMigrations(ctx context.Context, db *sql.DB) error {
-	if _, err := db.ExecContext(ctx, `
+func RunMigrations(ctx context.Context, sqlDB *sql.DB) error {
+	_, err := sqlDB.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version BIGINT PRIMARY KEY,
 			name TEXT NOT NULL,
 			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
-	`); err != nil {
+	`)
+	if err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	for _, m := range migrations {
+	for _, mig := range migrations {
 		var count int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version = $1`, m.version).Scan(&count); err != nil {
-			return fmt.Errorf("check migration version %d: %w", m.version, err)
+
+		err = sqlDB.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM schema_migrations WHERE version = $1`,
+			mig.version,
+		).Scan(&count)
+		if err != nil {
+			return fmt.Errorf("check migration version %d: %w", mig.version, err)
 		}
+
 		if count > 0 {
 			continue
 		}
 
-		tx, err := db.BeginTx(ctx, nil)
+		err = applyMigration(ctx, sqlDB, mig)
 		if err != nil {
-			return fmt.Errorf("start migration transaction %d: %w", m.version, err)
-		}
-
-		if _, err := tx.ExecContext(ctx, m.sql); err != nil {
-			if rErr := tx.Rollback(); rErr != nil {
-				err = errors.Join(err, rErr)
-			}
-			return fmt.Errorf("apply migration %d (%s): %w", m.version, m.name, err)
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`, m.version, m.name); err != nil {
-			if rErr := tx.Rollback(); rErr != nil {
-				err = errors.Join(err, rErr)
-			}
-			return fmt.Errorf("record migration %d (%s): %w", m.version, m.name, err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration %d (%s): %w", m.version, m.name, err)
+			return err
 		}
 	}
 
@@ -238,6 +237,7 @@ func SeedDefaultsIfEmpty(ctx context.Context, repo Repository) error {
 	if err != nil {
 		return fmt.Errorf("count app settings: %w", err)
 	}
+
 	if count > 0 {
 		return nil
 	}
@@ -248,14 +248,56 @@ func SeedDefaultsIfEmpty(ctx context.Context, repo Repository) error {
 			return fmt.Errorf("marshal default setting %s: %w", key, err)
 		}
 
-		if err := repo.Set(ctx, Setting{
+		err = repo.Set(ctx, Setting{
 			Key:         key,
 			Scope:       defaultSetting.scope,
 			Description: defaultSetting.description,
 			ValueJSON:   valueJSON,
-		}); err != nil {
+			CreatedAt:   time.Time{},
+			UpdatedAt:   time.Time{},
+		})
+		if err != nil {
 			return fmt.Errorf("seed default setting %s: %w", key, err)
 		}
+	}
+
+	return nil
+}
+
+func applyMigration(ctx context.Context, db *sql.DB, mig migration) error {
+	sqlTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("start migration transaction %d: %w", mig.version, err)
+	}
+
+	_, err = sqlTx.ExecContext(ctx, mig.sql)
+	if err != nil {
+		rErr := sqlTx.Rollback()
+		if rErr != nil {
+			err = errors.Join(err, rErr)
+		}
+
+		return fmt.Errorf("apply migration %d (%s): %w", mig.version, mig.name, err)
+	}
+
+	_, err = sqlTx.ExecContext(
+		ctx,
+		`INSERT INTO schema_migrations (version, name) VALUES ($1, $2)`,
+		mig.version,
+		mig.name,
+	)
+	if err != nil {
+		rErr := sqlTx.Rollback()
+		if rErr != nil {
+			err = errors.Join(err, rErr)
+		}
+
+		return fmt.Errorf("record migration %d (%s): %w", mig.version, mig.name, err)
+	}
+
+	err = sqlTx.Commit()
+	if err != nil {
+		return fmt.Errorf("commit migration %d (%s): %w", mig.version, mig.name, err)
 	}
 
 	return nil

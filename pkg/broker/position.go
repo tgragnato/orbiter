@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+const percentageMultiplier = 100
+
+// Position represents an open or closed trading position.
 type Position struct {
 	PerformanceRecordID uint // foreign key
 	Reference           string
@@ -29,13 +32,15 @@ type Position struct {
 	GapToSMA                  float64
 }
 
-// Duration - returns duration of position
+// Duration returns duration of position.
 func (p *Position) Duration() time.Duration {
 	return p.SellTime.Sub(p.BuyTime)
 }
 
+// PerformanceAbsolute returns the absolute performance of the position in currency units.
 func (p *Position) PerformanceAbsolute(bid, ask float64) float64 {
 	var abs float64
+
 	if p.SellPrice == 0 {
 		switch p.BuyDirection {
 		case BuyDirectionLong:
@@ -51,18 +56,23 @@ func (p *Position) PerformanceAbsolute(bid, ask float64) float64 {
 			abs = p.BuyPrice - p.SellPrice
 		}
 	}
+
 	abs *= p.Size
+
 	return abs
 }
 
-// PerformanceInPercentagePretty returns performance for closed positions
+// PerformanceInPercentagePretty returns performance for closed positions.
 func (p *Position) PerformanceInPercentagePretty() float64 {
 	perf := p.PerformanceInPercentage(0, 0)
-	return math.Round(perf*100) / 100
+
+	return math.Round(perf*percentageMultiplier) / percentageMultiplier
 }
 
+// PerformanceInPercentage returns the performance of the position as a percentage.
 func (p *Position) PerformanceInPercentage(bid, ask float64) float64 {
 	var percentage float64
+
 	if p.SellPrice == 0 {
 		switch p.BuyDirection {
 		case BuyDirectionLong:
@@ -71,9 +81,11 @@ func (p *Position) PerformanceInPercentage(bid, ask float64) float64 {
 			if ask == 0 {
 				return 0
 			}
+
 			percentage = (p.BuyPrice - ask) / ask
 		}
-		percentage *= 100
+
+		percentage *= percentageMultiplier
 	} else {
 		switch p.BuyDirection {
 		case BuyDirectionLong:
@@ -81,11 +93,14 @@ func (p *Position) PerformanceInPercentage(bid, ask float64) float64 {
 		case BuyDirectionShort:
 			percentage = (p.BuyPrice - p.SellPrice) / p.SellPrice
 		}
-		percentage *= 100
+
+		percentage *= percentageMultiplier
 	}
+
 	return percentage
 }
 
+// Age returns how long ago the position was opened relative to now.
 func (p *Position) Age(now time.Time) time.Duration {
 	return now.Sub(p.BuyTime)
 }

@@ -9,12 +9,26 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const defaultYahooBaseURL = "https://query1.finance.yahoo.com"
+const bodyReadLimit = 512
+const truncateDay = hoursPerDay * time.Hour
+const defaultHTTPTimeout = 15 * time.Second
+
+// Sentinel errors for Yahoo Finance data fetching.
+var (
+	ErrTickerRequired        = errors.New("ticker is required")
+	ErrInvalidDateRange      = errors.New("invalid date range: to before from")
+	ErrYahooRequestFailed    = errors.New("yahoo request failed")
+	ErrYahooAPIError         = errors.New("yahoo api error")
+	ErrYahooNoResult         = errors.New("yahoo response has no result")
+	ErrYahooMissingQuoteData = errors.New("yahoo response missing quote/adjclose data")
+)
 
 // YahooProvider fetches EOD data from Yahoo Finance chart API.
 type YahooProvider struct {
@@ -27,54 +41,69 @@ type YahooProvider struct {
 // NewYahooProvider creates a provider using a production Yahoo endpoint.
 func NewYahooProvider(client *http.Client) *YahooProvider {
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = &http.Client{ //nolint:exhaustruct // zero values for Transport, CheckRedirect, Jar are the correct defaults
+			Timeout: defaultHTTPTimeout,
+		}
 	}
-	return &YahooProvider{client: client, baseURL: defaultYahooBaseURL}
-}
 
-// SetAPIKey dynamically updates the API key used for authenticated Yahoo endpoints.
-func (p *YahooProvider) SetAPIKey(apiKey string) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.apiKey = strings.TrimSpace(apiKey)
+	return &YahooProvider{ //nolint:exhaustruct // mu and apiKey zero values are correct defaults
+		client:  client,
+		baseURL: defaultYahooBaseURL,
+	}
 }
 
 // APIKey returns the current API key.
 func (p *YahooProvider) APIKey() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+
 	return p.apiKey
+}
+
+// SetAPIKey dynamically updates the API key used for authenticated Yahoo endpoints.
+func (p *YahooProvider) SetAPIKey(apiKey string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.apiKey = strings.TrimSpace(apiKey)
 }
 
 // WithAPIKey sets an optional API key for authenticated Yahoo endpoints.
 func (p *YahooProvider) WithAPIKey(apiKey string) *YahooProvider {
 	p.SetAPIKey(apiKey)
+
 	return p
 }
 
 // GetEOD returns daily candles including adjusted close and corporate action fields.
-func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, error) {
+//
+//nolint:cyclop,funlen // parsing Yahoo Finance response inherently branches on many optional fields
+func (p *YahooProvider) GetEOD(ticker string, from, until time.Time) ([]Candle, error) {
 	ticker = strings.TrimSpace(ticker)
 	if ticker == "" {
-		return nil, errors.New("ticker is required")
-	}
-	if to.Before(from) {
-		return nil, errors.New("invalid date range: to before from")
+		return nil, ErrTickerRequired
 	}
 
-	requestURL, err := p.buildURL(ticker, from, to)
+	if until.Before(from) {
+		return nil, ErrInvalidDateRange
+	}
+
+	requestURL, err := p.buildURL(ticker, from, until)
 	if err != nil {
 		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, requestURL, http.NoBody)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("build yahoo request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15")
+	const userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
+		"AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15"
+	req.Header.Set("User-Agent", userAgent)
+
 	if key := p.APIKey(); key != "" {
-		req.Header.Set("X-API-KEY", key)
+		req.Header.Set("X-Api-Key", key)
 	}
 
 	resp, err := p.client.Do(req)
@@ -84,25 +113,29 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("yahoo request failed with status %d: %s", resp.StatusCode, string(body))
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, bodyReadLimit))
+
+		return nil, fmt.Errorf("%w with status %d: %s", ErrYahooRequestFailed, resp.StatusCode, string(body))
 	}
 
 	var payload yahooChartResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+
+	err = json.NewDecoder(resp.Body).Decode(&payload)
+	if err != nil {
 		return nil, fmt.Errorf("decode yahoo response: %w", err)
 	}
 
 	if payload.Chart.Error != nil {
-		return nil, fmt.Errorf("yahoo api error: %s", payload.Chart.Error.Description)
+		return nil, fmt.Errorf("%w: %s", ErrYahooAPIError, payload.Chart.Error.Description)
 	}
+
 	if len(payload.Chart.Result) == 0 {
-		return nil, errors.New("yahoo response has no result")
+		return nil, ErrYahooNoResult
 	}
 
 	result := payload.Chart.Result[0]
 	if len(result.Indicators.Quote) == 0 || len(result.Indicators.AdjClose) == 0 {
-		return nil, errors.New("yahoo response missing quote/adjclose data")
+		return nil, ErrYahooMissingQuoteData
 	}
 
 	quote := result.Indicators.Quote[0]
@@ -115,36 +148,42 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 	candles := make([]Candle, 0, len(result.Timestamp))
 	matchedDivDates := make(map[int64]bool, len(dividends))
 
-	for i, ts := range result.Timestamp {
-		if i >= len(quote.Open) || i >= len(quote.High) || i >= len(quote.Low) || i >= len(quote.Close) || i >= len(quote.Volume) || i >= len(adjClose.AdjClose) {
+	for idx, timestamp := range result.Timestamp {
+		if idx >= len(quote.Open) || idx >= len(quote.High) || idx >= len(quote.Low) ||
+			idx >= len(quote.Close) || idx >= len(quote.Volume) || idx >= len(adjClose.AdjClose) {
 			continue
 		}
-		if quote.Open[i] == nil || quote.High[i] == nil || quote.Low[i] == nil || quote.Close[i] == nil || quote.Volume[i] == nil || adjClose.AdjClose[i] == nil {
+
+		if quote.Open[idx] == nil || quote.High[idx] == nil || quote.Low[idx] == nil ||
+			quote.Close[idx] == nil || quote.Volume[idx] == nil || adjClose.AdjClose[idx] == nil {
 			continue
 		}
 
 		// Normalise candle timestamp to midnight UTC for dividend/split lookup.
-		dateTS := time.Unix(ts, 0).UTC().Truncate(24 * time.Hour).Unix()
+		dateTS := time.Unix(timestamp, 0).UTC().Truncate(truncateDay).Unix()
 
 		candle := Candle{
 			Ticker:        ticker,
-			Time:          time.Unix(ts, 0).UTC(),
-			Open:          *quote.Open[i],
-			High:          *quote.High[i],
-			Low:           *quote.Low[i],
-			Close:         *quote.Close[i],
-			AdjustedClose: *adjClose.AdjClose[i],
-			Volume:        *quote.Volume[i],
+			Time:          time.Unix(timestamp, 0).UTC(),
+			Open:          *quote.Open[idx],
+			High:          *quote.High[idx],
+			Low:           *quote.Low[idx],
+			Close:         *quote.Close[idx],
+			AdjustedClose: *adjClose.AdjClose[idx],
+			Volume:        *quote.Volume[idx],
 			SplitFactor:   1,
+			CashDividend:  0,
 			Currency:      strings.ToUpper(strings.TrimSpace(result.Meta.Currency)),
 		}
 		if dividend, ok := dividends[dateTS]; ok {
 			candle.CashDividend = dividend
 			matchedDivDates[dateTS] = true
 		}
+
 		if splitFactor, ok := splits[dateTS]; ok {
 			candle.SplitFactor = splitFactor
 		}
+
 		candles = append(candles, candle)
 	}
 
@@ -156,12 +195,19 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 		if matchedDivDates[divDateTS] {
 			continue
 		}
+
 		candles = append(candles, Candle{
-			Ticker:       ticker,
-			Time:         time.Unix(divDateTS, 0).UTC(),
-			CashDividend: amount,
-			SplitFactor:  1,
-			Currency:     strings.ToUpper(strings.TrimSpace(result.Meta.Currency)),
+			Ticker:        ticker,
+			Time:          time.Unix(divDateTS, 0).UTC(),
+			Open:          0,
+			High:          0,
+			Low:           0,
+			Close:         0,
+			AdjustedClose: 0,
+			Volume:        0,
+			CashDividend:  amount,
+			SplitFactor:   1,
+			Currency:      strings.ToUpper(strings.TrimSpace(result.Meta.Currency)),
 		})
 	}
 
@@ -172,29 +218,32 @@ func (p *YahooProvider) GetEOD(ticker string, from, to time.Time) ([]Candle, err
 	return candles, nil
 }
 
-func (p *YahooProvider) buildURL(ticker string, from, to time.Time) (string, error) {
+func (p *YahooProvider) buildURL(ticker string, from, until time.Time) (string, error) {
 	base, err := url.Parse(p.baseURL)
 	if err != nil {
 		return "", fmt.Errorf("invalid base URL: %w", err)
 	}
+
 	base.Path = strings.TrimRight(base.Path, "/") + "/v8/finance/chart/" + url.PathEscape(ticker)
 
 	query := base.Query()
 	query.Set("interval", "1d")
 	query.Set("events", "div,split")
 	query.Set("includeAdjustedClose", "true")
-	query.Set("period1", fmt.Sprintf("%d", from.UTC().Unix()))
-	query.Set("period2", fmt.Sprintf("%d", to.UTC().Unix()))
+	query.Set("period1", strconv.FormatInt(from.UTC().Unix(), 10))
+	query.Set("period2", strconv.FormatInt(until.UTC().Unix(), 10))
 	base.RawQuery = query.Encode()
+
 	return base.String(), nil
 }
 
 func parseDividends(raw map[string]yahooDividendEvent) map[int64]float64 {
 	out := make(map[int64]float64, len(raw))
 	for _, event := range raw {
-		dateTS := time.Unix(event.Date, 0).UTC().Truncate(24 * time.Hour).Unix()
+		dateTS := time.Unix(event.Date, 0).UTC().Truncate(truncateDay).Unix()
 		out[dateTS] = event.Amount
 	}
+
 	return out
 }
 
@@ -205,9 +254,11 @@ func parseSplits(raw map[string]yahooSplitEvent) map[int64]float64 {
 		if event.Denominator > 0 {
 			factor = event.Numerator / event.Denominator
 		}
-		dateTS := time.Unix(event.Date, 0).UTC().Truncate(24 * time.Hour).Unix()
+
+		dateTS := time.Unix(event.Date, 0).UTC().Truncate(truncateDay).Unix()
 		out[dateTS] = factor
 	}
+
 	return out
 }
 

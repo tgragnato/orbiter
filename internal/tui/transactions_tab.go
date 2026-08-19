@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/tgragnato/orbiter/internal/portfolio"
@@ -47,6 +48,32 @@ const (
 	txModeConfirmDelete
 )
 
+const (
+	txColSymbolWidth  = 10
+	txColDateWidth    = 12
+	txColTypeWidth    = 5
+	txColQtyWidth     = 10
+	txColPriceWidth   = 10
+	txColFeeWidth     = 9
+	txColSleeveWidth  = 8
+	txTableHeight     = 20
+	txTableMinWidth   = 40
+	txTableMinHeight  = 10
+	txTableWidthOff   = 4 // columns + border padding
+	txTableHeightOff  = 1 // header row
+)
+
+const (
+	txKindBuy  = "BUY"
+	txKindSell = "SELL"
+	txKindDiv  = "DIV"
+)
+
+const (
+	txSleeveSat  = "SAT"
+	txSleeveCore = "CORE"
+)
+
 // txDisplayEntry is a unified row for the transactions table — either a
 // BUY/SELL trade or a DIV (dividend) income record.
 type txDisplayEntry struct {
@@ -62,34 +89,37 @@ type txDisplayEntry struct {
 
 // TransactionsTabModel is the Tab 5 sub-model for viewing, editing, and
 // deleting individual trade records and viewing dividend income.
+//
+//nolint:recvcheck // tea.Model interface requires value receivers; buildEntries/syncRows use pointer
 type TransactionsTabModel struct {
-	editor  TransactionEditor
-	txs     []portfolio.Transaction
-	divs    []portfolio.DividendRecord
-	entries []txDisplayEntry
-	tbl     table.Model
-	status  string
-	loading bool
-	mode    int
-	form    transactionFormModel
+	editor       TransactionEditor
+	txs          []portfolio.Transaction
+	divs         []portfolio.DividendRecord
+	entries      []txDisplayEntry
+	tbl          table.Model
+	status       string
+	loading      bool
+	mode         int
+	form         transactionFormModel
 	pendingDelID int64
 }
 
+// NewTransactionsTabModel creates a new TransactionsTabModel wired to the given editor.
 func NewTransactionsTabModel(editor TransactionEditor) TransactionsTabModel {
 	cols := []table.Column{
-		{Title: "Symbol", Width: 10},
-		{Title: "Date", Width: 12},
-		{Title: "Type", Width: 5},
-		{Title: "Qty", Width: 10},
-		{Title: "Price", Width: 10},
-		{Title: "Fee/Inc", Width: 9},
-		{Title: "Sleeve", Width: 8},
+		{Title: "Symbol", Width: txColSymbolWidth},
+		{Title: "Date", Width: txColDateWidth},
+		{Title: "Type", Width: txColTypeWidth},
+		{Title: "Qty", Width: txColQtyWidth},
+		{Title: "Price", Width: txColPriceWidth},
+		{Title: "Fee/Inc", Width: txColFeeWidth},
+		{Title: "Sleeve", Width: txColSleeveWidth},
 	}
 	tbl := table.New(
 		table.WithColumns(cols),
 		table.WithRows([]table.Row{}),
 		table.WithFocused(true),
-		table.WithHeight(20),
+		table.WithHeight(txTableHeight),
 	)
 	tbl.KeyMap.LineUp.SetKeys("up", "k")
 	tbl.KeyMap.LineDown.SetKeys("down", "j")
@@ -100,27 +130,309 @@ func NewTransactionsTabModel(editor TransactionEditor) TransactionsTabModel {
 	}
 
 	return TransactionsTabModel{
-		editor: editor,
-		tbl:    tbl,
-		status: status,
+		editor:       editor,
+		txs:          nil,
+		divs:         nil,
+		entries:      nil,
+		tbl:          tbl,
+		status:       status,
+		loading:      false,
+		mode:         txModeNormal,
+		form: transactionFormModel{
+			symbolInput:      textinput.Model{},
+			qtyInput:         textinput.Model{},
+			priceInput:       textinput.Model{},
+			feeInput:         textinput.Model{},
+			dateInput:        textinput.Model{},
+			txType:           "",
+			allocType:        "",
+			focused:          0,
+			errMsg:           "",
+			knownSymbols:     nil,
+			autocompleteHint: "",
+			txID:             0,
+			formStyles: formStyles{}, //nolint:exhaustruct // zero-value placeholder; replaced by newFormStyles() on open
+		},
+		pendingDelID: 0,
 	}
 }
 
+// Init loads transactions if an editor is configured.
 func (m TransactionsTabModel) Init() tea.Cmd {
 	if m.editor == nil {
 		return nil
 	}
+
 	return m.loadCmd()
+}
+
+// Update handles incoming messages for the transactions tab.
+//
+//nolint:gocognit,cyclop,gocyclo,funlen,maintidx // transaction tab dispatch; complexity is inherent in multi-mode UI
+func (m TransactionsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Add form intercepts all messages while active.
+	if m.mode == txModeAdding {
+		switch msg := msg.(type) {
+		case txFormResultMsg:
+			if msg.cancelled {
+				m.mode = txModeNormal
+				m.status = "Add cancelled"
+
+				return m, nil
+			}
+
+			m.mode = txModeNormal
+			m.loading = true
+			m.status = "Saving..."
+
+			return m, m.addCmd(*msg.tx)
+		default:
+			var cmd tea.Cmd
+
+			m.form, cmd = m.form.Update(msg)
+
+			return m, cmd
+		}
+	}
+
+	// Edit form intercepts all messages while active.
+	if m.mode == txModeEditing {
+		switch msg := msg.(type) {
+		case txFormResultMsg:
+			if msg.cancelled {
+				m.mode = txModeNormal
+				m.status = "Edit cancelled"
+
+				return m, nil
+			}
+
+			m.mode = txModeNormal
+			m.loading = true
+			m.status = "Saving..."
+
+			return m, m.updateCmd(*msg.tx)
+		default:
+			var cmd tea.Cmd
+
+			m.form, cmd = m.form.Update(msg)
+
+			return m, cmd
+		}
+	}
+
+	// Confirm-delete mode: d/y confirms, any other key cancels.
+	if m.mode == txModeConfirmDelete {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "d", "y":
+				m.mode = txModeNormal
+				m.loading = true
+				m.status = "Deleting..."
+
+				return m, m.deleteCmd(m.pendingDelID)
+			default:
+				m.mode = txModeNormal
+				m.status = "Delete cancelled"
+			}
+		}
+
+		return m, nil
+	}
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "a":
+			if m.editor == nil {
+				return m, nil
+			}
+
+			m.mode = txModeAdding
+
+			var cmd tea.Cmd
+
+			m.form, cmd = newTransactionForm(m.knownSymbols())
+
+			return m, cmd
+
+		case "e":
+			if m.editor == nil || len(m.entries) == 0 {
+				return m, nil
+			}
+
+			cur := m.tbl.Cursor()
+			if cur < 0 || cur >= len(m.entries) {
+				return m, nil
+			}
+
+			entry := m.entries[cur]
+			if entry.txIndex < 0 {
+				m.status = "Dividend records cannot be edited — delete and re-add the transaction to adjust"
+
+				return m, nil
+			}
+
+			m.mode = txModeEditing
+
+			var cmd tea.Cmd
+
+			m.form, cmd = newTransactionFormEditing(m.txs[entry.txIndex], m.knownSymbols())
+
+			return m, cmd
+
+		case "d":
+			if m.editor == nil || len(m.entries) == 0 {
+				return m, nil
+			}
+
+			cur := m.tbl.Cursor()
+			if cur < 0 || cur >= len(m.entries) {
+				return m, nil
+			}
+
+			entry := m.entries[cur]
+			if entry.txIndex < 0 {
+				m.status = "Dividend records are computed automatically and cannot be deleted"
+
+				return m, nil
+			}
+
+			txRecord := m.txs[entry.txIndex]
+			m.pendingDelID = txRecord.ID
+			m.mode = txModeConfirmDelete
+			m.status = fmt.Sprintf("Delete %s %s %.4f @ %.2f? d/y: confirm · any other key: cancel",
+				txRecord.Symbol, txRecord.Type, txRecord.Quantity, txRecord.Price)
+
+			return m, nil
+
+		case "r":
+			if m.loading || m.editor == nil {
+				return m, nil
+			}
+
+			m.loading = true
+			m.status = "Loading..."
+
+			return m, m.loadCmd()
+		}
+
+	case tea.WindowSizeMsg:
+		m.tbl.SetWidth(max(txTableMinWidth, msg.Width-txTableWidthOff))
+		// SetHeight controls data rows only; the table also renders 1 header row.
+		// The view now contains only the table, so the full content area is available.
+		m.tbl.SetHeight(max(txTableMinHeight, msg.Height-txTableHeightOff))
+
+		return m, nil
+
+	case txsLoadedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Load error: %v", msg.err)
+
+			return m, nil
+		}
+		// Reverse transactions so newest appears first.
+		for left, right := 0, len(msg.txs)-1; left < right; left, right = left+1, right-1 {
+			msg.txs[left], msg.txs[right] = msg.txs[right], msg.txs[left]
+		}
+
+		m.txs = msg.txs
+		m.divs = msg.divs
+		m.buildEntries()
+
+		nDivs := len(msg.divs)
+		m.status = fmt.Sprintf("%d transactions · %d dividends | a: add · e: edit · d: delete · r: reload",
+			len(msg.txs), nDivs)
+
+		return m, nil
+
+	case txAddedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Add error: %v", msg.err)
+
+			return m, nil
+		}
+
+		m.status = "Transaction added — reloading..."
+
+		return m, tea.Batch(m.loadCmd(), func() tea.Msg { return txChangedMsg{} })
+
+	case txUpdatedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Update error: %v", msg.err)
+
+			return m, nil
+		}
+
+		m.status = "Transaction updated — reloading..."
+
+		return m, tea.Batch(m.loadCmd(), func() tea.Msg { return txChangedMsg{} })
+
+	case txDeletedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.status = fmt.Sprintf("Delete error: %v", msg.err)
+
+			return m, nil
+		}
+
+		m.status = "Transaction deleted — reloading..."
+
+		return m, tea.Batch(m.loadCmd(), func() tea.Msg { return txChangedMsg{} })
+	}
+
+	var cmd tea.Cmd
+
+	m.tbl, cmd = m.tbl.Update(msg)
+
+	return m, cmd
+}
+
+// NavHint returns the context-sensitive hint string that the root model merges
+// into its global help line when the Transactions tab is active.
+func (m TransactionsTabModel) NavHint() string {
+	if m.editor == nil {
+		return ""
+	}
+
+	if m.mode == txModeAdding || m.mode == txModeEditing {
+		return "esc: cancel"
+	}
+
+	if m.status != "" {
+		return m.status
+	}
+
+	return "a: add · e: edit · d: delete · r: reload"
+}
+
+// View renders the transactions table or active form.
+func (m TransactionsTabModel) View() string {
+	if m.editor == nil {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render(
+			"Transaction editor not available — no transaction store configured.",
+		)
+	}
+
+	if m.mode == txModeAdding || m.mode == txModeEditing {
+		return m.form.View()
+	}
+
+	return m.tbl.View()
 }
 
 func (m TransactionsTabModel) loadCmd() tea.Cmd {
 	return func() tea.Msg {
 		txs, err := m.editor.ListTransactions(context.Background(), "")
 		if err != nil {
-			return txsLoadedMsg{err: err}
+			return txsLoadedMsg{err: err, txs: nil, divs: nil}
 		}
+
 		divs, _ := m.editor.ListDividendIncome(context.Background())
-		return txsLoadedMsg{txs: txs, divs: divs}
+
+		return txsLoadedMsg{txs: txs, divs: divs, err: nil}
 	}
 }
 
@@ -142,235 +454,33 @@ func (m TransactionsTabModel) deleteCmd(id int64) tea.Cmd {
 	}
 }
 
-func (m TransactionsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Add form intercepts all messages while active.
-	if m.mode == txModeAdding {
-		switch msg := msg.(type) {
-		case txFormResultMsg:
-			if msg.cancelled {
-				m.mode = txModeNormal
-				m.status = "Add cancelled"
-				return m, nil
-			}
-			m.mode = txModeNormal
-			m.loading = true
-			m.status = "Saving..."
-			return m, m.addCmd(*msg.tx)
-		default:
-			var cmd tea.Cmd
-			m.form, cmd = m.form.Update(msg)
-			return m, cmd
-		}
-	}
-
-	// Edit form intercepts all messages while active.
-	if m.mode == txModeEditing {
-		switch msg := msg.(type) {
-		case txFormResultMsg:
-			if msg.cancelled {
-				m.mode = txModeNormal
-				m.status = "Edit cancelled"
-				return m, nil
-			}
-			m.mode = txModeNormal
-			m.loading = true
-			m.status = "Saving..."
-			return m, m.updateCmd(*msg.tx)
-		default:
-			var cmd tea.Cmd
-			m.form, cmd = m.form.Update(msg)
-			return m, cmd
-		}
-	}
-
-	// Confirm-delete mode: d/y confirms, any other key cancels.
-	if m.mode == txModeConfirmDelete {
-		if key, ok := msg.(tea.KeyMsg); ok {
-			switch key.String() {
-			case "d", "y":
-				m.mode = txModeNormal
-				m.loading = true
-				m.status = "Deleting..."
-				return m, m.deleteCmd(m.pendingDelID)
-			default:
-				m.mode = txModeNormal
-				m.status = "Delete cancelled"
-			}
-		}
-		return m, nil
-	}
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "a":
-			if m.editor == nil {
-				return m, nil
-			}
-			m.mode = txModeAdding
-			var cmd tea.Cmd
-			m.form, cmd = newTransactionForm(m.knownSymbols())
-			return m, cmd
-
-		case "e":
-			if m.editor == nil || len(m.entries) == 0 {
-				return m, nil
-			}
-			cur := m.tbl.Cursor()
-			if cur < 0 || cur >= len(m.entries) {
-				return m, nil
-			}
-			entry := m.entries[cur]
-			if entry.txIndex < 0 {
-				m.status = "Dividend records cannot be edited — delete and re-add the transaction to adjust"
-				return m, nil
-			}
-			m.mode = txModeEditing
-			var cmd tea.Cmd
-			m.form, cmd = newTransactionFormEditing(m.txs[entry.txIndex], m.knownSymbols())
-			return m, cmd
-
-		case "d":
-			if m.editor == nil || len(m.entries) == 0 {
-				return m, nil
-			}
-			cur := m.tbl.Cursor()
-			if cur < 0 || cur >= len(m.entries) {
-				return m, nil
-			}
-			entry := m.entries[cur]
-			if entry.txIndex < 0 {
-				m.status = "Dividend records are computed automatically and cannot be deleted"
-				return m, nil
-			}
-			tx := m.txs[entry.txIndex]
-			m.pendingDelID = tx.ID
-			m.mode = txModeConfirmDelete
-			m.status = fmt.Sprintf("Delete %s %s %.4f @ %.2f? d/y: confirm · any other key: cancel",
-				tx.Symbol, tx.Type, tx.Quantity, tx.Price)
-			return m, nil
-
-		case "r":
-			if m.loading || m.editor == nil {
-				return m, nil
-			}
-			m.loading = true
-			m.status = "Loading..."
-			return m, m.loadCmd()
-		}
-
-	case tea.WindowSizeMsg:
-		m.tbl.SetWidth(max(40, msg.Width-4))
-		// SetHeight controls data rows only; the table also renders 1 header row.
-		// The view now contains only the table, so the full content area is available.
-		m.tbl.SetHeight(max(10, msg.Height-1))
-		return m, nil
-
-	case txsLoadedMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.status = fmt.Sprintf("Load error: %v", msg.err)
-			return m, nil
-		}
-		// Reverse transactions so newest appears first.
-		for i, j := 0, len(msg.txs)-1; i < j; i, j = i+1, j-1 {
-			msg.txs[i], msg.txs[j] = msg.txs[j], msg.txs[i]
-		}
-		m.txs = msg.txs
-		m.divs = msg.divs
-		m.buildEntries()
-		nDivs := len(msg.divs)
-		m.status = fmt.Sprintf("%d transactions · %d dividends | a: add · e: edit · d: delete · r: reload",
-			len(msg.txs), nDivs)
-		return m, nil
-
-	case txAddedMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.status = fmt.Sprintf("Add error: %v", msg.err)
-			return m, nil
-		}
-		m.status = "Transaction added — reloading..."
-		return m, tea.Batch(m.loadCmd(), func() tea.Msg { return txChangedMsg{} })
-
-	case txUpdatedMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.status = fmt.Sprintf("Update error: %v", msg.err)
-			return m, nil
-		}
-		m.status = "Transaction updated — reloading..."
-		return m, tea.Batch(m.loadCmd(), func() tea.Msg { return txChangedMsg{} })
-
-	case txDeletedMsg:
-		m.loading = false
-		if msg.err != nil {
-			m.status = fmt.Sprintf("Delete error: %v", msg.err)
-			return m, nil
-		}
-		m.status = "Transaction deleted — reloading..."
-		return m, tea.Batch(m.loadCmd(), func() tea.Msg { return txChangedMsg{} })
-	}
-
-	var cmd tea.Cmd
-	m.tbl, cmd = m.tbl.Update(msg)
-	return m, cmd
-}
-
-// NavHint returns the context-sensitive hint string that the root model merges
-// into its global help line when the Transactions tab is active.
-func (m TransactionsTabModel) NavHint() string {
-	if m.editor == nil {
-		return ""
-	}
-	if m.mode == txModeAdding || m.mode == txModeEditing {
-		return "esc: cancel"
-	}
-	if m.status != "" {
-		return m.status
-	}
-	return "a: add · e: edit · d: delete · r: reload"
-}
-
-func (m TransactionsTabModel) View() string {
-	if m.editor == nil {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render(
-			"Transaction editor not available — no transaction store configured.",
-		)
-	}
-
-	if m.mode == txModeAdding || m.mode == txModeEditing {
-		return m.form.View()
-	}
-
-	return m.tbl.View()
-}
-
 // buildEntries merges m.txs and m.divs into a single date-sorted slice and
 // refreshes the table rows. Transactions in m.txs must already be newest-first.
 func (m *TransactionsTabModel) buildEntries() {
 	entries := make([]txDisplayEntry, 0, len(m.txs)+len(m.divs))
 
-	for i := range m.txs {
-		kind := "BUY"
-		if m.txs[i].Type == portfolio.TransactionSell {
-			kind = "SELL"
+	for txIdx := range m.txs {
+		kind := txKindBuy
+		if m.txs[txIdx].Type == portfolio.TransactionSell {
+			kind = txKindSell
 		}
-		sleeve := "SAT"
-		if m.txs[i].AllocationType == portfolio.AllocationCore {
-			sleeve = "CORE"
+
+		sleeve := txSleeveSat
+		if m.txs[txIdx].AllocationType == portfolio.AllocationCore {
+			sleeve = txSleeveCore
 		}
+
 		entries = append(entries, txDisplayEntry{
-			date: m.txs[i].ExecutedAt, symbol: m.txs[i].Symbol, kind: kind,
-			qty: m.txs[i].Quantity, price: m.txs[i].Price, fee: m.txs[i].Fee,
-			sleeve: sleeve, txIndex: i,
+			date: m.txs[txIdx].ExecutedAt, symbol: m.txs[txIdx].Symbol, kind: kind,
+			qty: m.txs[txIdx].Quantity, price: m.txs[txIdx].Price, fee: m.txs[txIdx].Fee,
+			sleeve: sleeve, txIndex: txIdx,
 		})
 	}
 
-	for _, d := range m.divs {
+	for _, div := range m.divs {
 		entries = append(entries, txDisplayEntry{
-			date: d.ExDate, symbol: d.Symbol, kind: "DIV",
-			qty: d.Quantity, price: d.CashDividendPerShare, fee: d.IncomeAmount,
+			date: div.ExDate, symbol: div.Symbol, kind: txKindDiv,
+			qty: div.Quantity, price: div.CashDividendPerShare, fee: div.IncomeAmount,
 			sleeve: "—", txIndex: -1,
 		})
 	}
@@ -385,28 +495,32 @@ func (m *TransactionsTabModel) buildEntries() {
 
 func (m *TransactionsTabModel) syncRows() {
 	rows := make([]table.Row, 0, len(m.entries))
-	for _, e := range m.entries {
+	for _, entry := range m.entries {
 		rows = append(rows, table.Row{
-			e.symbol,
-			e.date.Format("2006-01-02"),
-			e.kind,
-			fmt.Sprintf("%.4f", e.qty),
-			fmt.Sprintf("%.2f", e.price),
-			fmt.Sprintf("%.2f", e.fee),
-			e.sleeve,
+			entry.symbol,
+			entry.date.Format("2006-01-02"),
+			entry.kind,
+			fmt.Sprintf("%.4f", entry.qty),
+			fmt.Sprintf("%.2f", entry.price),
+			fmt.Sprintf("%.2f", entry.fee),
+			entry.sleeve,
 		})
 	}
+
 	m.tbl.SetRows(rows)
 }
 
 func (m TransactionsTabModel) knownSymbols() []string {
 	seen := make(map[string]bool)
+
 	var syms []string
-	for i := range m.txs {
-		if !seen[m.txs[i].Symbol] {
-			seen[m.txs[i].Symbol] = true
-			syms = append(syms, m.txs[i].Symbol)
+
+	for txIdx := range m.txs {
+		if !seen[m.txs[txIdx].Symbol] {
+			seen[m.txs[txIdx].Symbol] = true
+			syms = append(syms, m.txs[txIdx].Symbol)
 		}
 	}
+
 	return syms
 }

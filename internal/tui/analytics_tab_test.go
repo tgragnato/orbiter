@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported tui symbols (analyticsLoadedMsg, AnalyticsTabModel fields)
 package tui
 
 import (

@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported tui symbols (fakeSignalReadModel, SignalsTabModel fields)
 package tui
 
 import (

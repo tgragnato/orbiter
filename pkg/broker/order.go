@@ -1,11 +1,21 @@
 package broker
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
 
-// Order is a request to open a new position
+// ErrUnknownOrderType is returned when an order has an unrecognized type.
+var ErrUnknownOrderType = errors.New("unknown order type")
+
+// ErrUnknownOrderDirection is returned when an order has an unrecognized direction.
+var ErrUnknownOrderDirection = errors.New("unknown order direction")
+
+// ErrInvalidSize is returned when an order size is zero or negative.
+var ErrInvalidSize = errors.New("size cannot be <= 0")
+
+// Order is a request to open a new position.
 type Order struct {
 	ID            string // set by broker
 	Type          OrderType
@@ -19,39 +29,51 @@ type Order struct {
 	CandleStart   time.Time
 }
 
-// NewMarketOrder creates a new order from given parameters
+// NewMarketOrder creates a new order from given parameters.
 func NewMarketOrder(direction BuyDirection, size float64, instrument string, targetPrice, stopLossPrice float64) Order {
 	return newOrderImpl(OrderTypeMarket, direction, size, instrument, targetPrice, stopLossPrice, 0)
 }
 
-func newOrderImpl(orderType OrderType, direction BuyDirection, size float64, instrument string, targetPrice, stopLossPrice, limitPrice float64) Order {
+func newOrderImpl(
+	orderType OrderType,
+	direction BuyDirection,
+	size float64,
+	instrument string,
+	targetPrice, stopLossPrice, limitPrice float64,
+) Order {
 	return Order{
+		ID:            "",
 		Type:          orderType,
 		Direction:     direction,
 		Size:          size,
 		Instrument:    instrument,
+		CurrencyCode:  "",
 		TargetPrice:   targetPrice,
 		StopLossPrice: stopLossPrice,
 		Limit:         limitPrice,
+		CandleStart:   time.Time{},
 	}
 }
 
-// HasTargetPrice checks if the optional target price has been set
+// HasTargetPrice checks if the optional target price has been set.
 func (order *Order) HasTargetPrice() bool {
 	return order.TargetPrice != 0
 }
 
-// Valid checks if the given order contains malformed data
+// Valid checks if the given order contains malformed data.
 func (order *Order) Valid() error {
 	if order.Type != OrderTypeMarket && order.Type != OrderTypeLimit {
-		return fmt.Errorf("unknown order type %d", order.Type)
+		return fmt.Errorf("order type %d: %w", order.Type, ErrUnknownOrderType)
 	}
+
 	if order.Direction != BuyDirectionShort && order.Direction != BuyDirectionLong {
-		return fmt.Errorf("unknown order direction %v", order.Direction)
+		return fmt.Errorf("order direction %v: %w", order.Direction, ErrUnknownOrderDirection)
 	}
+
 	if order.Size <= 0 {
-		return fmt.Errorf("cannot be <= 0")
+		return ErrInvalidSize
 	}
+
 	return nil
 }
 

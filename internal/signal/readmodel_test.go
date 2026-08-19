@@ -1,22 +1,56 @@
-package signal
+package signal_test
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/tgragnato/orbiter/internal/signal"
+)
 
 func TestReadModelWithMemoryDispatcher(t *testing.T) {
 	t.Parallel()
 
-	d := NewMemoryDispatcher()
-	_ = d.Dispatch(Message{Type: TypeBuy, Instrument: "A"})
-	_ = d.Dispatch(Message{Type: TypeSell, Instrument: "B"})
+	dispatcher := signal.NewMemoryDispatcher()
+	_ = dispatcher.Dispatch(signal.Message{
+		Type:          signal.TypeBuy,
+		Instrument:    "A",
+		CreatedAt:     time.Time{},
+		Summary:       "",
+		OrderID:       "",
+		Conviction:    0,
+		TargetWeight:  0,
+		CurrentWeight: 0,
+		Delta:         0,
+		Currency:      "",
+		MarketPrice:   0,
+		PMC:           0,
+	})
+	_ = dispatcher.Dispatch(signal.Message{
+		Type:          signal.TypeSell,
+		Instrument:    "B",
+		CreatedAt:     time.Time{},
+		Summary:       "",
+		OrderID:       "",
+		Conviction:    0,
+		TargetWeight:  0,
+		CurrentWeight: 0,
+		Delta:         0,
+		Currency:      "",
+		MarketPrice:   0,
+		PMC:           0,
+	})
 
-	rm := NewReadModel(d)
-	if got := rm.Pending(); len(got) != 2 {
+	readModel := signal.NewReadModel(dispatcher)
+
+	if got := readModel.Pending(); len(got) != 2 {
 		t.Fatalf("Pending len = %d, want 2", len(got))
 	}
-	if got := rm.Drain(); len(got) != 2 {
+
+	if got := readModel.Drain(); len(got) != 2 {
 		t.Fatalf("Drain len = %d, want 2", len(got))
 	}
-	if got := rm.Pending(); len(got) != 0 {
+
+	if got := readModel.Pending(); len(got) != 0 {
 		t.Fatalf("Pending after drain = %d, want 0", len(got))
 	}
 }
@@ -24,17 +58,19 @@ func TestReadModelWithMemoryDispatcher(t *testing.T) {
 func TestReadModelWithNonQueueDispatcher(t *testing.T) {
 	t.Parallel()
 
-	rm := NewReadModel(noopDispatcher{})
-	if got := rm.Pending(); got != nil {
+	readModel := signal.NewReadModel(noopDispatcher{})
+
+	if got := readModel.Pending(); got != nil {
 		t.Fatalf("Pending = %#v, want nil", got)
 	}
-	if got := rm.Drain(); got != nil {
+
+	if got := readModel.Drain(); got != nil {
 		t.Fatalf("Drain = %#v, want nil", got)
 	}
 }
 
 type noopDispatcher struct{}
 
-func (n noopDispatcher) Dispatch(message Message) error {
+func (n noopDispatcher) Dispatch(_ signal.Message) error {
 	return nil
 }

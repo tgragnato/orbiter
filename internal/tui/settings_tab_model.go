@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -30,14 +31,28 @@ type SettingsService interface {
 }
 
 const (
-	settingFieldYahooAPIKey     = iota
-	settingFieldCurrency        // 1
-	settingFieldTaxRate         // 2  — stored as decimal, displayed as %
-	settingFieldBrokerFeePercent // 3 — stored as decimal, displayed as %
-	settingFieldMaxBrokerFee    // 4  — absolute base-currency amount
-	settingFieldBuffer          // 5  — stored as decimal, displayed as %
-	settingFieldCount = 6
+	settingFieldYahooAPIKey = iota
+	settingFieldCurrency    // 1
+	settingFieldTaxRate     // 2  — stored as decimal, displayed as %
+	settingFieldBrokerFeePercent
+	settingFieldMaxBrokerFee // 4  — absolute base-currency amount
+	settingFieldBuffer       // 5  — stored as decimal, displayed as %
 )
+
+const settingFieldCount = 6
+
+const (
+	settingLabelWidth      = 22
+	settingPctDivisor      = 100.0
+	settingCurrencyCodeLen = 3
+	settingCurrencyDefault = "EUR"
+)
+
+// ErrSettingsServiceNotConfigured is returned when the settings service is nil.
+var ErrSettingsServiceNotConfigured = errors.New("settings service not configured")
+
+// ErrBaseCurrencyInvalid is returned when the base currency is not a 3-letter ISO code.
+var ErrBaseCurrencyInvalid = errors.New("base currency: must be a 3-letter ISO code")
 
 type settingsActivateMsg struct{}
 
@@ -50,24 +65,26 @@ type settingsLoadedMsg struct {
 
 type settingsSavedMsg struct {
 	err          error
-	apiKey       string                       // populated on success; empty string is valid (key removed)
-	currency     string                       // populated on success; always 3-letter ISO code
+	apiKey       string                        // populated on success; empty string is valid (key removed)
+	currency     string                        // populated on success; always 3-letter ISO code
 	brokerConfig configuration.TAABrokerConfig // populated on success
 }
 
 // SettingsTabModel renders editable application configuration in Tab 3.
+//
+//nolint:recvcheck // tea.Model interface requires value receivers; blurCurrent/focusCurrent use pointer
 type SettingsTabModel struct {
 	svc     SettingsService
 	focused int
 	quit    bool
 	status  string
 
-	yahooKeyInput    textinput.Model
-	currencyInput    textinput.Model
-	taxRateInput     textinput.Model // displayed as % (e.g. "26"), stored as decimal 0.26
-	brokerFeeInput   textinput.Model // displayed as % (e.g. "0.19"), stored as decimal 0.0019
+	yahooKeyInput     textinput.Model
+	currencyInput     textinput.Model
+	taxRateInput      textinput.Model // displayed as % (e.g. "26"), stored as decimal 0.26
+	brokerFeeInput    textinput.Model // displayed as % (e.g. "0.19"), stored as decimal 0.0019
 	maxBrokerFeeInput textinput.Model // absolute base-currency amount (e.g. "18.9")
-	bufferInput      textinput.Model // displayed as % (e.g. "1"), stored as decimal 0.01
+	bufferInput       textinput.Model // displayed as % (e.g. "1"), stored as decimal 0.01
 
 	styles settingsStyles
 }
@@ -86,8 +103,8 @@ func newSettingsStyles() settingsStyles {
 	return settingsStyles{
 		title:        lipgloss.NewStyle().Bold(true),
 		sectionTitle: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")),
-		label:        lipgloss.NewStyle().Width(22).Foreground(lipgloss.Color("252")),
-		labelFocused: lipgloss.NewStyle().Width(22).Foreground(lipgloss.Color("33")),
+		label:        lipgloss.NewStyle().Width(settingLabelWidth).Foreground(lipgloss.Color("252")),
+		labelFocused: lipgloss.NewStyle().Width(settingLabelWidth).Foreground(lipgloss.Color("33")),
 		status:       lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
 		errStyle:     lipgloss.NewStyle().Foreground(lipgloss.Color("196")),
 		hint:         lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
@@ -103,7 +120,7 @@ func NewSettingsTabModel(svc SettingsService) SettingsTabModel {
 	yahooKeyInput.Width = 32
 
 	currencyInput := textinput.New()
-	currencyInput.Placeholder = "EUR"
+	currencyInput.Placeholder = settingCurrencyDefault
 	currencyInput.CharLimit = 8
 	currencyInput.Width = 6
 
@@ -130,6 +147,8 @@ func NewSettingsTabModel(svc SettingsService) SettingsTabModel {
 	return SettingsTabModel{
 		svc:               svc,
 		focused:           settingFieldYahooAPIKey,
+		quit:              false,
+		status:            "",
 		yahooKeyInput:     yahooKeyInput,
 		currencyInput:     currencyInput,
 		taxRateInput:      taxRateInput,
@@ -141,17 +160,18 @@ func NewSettingsTabModel(svc SettingsService) SettingsTabModel {
 }
 
 // fmtPct converts a decimal rate to a compact percentage string (e.g. 0.26 → "26", 0.0019 → "0.19").
-func fmtPct(v float64) string {
-	return strconv.FormatFloat(v*100, 'f', -1, 64)
+func fmtPct(val float64) string {
+	return strconv.FormatFloat(val*settingPctDivisor, 'f', -1, 64)
 }
 
 // parsePct parses a percentage string and returns the equivalent decimal (e.g. "26" → 0.26).
-func parsePct(s string) (float64, error) {
-	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+func parsePct(raw string) (float64, error) {
+	val, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("parsePct: %w", err)
 	}
-	return v / 100, nil
+
+	return val / settingPctDivisor, nil
 }
 
 // Init focuses the first field and loads current settings from the service.
@@ -160,9 +180,13 @@ func (m SettingsTabModel) Init() tea.Cmd {
 	if m.svc != nil {
 		cmds = append(cmds, m.loadCmd())
 	}
+
 	return tea.Batch(cmds...)
 }
 
+// Update handles incoming messages for the settings tab.
+//
+//nolint:cyclop // settings tab dispatch; complexity is inherent in multi-field form
 func (m SettingsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.quit {
 		return m, nil
@@ -175,13 +199,16 @@ func (m SettingsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case settingsActivateMsg:
 		m.focused = settingFieldYahooAPIKey
 		cmd := m.yahooKeyInput.Focus()
+
 		return m, cmd
 
 	case settingsLoadedMsg:
 		if msg.err != nil {
 			m.status = fmt.Sprintf("Load error: %v", msg.err)
+
 			return m, nil
 		}
+
 		m.yahooKeyInput.SetValue(msg.yahooAPIKey)
 		m.currencyInput.SetValue(msg.currency)
 		m.taxRateInput.SetValue(fmtPct(msg.brokerConfig.TaxRate))
@@ -189,6 +216,7 @@ func (m SettingsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.maxBrokerFeeInput.SetValue(strconv.FormatFloat(msg.brokerConfig.MaxBrokerFee, 'f', -1, 64))
 		m.bufferInput.SetValue(fmtPct(msg.brokerConfig.Buffer))
 		m.status = "Settings loaded"
+
 		return m, nil
 
 	case settingsSavedMsg:
@@ -197,16 +225,17 @@ func (m SettingsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "Settings saved"
 		}
+
 		return m, nil
 	}
 
 	if key, ok := msg.(tea.KeyMsg); ok {
 		switch key.String() {
-		case "j", "down":
+		case "j", keyDown:
 			return m.moveSettingsFocus(1)
 		case "k", "up":
 			return m.moveSettingsFocus(-1)
-		case "s", "enter":
+		case "s", keyEnter:
 			return m, m.saveCmd()
 		}
 	}
@@ -214,10 +243,46 @@ func (m SettingsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m.updateSettingsFocused(msg)
 }
 
+// NavHint returns the context-sensitive hint string that the root model merges
+// into its global help line when the Settings tab is active.
+func (m SettingsTabModel) NavHint() string {
+	nav := "j/k: navigate · s/enter: save"
+	if m.status != "" {
+		return m.status + "  |  " + nav
+	}
+
+	return nav
+}
+
+// View renders the settings tab.
+func (m SettingsTabModel) View() string {
+	if m.quit {
+		return ""
+	}
+
+	styles := m.styles
+	lines := []string{
+		styles.sectionTitle.Render("Data Provider Credentials"),
+		m.renderSettingsInput("Yahoo API Key:       ", m.yahooKeyInput, m.focused == settingFieldYahooAPIKey),
+		"",
+		styles.sectionTitle.Render("Portfolio Currency"),
+		m.renderSettingsInput("Base Currency (ISO): ", m.currencyInput, m.focused == settingFieldCurrency),
+		"",
+		styles.sectionTitle.Render("TAA Broker Configuration"),
+		m.renderSettingsInput("Tax Rate (%):        ", m.taxRateInput, m.focused == settingFieldTaxRate),
+		m.renderSettingsInput("Broker Fee (%):      ", m.brokerFeeInput, m.focused == settingFieldBrokerFeePercent),
+		m.renderSettingsInput("Max Broker Fee:      ", m.maxBrokerFeeInput, m.focused == settingFieldMaxBrokerFee),
+		m.renderSettingsInput("Buffer (%):          ", m.bufferInput, m.focused == settingFieldBuffer),
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func (m SettingsTabModel) moveSettingsFocus(delta int) (SettingsTabModel, tea.Cmd) {
 	m.blurSettingsCurrent()
 	m.focused = ((m.focused+delta)%settingFieldCount + settingFieldCount) % settingFieldCount
 	cmd := m.focusSettingsCurrent()
+
 	return m, cmd
 }
 
@@ -253,11 +318,13 @@ func (m *SettingsTabModel) focusSettingsCurrent() tea.Cmd {
 	case settingFieldBuffer:
 		return m.bufferInput.Focus()
 	}
+
 	return nil
 }
 
 func (m SettingsTabModel) updateSettingsFocused(msg tea.Msg) (SettingsTabModel, tea.Cmd) {
 	var cmd tea.Cmd
+
 	switch m.focused {
 	case settingFieldYahooAPIKey:
 		m.yahooKeyInput, cmd = m.yahooKeyInput.Update(msg)
@@ -272,61 +339,129 @@ func (m SettingsTabModel) updateSettingsFocused(msg tea.Msg) (SettingsTabModel, 
 	case settingFieldBuffer:
 		m.bufferInput, cmd = m.bufferInput.Update(msg)
 	}
+
 	return m, cmd
 }
 
 func (m SettingsTabModel) loadCmd() tea.Cmd {
 	svc := m.svc
+
 	return func() tea.Msg {
 		ctx := context.Background()
+
 		creds, err := svc.GetYahooCredentials(ctx)
 		if err != nil {
-			return settingsLoadedMsg{err: err}
+			return settingsLoadedMsg{
+				err:          err,
+				yahooAPIKey:  "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
 		}
+
 		baseCurrency, err := svc.GetBaseCurrency(ctx)
 		if err != nil {
-			return settingsLoadedMsg{err: err}
+			return settingsLoadedMsg{
+				err:          err,
+				yahooAPIKey:  "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
 		}
+
 		brokerConfig, err := svc.GetBrokerConfig(ctx)
 		if err != nil {
-			return settingsLoadedMsg{err: err}
+			return settingsLoadedMsg{
+				err:          err,
+				yahooAPIKey:  "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
 		}
+
 		return settingsLoadedMsg{
 			yahooAPIKey:  creds.APIKey,
 			currency:     baseCurrency,
 			brokerConfig: brokerConfig,
+			err:          nil,
 		}
 	}
 }
 
+//nolint:funlen // saveCmd validates and persists many fields; each branch is a required validation step
 func (m SettingsTabModel) saveCmd() tea.Cmd {
 	if m.svc == nil {
-		return func() tea.Msg { return settingsSavedMsg{err: fmt.Errorf("settings service not configured")} }
+		return func() tea.Msg {
+			return settingsSavedMsg{
+				err:          ErrSettingsServiceNotConfigured,
+				apiKey:       "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
+		}
 	}
 
 	apiKey := strings.TrimSpace(m.yahooKeyInput.Value())
 	currencyStr := strings.ToUpper(strings.TrimSpace(m.currencyInput.Value()))
 
-	if len(currencyStr) != 3 {
-		return func() tea.Msg { return settingsSavedMsg{err: fmt.Errorf("base currency: must be a 3-letter ISO code")} }
+	if len(currencyStr) != settingCurrencyCodeLen {
+		return func() tea.Msg {
+			return settingsSavedMsg{
+				err:          ErrBaseCurrencyInvalid,
+				apiKey:       "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
+		}
 	}
 
 	// Parse broker config fields (displayed as %, stored as decimals).
 	taxRate, err := parsePct(m.taxRateInput.Value())
 	if err != nil {
-		return func() tea.Msg { return settingsSavedMsg{err: fmt.Errorf("tax rate: %w", err)} }
+		return func() tea.Msg {
+			return settingsSavedMsg{
+				err:          fmt.Errorf("tax rate: %w", err),
+				apiKey:       "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
+		}
 	}
+
 	brokerFee, err := parsePct(m.brokerFeeInput.Value())
 	if err != nil {
-		return func() tea.Msg { return settingsSavedMsg{err: fmt.Errorf("broker fee %%: %w", err)} }
+		return func() tea.Msg {
+			return settingsSavedMsg{
+				err:          fmt.Errorf("broker fee %%: %w", err),
+				apiKey:       "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
+		}
 	}
+
 	maxFee, err := strconv.ParseFloat(strings.TrimSpace(m.maxBrokerFeeInput.Value()), 64)
 	if err != nil {
-		return func() tea.Msg { return settingsSavedMsg{err: fmt.Errorf("max broker fee: %w", err)} }
+		return func() tea.Msg {
+			return settingsSavedMsg{
+				err:          fmt.Errorf("max broker fee: %w", err),
+				apiKey:       "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
+		}
 	}
+
 	buffer, err := parsePct(m.bufferInput.Value())
 	if err != nil {
-		return func() tea.Msg { return settingsSavedMsg{err: fmt.Errorf("buffer: %w", err)} }
+		return func() tea.Msg {
+			return settingsSavedMsg{
+				err:          fmt.Errorf("buffer: %w", err),
+				apiKey:       "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
+		}
 	}
 
 	brokerConfig := configuration.TAABrokerConfig{
@@ -337,61 +472,58 @@ func (m SettingsTabModel) saveCmd() tea.Cmd {
 	}
 
 	svc := m.svc
+
 	return func() tea.Msg {
 		ctx := context.Background()
-		if err := svc.SetYahooCredentials(ctx, configuration.YahooCredentialsSetting{
+
+		err := svc.SetYahooCredentials(ctx, configuration.YahooCredentialsSetting{
 			APIKey: apiKey,
-		}); err != nil {
-			return settingsSavedMsg{err: err}
+		})
+		if err != nil {
+			return settingsSavedMsg{
+				err:          err,
+				apiKey:       "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
 		}
-		if err := svc.SetBaseCurrency(ctx, currencyStr); err != nil {
-			return settingsSavedMsg{err: err}
+
+		err = svc.SetBaseCurrency(ctx, currencyStr)
+		if err != nil {
+			return settingsSavedMsg{
+				err:          err,
+				apiKey:       "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
 		}
-		if err := svc.SetBrokerConfig(ctx, brokerConfig); err != nil {
-			return settingsSavedMsg{err: err}
+
+		err = svc.SetBrokerConfig(ctx, brokerConfig)
+		if err != nil {
+			return settingsSavedMsg{
+				err:          err,
+				apiKey:       "",
+				currency:     "",
+				brokerConfig: configuration.TAABrokerConfig{TaxRate: 0, BrokerFeePercent: 0, MaxBrokerFee: 0, Buffer: 0},
+			}
 		}
-		return settingsSavedMsg{apiKey: apiKey, currency: currencyStr, brokerConfig: brokerConfig}
-	}
-}
 
-// NavHint returns the context-sensitive hint string that the root model merges
-// into its global help line when the Settings tab is active.
-func (m SettingsTabModel) NavHint() string {
-	nav := "j/k: navigate · s/enter: save"
-	if m.status != "" {
-		return m.status + "  |  " + nav
+		return settingsSavedMsg{
+			apiKey:       apiKey,
+			currency:     currencyStr,
+			brokerConfig: brokerConfig,
+			err:          nil,
+		}
 	}
-	return nav
-}
-
-func (m SettingsTabModel) View() string {
-	if m.quit {
-		return ""
-	}
-
-	st := m.styles
-	lines := []string{
-		st.sectionTitle.Render("Data Provider Credentials"),
-		m.renderSettingsInput("Yahoo API Key:       ", m.yahooKeyInput, m.focused == settingFieldYahooAPIKey),
-		"",
-		st.sectionTitle.Render("Portfolio Currency"),
-		m.renderSettingsInput("Base Currency (ISO): ", m.currencyInput, m.focused == settingFieldCurrency),
-		"",
-		st.sectionTitle.Render("TAA Broker Configuration"),
-		m.renderSettingsInput("Tax Rate (%):        ", m.taxRateInput, m.focused == settingFieldTaxRate),
-		m.renderSettingsInput("Broker Fee (%):      ", m.brokerFeeInput, m.focused == settingFieldBrokerFeePercent),
-		m.renderSettingsInput("Max Broker Fee:      ", m.maxBrokerFeeInput, m.focused == settingFieldMaxBrokerFee),
-		m.renderSettingsInput("Buffer (%):          ", m.bufferInput, m.focused == settingFieldBuffer),
-	}
-
-	return strings.Join(lines, "\n")
 }
 
 func (m SettingsTabModel) renderSettingsInput(label string, inp textinput.Model, isFocused bool) string {
-	st := m.styles
-	lStyle := st.label
+	styles := m.styles
+
+	lStyle := styles.label
 	if isFocused {
-		lStyle = st.labelFocused
+		lStyle = styles.labelFocused
 	}
+
 	return lStyle.Render(label) + inp.View()
 }

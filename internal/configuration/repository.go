@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 // Repository stores and retrieves configuration settings.
@@ -32,23 +33,25 @@ func (r *PostgresRepository) Get(ctx context.Context, key string) (Setting, erro
 		WHERE key = $1
 	`
 
-	var s Setting
+	var row Setting
+
 	err := r.db.QueryRowContext(ctx, query, key).Scan(
-		&s.Key,
-		&s.Scope,
-		&s.Description,
-		&s.ValueJSON,
-		&s.CreatedAt,
-		&s.UpdatedAt,
+		&row.Key,
+		&row.Scope,
+		&row.Description,
+		&row.ValueJSON,
+		&row.CreatedAt,
+		&row.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Setting{}, ErrSettingNotFound
 	}
+
 	if err != nil {
-		return Setting{}, err
+		return Setting{}, fmt.Errorf("scan setting %s: %w", key, err)
 	}
 
-	return s, nil
+	return row, nil
 }
 
 // Set creates or updates a setting.
@@ -65,7 +68,11 @@ func (r *PostgresRepository) Set(ctx context.Context, setting Setting) error {
 	`
 
 	_, err := r.db.ExecContext(ctx, query, setting.Key, setting.Scope, setting.Description, setting.ValueJSON)
-	return err
+	if err != nil {
+		return fmt.Errorf("exec set setting %s: %w", setting.Key, err)
+	}
+
+	return nil
 }
 
 // List returns all settings sorted by key.
@@ -78,21 +85,27 @@ func (r *PostgresRepository) List(ctx context.Context) ([]Setting, error) {
 
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query settings: %w", err)
 	}
+
 	defer func() { _ = rows.Close() }()
 
 	settings := make([]Setting, 0)
+
 	for rows.Next() {
-		var s Setting
-		if err := rows.Scan(&s.Key, &s.Scope, &s.Description, &s.ValueJSON, &s.CreatedAt, &s.UpdatedAt); err != nil {
-			return nil, err
+		var row Setting
+
+		err = rows.Scan(&row.Key, &row.Scope, &row.Description, &row.ValueJSON, &row.CreatedAt, &row.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("scan setting row: %w", err)
 		}
-		settings = append(settings, s)
+
+		settings = append(settings, row)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate settings rows: %w", err)
 	}
 
 	return settings, nil
@@ -103,8 +116,11 @@ func (r *PostgresRepository) Count(ctx context.Context) (int, error) {
 	const query = `SELECT COUNT(*) FROM app_settings`
 
 	var count int
-	if err := r.db.QueryRowContext(ctx, query).Scan(&count); err != nil {
-		return 0, err
+
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("scan settings count: %w", err)
 	}
+
 	return count, nil
 }

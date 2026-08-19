@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported tui symbols (holdingsMsg, toggledMsg, rowKind, etc.)
 package tui
 
 import (
@@ -150,7 +151,9 @@ func TestModelToggleError(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeHoldingsStore{
-		holdings:  []portfolio.Holding{{ID: 10, Symbol: "AAA", Quantity: 1, MarketPrice: 10, AllocationType: portfolio.AllocationCore}},
+		holdings: []portfolio.Holding{
+			{ID: 10, Symbol: "AAA", Quantity: 1, MarketPrice: 10, AllocationType: portfolio.AllocationCore},
+		},
 		toggleErr: errors.New("toggle failed"),
 	}
 	m := NewModelWithAll(store, nil, defaultPortfolioID)
@@ -289,7 +292,8 @@ func TestModelTAAToggle(t *testing.T) {
 
 	store := &fakeHoldingsStore{
 		holdings: []portfolio.Holding{
-			{ID: 1, Symbol: "VWCE.DE", Quantity: 2, MarketPrice: 100, AllocationType: portfolio.AllocationCore, TAAEnabled: true},
+			{ID: 1, Symbol: "VWCE.DE", Quantity: 2, MarketPrice: 100,
+				AllocationType: portfolio.AllocationCore, TAAEnabled: true},
 		},
 	}
 	m := NewModelWithAll(store, nil, defaultPortfolioID)
@@ -318,7 +322,10 @@ func TestModelTAAToggleError(t *testing.T) {
 	t.Parallel()
 
 	store := &fakeHoldingsStore{
-		holdings:     []portfolio.Holding{{ID: 1, Symbol: "AAA", Quantity: 1, MarketPrice: 10, AllocationType: portfolio.AllocationCore, TAAEnabled: true}},
+		holdings: []portfolio.Holding{
+			{ID: 1, Symbol: "AAA", Quantity: 1, MarketPrice: 10,
+				AllocationType: portfolio.AllocationCore, TAAEnabled: true},
+		},
 		taaToggleErr: errors.New("taa toggle failed"),
 	}
 	m := NewModelWithAll(store, nil, defaultPortfolioID)
@@ -340,6 +347,7 @@ func TestModelClosedHoldingRendered(t *testing.T) {
 
 	store := &fakeHoldingsStore{holdings: []portfolio.Holding{
 		{ID: 1, Symbol: "OPEN", Quantity: 2, MarketPrice: 100, AllocationType: portfolio.AllocationCore, TAAEnabled: true},
+		//nolint:lll // long test data row
 		{ID: 2, Symbol: "CLOSED", Quantity: 0, MarketPrice: 80, AllocationType: portfolio.AllocationSatellite, TAAEnabled: false},
 	}}
 	m := NewModelWithAll(store, nil, defaultPortfolioID)

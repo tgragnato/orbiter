@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported tui symbols (LogsTabModel fields, LogEntry)
 package tui
 
 import (

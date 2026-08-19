@@ -1,3 +1,4 @@
+//nolint:testpackage // accesses unexported tui symbols (transactionFormModel, txFormResultMsg, formField*)
 package tui
 
 import (
@@ -408,7 +409,9 @@ func TestNewTransactionFormEditing(t *testing.T) {
 func TestNewTransactionFormEditingTitle(t *testing.T) {
 	t.Parallel()
 
-	tx := portfolio.Transaction{ID: 7, Symbol: "SPY", Type: portfolio.TransactionBuy, Quantity: 1, Price: 400, ExecutedAt: time.Now()}
+	tx := portfolio.Transaction{
+		ID: 7, Symbol: "SPY", Type: portfolio.TransactionBuy, Quantity: 1, Price: 400, ExecutedAt: time.Now(),
+	}
 	f, _ := newTransactionFormEditing(tx, nil)
 
 	view := f.View()

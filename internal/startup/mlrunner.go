@@ -10,6 +10,10 @@ import (
 	"github.com/tgragnato/orbiter/internal/ml"
 )
 
+// defaultConvictionScale is the default prediction scale used when seeding conviction
+// scores from the most recent checkpoint at startup.
+const defaultConvictionScale = 0.01
+
 // mlRunner wraps ml.Engine with 24-hour auto-scheduling and implements both
 // the signals.MLEngine and taa.ConvictionProvider interfaces.
 //
@@ -35,7 +39,7 @@ type mlRunner struct {
 	mu              sync.Mutex
 	lastRun         time.Time
 	trigger         chan struct{}
-	conviction      sync.Map   // map[string]float64
+	conviction      sync.Map    // map[string]float64
 	convictionReady chan struct{} // closed once conviction scores are seeded (or unavailable)
 }
 
@@ -55,31 +59,49 @@ func newMLRunner(
 		checkpoint:      checkpoint,
 		currentSamples:  currentSamples,
 		convictionReady: make(chan struct{}),
+		mu:              sync.Mutex{},
+		lastRun:         time.Time{},
+		conviction:      sync.Map{},
 	}
 }
 
 func (r *mlRunner) Status() int32         { return r.engine.Status() }
 func (r *mlRunner) Pause()                { r.engine.Pause() }
 func (r *mlRunner) Resume()               { r.engine.Resume() }
-func (r *mlRunner) LogsChan() chan string { return r.engine.LogsChan() }
+func (r *mlRunner) LogsChan() chan string  { return r.engine.LogsChan() }
 
 // Conviction implements taa.ConvictionProvider. Returns the most recently
 // computed conviction score for symbol in [-1,+1], or 0 when no score exists.
 func (r *mlRunner) Conviction(symbol string) float64 {
-	if v, ok := r.conviction.Load(symbol); ok {
-		return v.(float64)
+	val, ok := r.conviction.Load(symbol)
+	if !ok {
+		return 0
 	}
-	return 0
+
+	score, isFloat := val.(float64)
+	if !isFloat {
+		return 0
+	}
+
+	return score
 }
 
 // Symbols implements taa.SymbolProvider. Returns all symbols the ML engine has
 // conviction scores for, in no particular order.
 func (r *mlRunner) Symbols() []string {
 	var syms []string
-	r.conviction.Range(func(k, _ any) bool {
-		syms = append(syms, k.(string))
+
+	r.conviction.Range(func(key, _ any) bool {
+		sym, ok := key.(string)
+		if !ok {
+			return true
+		}
+
+		syms = append(syms, sym)
+
 		return true
 	})
+
 	return syms
 }
 
@@ -122,6 +144,7 @@ func (r *mlRunner) run(ctx context.Context) {
 	} else {
 		close(r.convictionReady)
 	}
+
 	r.maybeStart(ctx, true)
 
 	ticker := time.NewTicker(time.Hour)
@@ -131,6 +154,7 @@ func (r *mlRunner) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			r.engine.Cancel()
+
 			return
 		case <-r.trigger:
 			r.maybeStart(ctx, false)
@@ -148,27 +172,34 @@ func (r *mlRunner) applyResult(ctx context.Context, result ml.TrainingResult) {
 	}
 
 	if r.checkpoint != nil {
-		var m ml.Metrics
+		var metrics ml.Metrics
+
 		if best := ml.BestFold(result.AllFolds); best != nil {
-			m = best.Metrics
+			metrics = best.Metrics
 		}
-		if err := r.checkpoint.Save(ctx, "MAIN", result.Forest, m, true); err != nil {
-			slog.Warn("ml: checkpoint save failed", "error", err)
+
+		saveErr := r.checkpoint.Save(ctx, "MAIN", result.Forest, metrics, true)
+		if saveErr != nil {
+			slog.Warn("ml: checkpoint save failed", "error", saveErr)
 		}
 	}
 
 	if r.currentSamples == nil {
 		return
 	}
+
 	samples, err := r.currentSamples(ctx)
 	if err != nil {
 		slog.Warn("ml: current samples failed", "error", err)
+
 		return
 	}
+
 	for sym := range samples {
 		score := result.Forest.ConvictionScore(samples[sym].Features, result.PredictionScale)
 		r.conviction.Store(sym, score)
 	}
+
 	slog.Info("ml: conviction scores updated", "symbols", len(samples))
 }
 
@@ -179,16 +210,20 @@ func (r *mlRunner) initLastRunFromCheckpoint(ctx context.Context) *ml.Forest {
 	if r.checkpoint == nil {
 		return nil
 	}
+
 	forest, createdAt, err := r.checkpoint.LoadActive(ctx, "MAIN")
 	if err != nil {
 		if !errors.Is(err, ml.ErrNoActiveModel) {
 			slog.Warn("ml: checkpoint load failed", "error", err)
 		}
+
 		return nil
 	}
+
 	r.mu.Lock()
 	r.lastRun = createdAt
 	r.mu.Unlock()
+
 	return forest
 }
 
@@ -199,15 +234,19 @@ func (r *mlRunner) seedConvictionScores(ctx context.Context, forest *ml.Forest) 
 	if r.currentSamples == nil {
 		return
 	}
+
 	samples, err := r.currentSamples(ctx)
 	if err != nil {
 		slog.Warn("ml: seed current samples failed", "error", err)
+
 		return
 	}
+
 	for sym := range samples {
-		score := forest.ConvictionScore(samples[sym].Features, 0.01)
+		score := forest.ConvictionScore(samples[sym].Features, defaultConvictionScale)
 		r.conviction.Store(sym, score)
 	}
+
 	slog.Info("ml: conviction seeded from checkpoint", "symbols", len(samples))
 }
 
@@ -224,6 +263,7 @@ func (r *mlRunner) maybeStart(ctx context.Context, respectInterval bool) {
 		r.mu.Lock()
 		elapsed := time.Since(r.lastRun)
 		r.mu.Unlock()
+
 		if elapsed < r.interval {
 			return
 		}

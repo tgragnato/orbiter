@@ -1,4 +1,4 @@
-package sma10
+package sma10_test
 
 import (
 	"math/rand"
@@ -8,12 +8,16 @@ import (
 	"github.com/tgragnato/orbiter/pkg/ohlc"
 	"github.com/tgragnato/orbiter/pkg/strategy"
 	"github.com/tgragnato/orbiter/pkg/tick"
+
+	"github.com/tgragnato/orbiter/pkg/strategy/sma10"
 )
+
+const testInstrument = "CAD/AUD"
 
 func TestSMA10_Name(t *testing.T) {
 	t.Parallel()
 
-	s := New("test", time.Minute*60)
+	s := sma10.New("test", time.Minute*60)
 	if strategy.NameSMA10 != s.Name() {
 		t.Fatalf("expected %q, got %q", strategy.NameSMA10, s.Name())
 	}
@@ -22,7 +26,7 @@ func TestSMA10_Name(t *testing.T) {
 func TestSMA10_OnTick_NoOrders(t *testing.T) {
 	t.Parallel()
 
-	s := New("test", time.Minute*60)
+	s := sma10.New("test", time.Minute*60)
 	currentTick := tick.New("test", time.Now(), 100, 100)
 
 	toOpen, _, _ := s.OnTick(currentTick)
@@ -31,6 +35,7 @@ func TestSMA10_OnTick_NoOrders(t *testing.T) {
 	}
 }
 
+//nolint:cyclop,funlen // test function with multiple assertion branches and table entries
 func TestSMA_Score(t *testing.T) {
 	t.Parallel()
 
@@ -44,52 +49,57 @@ func TestSMA_Score(t *testing.T) {
 	}{
 		{
 			name:           "Less than 10 closed candles",
-			instrument:     "CAD/AUD",
+			instrument:     testInstrument,
 			candleDuration: time.Hour,
-			closedCandles:  generateCandles("uptrend", "CAD/AUD", 2, time.Hour),
+			closedCandles:  generateCandles("uptrend", 2),
 			wantZero:       true,
 			wantPositive:   false,
 		},
 		{
 			name:           "Test SMA Score Calculation (Mixed Price Action)",
-			instrument:     "CAD/AUD",
+			instrument:     testInstrument,
 			candleDuration: time.Hour,
-			closedCandles:  generateCandles("mixed", "CAD/AUD", 99, time.Hour),
+			closedCandles:  generateCandles("mixed", 99),
 			wantZero:       true,
 			wantPositive:   false,
 		},
 		{
 			name:           "Test SMA Score Calculation (Long Uptrend)",
-			instrument:     "CAD/AUD",
+			instrument:     testInstrument,
 			candleDuration: time.Hour,
-			closedCandles:  generateCandles("uptrend", "CAD/AUD", 1500, time.Hour),
+			closedCandles:  generateCandles("uptrend", 1500),
 			wantZero:       false,
 			wantPositive:   true,
 		},
 		{
 			name:           "Test SMA Score Calculation (Long Downtrend)",
-			instrument:     "CAD/AUD",
+			instrument:     testInstrument,
 			candleDuration: time.Hour,
-			closedCandles:  generateCandles("downtrend", "CAD/AUD", 1500, time.Hour),
+			closedCandles:  generateCandles("downtrend", 1500),
 			wantZero:       false,
 			wantPositive:   false,
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			d := New(tt.instrument, tt.candleDuration)
-			for _, candle := range tt.closedCandles {
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := sma10.New(testCase.instrument, testCase.candleDuration)
+			for _, candle := range testCase.closedCandles {
 				d.OnWarmUpCandle(candle)
 			}
 
-			got := d.Score(tt.closedCandles)
-			if tt.wantZero && got != 0 {
+			got := d.Score(testCase.closedCandles)
+			if testCase.wantZero && got != 0 {
 				t.Errorf("Score() = %v, want zero", got)
 			}
-			if !tt.wantZero && tt.wantPositive && got < 0 {
+
+			if !testCase.wantZero && testCase.wantPositive && got < 0 {
 				t.Errorf("Score() = %v, want positive", got)
 			}
-			if !tt.wantZero && !tt.wantPositive && got > 0 {
+
+			if !testCase.wantZero && !testCase.wantPositive && got > 0 {
 				t.Errorf("Score() = %v, want negative", got)
 			}
 		})
@@ -99,59 +109,62 @@ func TestSMA_Score(t *testing.T) {
 // generateCandles creates a slice of OHLC candles with a specified trend.
 // trend: "mixed", "uptrend", or "downtrend".
 // count: the number of candles to generate.
-// basePrice: the starting price for the candles.
-func generateCandles(trend string, instrument string, count int, candleDuration time.Duration) []*ohlc.OHLC {
+const testCandleDuration = time.Hour
+
+//nolint:funlen // inherently long due to multiple trend branches and candle construction
+func generateCandles(trend string, count int) []*ohlc.OHLC {
 	candles := make([]*ohlc.OHLC, count)
 	currentPrice := rand.Float64() * 100
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	for i := 0; i < count-1; i++ {
-		var open, high, low, close float64
+	for idx := range count - 1 {
+		var openPrice, highPrice, lowPrice, closePrice float64
 
 		switch trend {
 		case "uptrend":
-			open = currentPrice
-			high = currentPrice + (float64(i) * 1.0)
-			low = currentPrice - 0.5
-			close = currentPrice + (float64(i) * 1.5)
-			currentPrice = close
+			openPrice = currentPrice
+			highPrice = currentPrice + (float64(idx) * 1.0)
+			lowPrice = currentPrice - 0.5
+			closePrice = currentPrice + (float64(idx) * 1.5)
+			currentPrice = closePrice
 		case "downtrend":
-			open = currentPrice
-			high = currentPrice + 0.5
-			low = currentPrice - (float64(i) * 1.0)
-			close = currentPrice - (float64(i) * 1.5)
-			currentPrice = close
+			openPrice = currentPrice
+			highPrice = currentPrice + 0.5
+			lowPrice = currentPrice - (float64(idx) * 1.0)
+			closePrice = currentPrice - (float64(idx) * 1.5)
+			currentPrice = closePrice
 		default:
-			open = currentPrice
-			change := (float64(i%3) - 1) * 1.0
-			high = currentPrice + 2.0
-			low = currentPrice - 2.0
-			close = currentPrice + change
-			currentPrice = close
+			openPrice = currentPrice
+			change := (float64(idx%3) - 1) * 1.0
+			highPrice = currentPrice + 2.0
+			lowPrice = currentPrice - 2.0
+			closePrice = currentPrice + change
+			currentPrice = closePrice
 		}
 
-		o := ohlc.New(instrument, now.Add(time.Duration(i)*candleDuration), candleDuration, false)
-		o.Open = open
-		o.High = high
-		o.Low = low
-		o.Close = close
-		o.ForceClose()
-		candles[i] = o
+		candle := ohlc.New(testInstrument, now.Add(time.Duration(idx)*testCandleDuration), testCandleDuration, false)
+		candle.Open = openPrice
+		candle.High = highPrice
+		candle.Low = lowPrice
+		candle.Close = closePrice
+		candle.ForceClose()
+		candles[idx] = candle
 	}
 
 	multiple := 1.0
+
 	switch trend {
 	case "uptrend", "downtrend":
 		multiple = 0.90
 	}
 
-	o := ohlc.New("test", now.Add(time.Duration(len(candles)-1)*candleDuration), candleDuration, false)
-	o.Open = candles[len(candles)-2].Open * multiple
-	o.High = candles[len(candles)-2].High * multiple
-	o.Low = candles[len(candles)-2].Low * multiple
-	o.Close = candles[len(candles)-2].Close * multiple
-	o.ForceClose()
-	candles[len(candles)-1] = o
+	lastCandle := ohlc.New("test", now.Add(time.Duration(len(candles)-1)*testCandleDuration), testCandleDuration, false)
+	lastCandle.Open = candles[len(candles)-2].Open * multiple
+	lastCandle.High = candles[len(candles)-2].High * multiple
+	lastCandle.Low = candles[len(candles)-2].Low * multiple
+	lastCandle.Close = candles[len(candles)-2].Close * multiple
+	lastCandle.ForceClose()
+	candles[len(candles)-1] = lastCandle
 
 	return candles
 }

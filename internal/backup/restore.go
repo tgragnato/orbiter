@@ -3,7 +3,6 @@ package backup
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -13,92 +12,122 @@ import (
 	"github.com/tgragnato/orbiter/internal/portfolio"
 )
 
+// ErrUnsupportedVersion is returned when the backup file version is not supported.
+var ErrUnsupportedVersion = fmt.Errorf("unsupported backup version (expected %q)", backupVersion)
+
 // RunRestore is the entry point for `orbiter restore …`.
 // It inserts every transaction from the JSON file via AddTransaction, which
 // recalculates holdings after each insert. The operation is additive — existing
 // transactions are not removed. To restore into an empty database, truncate the
 // transactions and holdings tables first.
+//
+//nolint:cyclop,funlen // complexity is inherent to the restore workflow
 func RunRestore(ctx context.Context, args []string, lookupEnv func(string) string) error {
 	fs := flag.NewFlagSet("restore", flag.ContinueOnError)
 	dsn := fs.String("dsn", "", "PostgreSQL DSN")
 	input := fs.String("input", "transactions.json", "input file path")
-	if err := fs.Parse(args); err != nil {
-		return err
+
+	parseErr := fs.Parse(args)
+	if parseErr != nil {
+		return fmt.Errorf("parse flags: %w", parseErr)
 	}
 
 	if *dsn == "" {
 		*dsn = lookupEnv("DATABASE_URL")
 	}
+
 	if *dsn == "" {
-		return errors.New("missing PostgreSQL DSN: provide --dsn or DATABASE_URL")
+		return ErrMissingDSN
 	}
 
-	f, err := os.Open(*input)
+	inputFile, err := os.Open(*input)
 	if err != nil {
 		return fmt.Errorf("open input file: %w", err)
 	}
+
 	defer func() {
-		if err := f.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "close input file: %v\n", err)
+		closeErr := inputFile.Close()
+		if closeErr != nil {
+			fmt.Fprintf(os.Stderr, "close input file: %v\n", closeErr)
 		}
 	}()
 
-	var bf File
-	if err := json.NewDecoder(f).Decode(&bf); err != nil {
-		return fmt.Errorf("decode backup file: %w", err)
-	}
-	if bf.Version != backupVersion {
-		return fmt.Errorf("unsupported backup version %q (expected %q)", bf.Version, backupVersion)
+	var backupFile File
+
+	decodeErr := json.NewDecoder(inputFile).Decode(&backupFile)
+	if decodeErr != nil {
+		return fmt.Errorf("decode backup file: %w", decodeErr)
 	}
 
-	db, err := openDB(ctx, *dsn)
+	if backupFile.Version != backupVersion {
+		return fmt.Errorf("got %q: %w", backupFile.Version, ErrUnsupportedVersion)
+	}
+
+	sqlDB, err := openDB(ctx, *dsn)
 	if err != nil {
 		return err
 	}
+
 	defer func() {
-		if err := db.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "close database: %v\n", err)
+		closeErr := sqlDB.Close()
+		if closeErr != nil {
+			fmt.Fprintf(os.Stderr, "close database: %v\n", closeErr)
 		}
 	}()
 
-	if err := configuration.RunMigrations(ctx, db); err != nil {
-		return fmt.Errorf("run migrations: %w", err)
+	migrateErr := configuration.RunMigrations(ctx, sqlDB)
+	if migrateErr != nil {
+		return fmt.Errorf("run migrations: %w", migrateErr)
 	}
 
-	store := portfolio.NewPostgresStore(db)
+	store := portfolio.NewPostgresStore(sqlDB)
 
 	inserted, failed := 0, 0
-	for _, r := range bf.Transactions {
-		executedAt, err := time.Parse(time.RFC3339, r.ExecutedAt)
-		if err != nil {
+
+	for _, rec := range backupFile.Transactions {
+		executedAt, parseTimeErr := time.Parse(time.RFC3339, rec.ExecutedAt)
+		if parseTimeErr != nil {
 			fmt.Fprintf(os.Stderr, "restore: skip record %s %s — bad date %q: %v\n",
-				r.Symbol, r.Type, r.ExecutedAt, err)
+				rec.Symbol, rec.Type, rec.ExecutedAt, parseTimeErr)
+
 			failed++
+
 			continue
 		}
 
-		tx := portfolio.Transaction{
-			Symbol:         r.Symbol,
-			Type:           portfolio.TransactionType(r.Type),
-			Quantity:       r.Quantity,
-			Price:          r.Price,
-			Fee:            r.Fee,
-			AllocationType: portfolio.AllocationType(r.AllocationType),
+		transaction := portfolio.Transaction{
+			ID:             0,
+			Symbol:         rec.Symbol,
+			Type:           portfolio.TransactionType(rec.Type),
+			Quantity:       rec.Quantity,
+			Price:          rec.Price,
+			Fee:            rec.Fee,
+			AllocationType: portfolio.AllocationType(rec.AllocationType),
+			Currency:       "",
 			ExecutedAt:     executedAt.UTC(),
+			CreatedAt:      time.Time{},
 		}
-		if err := store.AddTransaction(ctx, tx); err != nil {
+
+		addErr := store.AddTransaction(ctx, transaction)
+		if addErr != nil {
 			fmt.Fprintf(os.Stderr, "restore: failed to insert %s %s %s: %v\n",
-				r.Symbol, r.Type, r.ExecutedAt, err)
+				rec.Symbol, rec.Type, rec.ExecutedAt, addErr)
+
 			failed++
+
 			continue
 		}
+
 		inserted++
 	}
 
 	fmt.Printf("restore: inserted %d transactions", inserted)
+
 	if failed > 0 {
 		fmt.Printf(", %d failed (see stderr)", failed)
 	}
+
 	fmt.Println()
+
 	return nil
 }

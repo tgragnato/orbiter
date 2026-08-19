@@ -9,36 +9,49 @@ import (
 	"github.com/tgragnato/orbiter/internal/portfolio/data"
 )
 
-// GetCachedCandles returns persisted EOD candles for symbol in [from, to].
+// GetCachedCandles returns persisted EOD candles for symbol in [from, until].
 // Implements data.CandleStorer.
-func (s *PostgresStore) GetCachedCandles(ctx context.Context, symbol string, from, to time.Time) ([]data.Candle, error) {
+func (s *PostgresStore) GetCachedCandles(
+	ctx context.Context, symbol string, from, until time.Time,
+) ([]data.Candle, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT symbol, candle_date, open, high, low, close_price, adj_close,
 		       volume, cash_dividend, split_factor, currency
 		FROM eod_candles
 		WHERE symbol = $1 AND candle_date >= $2 AND candle_date <= $3
 		ORDER BY candle_date ASC`,
-		symbol, from.UTC(), to.UTC())
+		symbol, from.UTC(), until.UTC())
 	if err != nil {
 		return nil, fmt.Errorf("query eod_candles: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	var candles []data.Candle
+
 	for rows.Next() {
-		var c data.Candle
-		var t time.Time
-		if err := rows.Scan(
-			&c.Ticker, &t,
-			&c.Open, &c.High, &c.Low, &c.Close, &c.AdjustedClose,
-			&c.Volume, &c.CashDividend, &c.SplitFactor, &c.Currency,
-		); err != nil {
+		var candle data.Candle
+
+		var candleTime time.Time
+
+		err = rows.Scan(
+			&candle.Ticker, &candleTime,
+			&candle.Open, &candle.High, &candle.Low, &candle.Close, &candle.AdjustedClose,
+			&candle.Volume, &candle.CashDividend, &candle.SplitFactor, &candle.Currency,
+		)
+		if err != nil {
 			return nil, fmt.Errorf("scan eod_candle row: %w", err)
 		}
-		c.Time = t.UTC()
-		candles = append(candles, c)
+
+		candle.Time = candleTime.UTC()
+		candles = append(candles, candle)
 	}
-	return candles, rows.Err()
+
+	err = rows.Err()
+	if err != nil {
+		return nil, fmt.Errorf("iterate eod_candles: %w", err)
+	}
+
+	return candles, nil
 }
 
 // UpsertCandles stores candles in a single transaction using a prepared
@@ -49,12 +62,12 @@ func (s *PostgresStore) UpsertCandles(ctx context.Context, candles []data.Candle
 		return nil
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
+	dbTx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin upsert candles transaction: %w", err)
 	}
 
-	stmt, err := tx.PrepareContext(ctx, `
+	stmt, err := dbTx.PrepareContext(ctx, `
 		INSERT INTO eod_candles
 		    (symbol, candle_date, open, high, low, close_price, adj_close,
 		     volume, cash_dividend, split_factor, currency)
@@ -69,26 +82,31 @@ func (s *PostgresStore) UpsertCandles(ctx context.Context, candles []data.Candle
 		        cash_dividend = EXCLUDED.cash_dividend,
 		        split_factor  = EXCLUDED.split_factor`)
 	if err != nil {
-		_ = tx.Rollback()
+		_ = dbTx.Rollback()
+
 		return fmt.Errorf("prepare upsert candles statement: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
 
-	for _, c := range candles {
-		if _, err := stmt.ExecContext(ctx,
-			c.Ticker,
-			c.Time.UTC().Format("2006-01-02"),
-			c.Open, c.High, c.Low, c.Close, c.AdjustedClose,
-			c.Volume, c.CashDividend, c.SplitFactor, c.Currency,
-		); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("upsert candle %s/%s: %w", c.Ticker, c.Time.Format("2006-01-02"), err)
+	for _, candle := range candles {
+		_, err = stmt.ExecContext(ctx,
+			candle.Ticker,
+			candle.Time.UTC().Format("2006-01-02"),
+			candle.Open, candle.High, candle.Low, candle.Close, candle.AdjustedClose,
+			candle.Volume, candle.CashDividend, candle.SplitFactor, candle.Currency,
+		)
+		if err != nil {
+			_ = dbTx.Rollback()
+
+			return fmt.Errorf("upsert candle %s/%s: %w", candle.Ticker, candle.Time.Format("2006-01-02"), err)
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	err = dbTx.Commit()
+	if err != nil {
 		return fmt.Errorf("commit upsert candles transaction: %w", err)
 	}
+
 	return nil
 }
 
@@ -96,14 +114,17 @@ func (s *PostgresStore) UpsertCandles(ctx context.Context, candles []data.Candle
 // or zero time if no candles are cached for that symbol.
 // Implements data.CandleStorer.
 func (s *PostgresStore) LatestCandleDate(ctx context.Context, symbol string) (time.Time, error) {
-	var t sql.NullTime
+	var latestTime sql.NullTime
+
 	err := s.db.QueryRowContext(ctx,
-		`SELECT MAX(candle_date) FROM eod_candles WHERE symbol = $1`, symbol).Scan(&t)
+		`SELECT MAX(candle_date) FROM eod_candles WHERE symbol = $1`, symbol).Scan(&latestTime)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("query latest candle date for %s: %w", symbol, err)
 	}
-	if !t.Valid {
+
+	if !latestTime.Valid {
 		return time.Time{}, nil // no cached data for this symbol
 	}
-	return t.Time.UTC(), nil
+
+	return latestTime.Time.UTC(), nil
 }

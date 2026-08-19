@@ -10,11 +10,13 @@ import (
 )
 
 // GitRev is injected by the compiler via -ldflags.
-var GitRev string
+var GitRev string //nolint:gochecknoglobals // linker-injected build metadata
 
 func main() {
 	ctx := context.Background()
-	if err := startup.Run(ctx, os.Args[1:]); err != nil {
+
+	err := startup.Run(ctx, os.Args[1:])
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		usage()
 		os.Exit(1)

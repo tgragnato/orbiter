@@ -24,6 +24,8 @@ import (
 // A holding is included in the output only when abs(conviction) exceeds the
 // per-holding friction threshold, which accounts for broker fees, capital-gains
 // tax, and the configured safety buffer.
+//
+//nolint:cyclop,gocognit,nestif,funlen // inherent complexity of conviction-weighted satellite optimizer
 func optimizeSatellite(
 	holdings []portfolio.Holding,
 	conviction ConvictionProvider,
@@ -38,19 +40,23 @@ func optimizeSatellite(
 	}
 
 	var candidates []candidate
+
 	totalNAV := 0.0
 
-	for _, h := range holdings {
-		if !h.TAAEnabled || h.Quantity <= 0 || h.AllocationType != portfolio.AllocationSatellite {
+	for _, holding := range holdings {
+		if !holding.TAAEnabled || holding.Quantity <= 0 || holding.AllocationType != portfolio.AllocationSatellite {
 			continue
 		}
-		c := conviction.Conviction(h.Symbol)
-		raw := 1 + c
+
+		conv := conviction.Conviction(holding.Symbol)
+		raw := 1 + conv
+
 		if raw < 0 {
 			raw = 0
 		}
-		candidates = append(candidates, candidate{h: h, conviction: c, rawWeight: raw})
-		totalNAV += h.NAV()
+
+		candidates = append(candidates, candidate{h: holding, conviction: conv, rawWeight: raw})
+		totalNAV += holding.NAV()
 	}
 
 	if len(candidates) == 0 || totalNAV <= 0 {
@@ -60,6 +66,7 @@ func optimizeSatellite(
 	// Separate candidates into exits (rawWeight=0, conviction=-1) and keeps.
 	// Exits are emitted as TypeSell; keeps are normalized and emitted as TypeRebalance.
 	var exits, keeps []candidate
+
 	for _, cand := range candidates {
 		if cand.rawWeight == 0 {
 			exits = append(exits, cand)
@@ -81,21 +88,26 @@ func optimizeSatellite(
 				}
 			}
 		}
+
 		friction := feeRate*(1+cfg.TaxRate) + cfg.Buffer
 		if abs(cand.conviction) <= friction {
 			continue
 		}
+
 		currentWeight := cand.h.NAV() / totalNAV
 		delta := -currentWeight * totalNAV
+
 		msgs = append(msgs, signal.NewSellMessage(now, cand.h.Symbol, cand.conviction, currentWeight, delta, cfg.Currency))
 	}
 
 	// Normalize keeps and emit rebalance signals.
 	if len(keeps) > 0 {
 		totalRaw := 0.0
-		for _, c := range keeps {
-			totalRaw += c.rawWeight
+
+		for _, cand := range keeps {
+			totalRaw += cand.rawWeight
 		}
+
 		for _, cand := range keeps {
 			targetWeight := cand.rawWeight / totalRaw
 			currentWeight := cand.h.NAV() / totalNAV
@@ -110,6 +122,7 @@ func optimizeSatellite(
 					}
 				}
 			}
+
 			friction := feeRate*(1+cfg.TaxRate) + cfg.Buffer
 			if abs(cand.conviction) <= friction {
 				continue
@@ -119,6 +132,7 @@ func optimizeSatellite(
 			if cand.conviction < 0 {
 				direction = "decrease"
 			}
+
 			msgs = append(msgs, signal.NewRebalanceMessage(
 				now,
 				cand.h.Symbol,
