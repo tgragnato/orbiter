@@ -64,7 +64,7 @@ func (cb *CircularBuffer) Average() (float64, error) {
 	return cb.sum / float64(len(cb.records)), nil
 }
 
-// GetAll returns all currently stored elements.
+// GetAll returns all currently stored elements in insertion (chronological) order.
 //
 // It returns an error until at least minSize elements have been inserted.
 func (cb *CircularBuffer) GetAll() ([]float64, error) {
@@ -72,7 +72,17 @@ func (cb *CircularBuffer) GetAll() ([]float64, error) {
 		return []float64{}, fmt.Errorf("not enough data, have %d, need %d: %w", cb.index, cb.minSize, ErrNotEnoughData)
 	}
 
-	return cb.records, nil
+	if cb.index == 0 {
+		return cb.records, nil
+	}
+
+	// Re-order the ring buffer into chronological (oldest → newest) order.
+	// records[index] is the oldest entry (next to be overwritten).
+	ordered := make([]float64, len(cb.records))
+	n := copy(ordered, cb.records[cb.index:])
+	copy(ordered[n:], cb.records[:cb.index])
+
+	return ordered, nil
 }
 
 // Insert adds a value to the buffer in O(1) time complexity.

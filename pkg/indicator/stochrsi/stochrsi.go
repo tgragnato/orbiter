@@ -44,7 +44,16 @@ func (v *StochRSI) Insert(o *ohlc.OHLC) {
 	v.cb.Insert(o.Close)
 }
 
+// rsiMidpoint is the boundary used to disambiguate the degenerate StochRSI case.
+const rsiMidpoint = 50.0
+
 // Value computes and returns the current StochRSI %K and %D values.
+//
+// When all RSI values in the fastK lookback window are identical (zero range),
+// talib returns 0 for both K and D regardless of whether RSI is high or low.
+// In that degenerate case Value resolves the ambiguity by inspecting the last
+// RSI value directly: an RSI above the midpoint maps to 100 (fully overbought)
+// and at or below the midpoint maps to 0 (fully oversold).
 func (v *StochRSI) Value() (map[string]float64, error) {
 	result := map[string]float64{}
 
@@ -55,13 +64,29 @@ func (v *StochRSI) Value() (map[string]float64, error) {
 
 	fastK, fastD := talib.StochRsi(closePrices, v.inTimePeriod, v.fastKPeriod, v.fastDPeriod, talib.SMA)
 
+	kVal := 0.0
 	if len(fastK) > 0 {
-		result[ValueK] = fastK[len(fastK)-1]
+		kVal = fastK[len(fastK)-1]
 	}
 
+	dVal := 0.0
 	if len(fastD) > 0 {
-		result[ValueD] = fastK[len(fastD)-1]
+		dVal = fastD[len(fastD)-1]
 	}
+
+	// Resolve the degenerate case: when every RSI value in the K-window is
+	// equal, talib divides 0/0 and returns 0 for both lines.  We detect this
+	// by checking whether RSI itself is above the midpoint.
+	if kVal == 0 && dVal == 0 {
+		rsiValues := talib.Rsi(closePrices, v.inTimePeriod)
+		if len(rsiValues) > 0 && rsiValues[len(rsiValues)-1] > rsiMidpoint {
+			kVal = 100
+			dVal = 100
+		}
+	}
+
+	result[ValueK] = kVal
+	result[ValueD] = dVal
 
 	return result, nil
 }

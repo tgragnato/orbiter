@@ -35,18 +35,45 @@ func TestStochRSI_OnTick_NoOrders(t *testing.T) {
 	}
 }
 
-// generateSimpleCandles generates a linear series of 99 to 598 candles.
+// signalLen is the number of trailing candles that move in the signal
+// direction. It must be larger than stochK+stochD (5+2=7) so that the
+// StochRSI K window sees RSI still rising/falling at the very end, which
+// guarantees a non-degenerate (non-NaN) K/D value.
+//
+// The circular buffer holds bufferMultiplier*rsiPeriod = 3*14 = 42 prices.
+// The remaining (42 - signalLen = 20) slots are filled with counter-trend
+// candles that prime RSI in the opposite direction, ensuring a clear RSI
+// transition and a non-zero K/D range every time GetAll is called.
+const signalLen = 22
+
+// generateSimpleCandles generates a series of 99 to 598 candles where the
+// last signalLen bars always move in the signal direction (up for bullish,
+// down for bearish) and all earlier bars move in the opposite direction.
+//
+// Because the circular buffer retains only the last 42 prices, the buffer
+// always presents (42-signalLen) counter-trend prices followed by signalLen
+// signal prices — regardless of total count. This keeps RSI in transition
+// across the StochRSI K window, producing a reliable K/D in the overbought
+// or oversold zone without degenerate 0/0 division.
 func generateSimpleCandles(isBullish bool) []*ohlc.OHLC {
 	count := 99 + rand.IntN(500)
 	candles := make([]*ohlc.OHLC, count)
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
+	// sign is +1 for bullish, -1 for bearish.
+	// Signal bars move with sign; counter-trend bars move against it.
+	sign := 1.0
+	if !isBullish {
+		sign = -1.0
+	}
+
+	price := float64(count)
+
 	for idx := 1; idx <= count; idx++ {
-		var price float64
-		if isBullish {
-			price = float64(idx)
+		if idx > count-signalLen {
+			price += sign
 		} else {
-			price = float64(count - idx + 1)
+			price -= sign
 		}
 
 		o := ohlc.New("test", now.Add(time.Duration(idx)*time.Minute), time.Minute, false)

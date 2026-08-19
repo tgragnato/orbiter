@@ -24,7 +24,7 @@ func TestAddOHLC(t *testing.T) {
 		vol.AddOHLC(bar)
 	}
 
-	wantArray := []float64{11, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+	wantArray := []float64{2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
 
 	isArray, err := vol.cb.GetAll()
 	if err != nil {
