@@ -26,6 +26,7 @@ const (
 	subUnitCentFactor  = 100.0
 	subUnitTenthFactor = 10.0
 
+	unitOne      = 1.0
 	unitTen      = 10.0
 	unitHundred  = 100.0
 	unitThousand = 1000.0
@@ -87,13 +88,13 @@ func (rn *Number) Value() (map[string]float64, error) {
 
 		return result, nil
 	case rn.latestCandle.Close < thresholdTen:
-		unit = unitTen
+		unit = unitOne
 		multiplier = multiplierTen
 	case rn.latestCandle.Close < thresholdHundred:
-		unit = unitHundred
+		unit = unitTen
 		multiplier = multiplierHundred
 	case rn.latestCandle.Close < thresholdThousand:
-		unit = unitThousand
+		unit = unitHundred
 		multiplier = multiplierThousand
 	case rn.latestCandle.Close < thresholdTenK:
 		unit = unitThousand
