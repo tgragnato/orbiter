@@ -49,18 +49,17 @@ const (
 )
 
 const (
-	txColSymbolWidth  = 10
-	txColDateWidth    = 12
-	txColTypeWidth    = 5
-	txColQtyWidth     = 10
-	txColPriceWidth   = 10
-	txColFeeWidth     = 9
-	txColSleeveWidth  = 8
-	txTableHeight     = 20
-	txTableMinWidth   = 40
-	txTableMinHeight  = 10
-	txTableWidthOff   = 4 // columns + border padding
-	txTableHeightOff  = 1 // header row
+	txColSymbolWidth = 10
+	txColDateWidth   = 12
+	txColTypeWidth   = 5
+	txColQtyWidth    = 10
+	txColPriceWidth  = 10
+	txColFeeWidth    = 9
+	txColSleeveWidth = 8
+	txTableHeight    = 20
+	txTableMinWidth  = 40
+	txTableMinHeight = 10
+	txTableWidthOff  = 4 // columns + border padding
 )
 
 const (
@@ -79,7 +78,7 @@ const (
 type txDisplayEntry struct {
 	date    time.Time
 	symbol  string
-	kind    string  // "BUY", "SELL", "DIV"
+	kind    string // "BUY", "SELL", "DIV"
 	qty     float64
 	price   float64 // trade price / per-share dividend
 	fee     float64 // trade fee / total income for DIV
@@ -130,14 +129,14 @@ func NewTransactionsTabModel(editor TransactionEditor) TransactionsTabModel {
 	}
 
 	return TransactionsTabModel{
-		editor:       editor,
-		txs:          nil,
-		divs:         nil,
-		entries:      nil,
-		tbl:          tbl,
-		status:       status,
-		loading:      false,
-		mode:         txModeNormal,
+		editor:  editor,
+		txs:     nil,
+		divs:    nil,
+		entries: nil,
+		tbl:     tbl,
+		status:  status,
+		loading: false,
+		mode:    txModeNormal,
 		form: transactionFormModel{
 			symbolInput:      textinput.Model{},
 			qtyInput:         textinput.Model{},
@@ -151,7 +150,7 @@ func NewTransactionsTabModel(editor TransactionEditor) TransactionsTabModel {
 			knownSymbols:     nil,
 			autocompleteHint: "",
 			txID:             0,
-			formStyles: formStyles{}, //nolint:exhaustruct // zero-value placeholder; replaced by newFormStyles() on open
+			formStyles:       formStyles{}, //nolint:exhaustruct // zero-value placeholder; replaced by newFormStyles() on open
 		},
 		pendingDelID: 0,
 	}
@@ -320,7 +319,7 @@ func (m TransactionsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tbl.SetWidth(max(txTableMinWidth, msg.Width-txTableWidthOff))
 		// SetHeight controls data rows only; the table also renders 1 header row.
 		// The view now contains only the table, so the full content area is available.
-		m.tbl.SetHeight(max(txTableMinHeight, msg.Height-txTableHeightOff))
+		m.tbl.SetHeight(max(txTableMinHeight, msg.Height))
 
 		return m, nil
 
@@ -500,8 +499,8 @@ func (m *TransactionsTabModel) syncRows() {
 			entry.symbol,
 			entry.date.Format("2006-01-02"),
 			entry.kind,
-			fmt.Sprintf("%.4f", entry.qty),
-			fmt.Sprintf("%.2f", entry.price),
+			fmt.Sprintf("%.2f", entry.qty),
+			fmt.Sprintf("%.4f", entry.price),
 			fmt.Sprintf("%.2f", entry.fee),
 			entry.sleeve,
 		})
