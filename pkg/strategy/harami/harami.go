@@ -70,9 +70,9 @@ func (h *Harami) Name() string {
 }
 
 // OnCandle processes a closed candle and returns orders to open, close, and positions to close.
-func (h *Harami) OnCandle( //nolint:nonamedreturns // named returns used to satisfy gocritic unnamedResult
+func (h *Harami) OnCandle(
 	closedCandles []*ohlc.OHLC,
-) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
+) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) { //nolint:nonamedreturns // satisfy gocritic
 	closedCandle := closedCandles[len(closedCandles)-1]
 
 	closePrice := closedCandle.Close
@@ -126,9 +126,9 @@ func (h *Harami) OnOrder(_ []broker.Order) {}
 func (h *Harami) OnPosition(_, _ []broker.Position) {}
 
 // OnTick is called on every tick (no-op for this strategy).
-func (h *Harami) OnTick( //nolint:nonamedreturns // named returns used to satisfy gocritic unnamedResult
+func (h *Harami) OnTick(
 	_ tick.Tick,
-) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) {
+) (toOpen, toClose []broker.Order, toClosePositions []broker.Position) { //nolint:nonamedreturns // satisfy gocritic
 	return nil, nil, nil
 }
 

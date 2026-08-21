@@ -30,7 +30,7 @@ linters:
     - errname
     - errorlint
     - exhaustive
-    - exhaustruct
+    - exhaustruct_v5
     - exptostd
     - fatcontext
     - forbidigo
@@ -125,8 +125,8 @@ linters:
         - all
         - -ST1000   # Package comment not required on every file
 
-    exhaustruct:
-      exclude:
+    exhaustruct_v5:
+      ignore-patterns:
         # External library structs — we do not control their field list
         - 'github\.com/charmbracelet/bubbles/textinput\.Model'
         - 'github\.com/charmbracelet/bubbles/cursor\.Model'
@@ -197,7 +197,7 @@ linters:
       - linters:
           - err113
           - errcheck
-          - exhaustruct
+          - exhaustruct_v5
           - forcetypeassert
           - goconst
           - gosec

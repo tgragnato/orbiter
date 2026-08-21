@@ -150,7 +150,7 @@ func NewTransactionsTabModel(editor TransactionEditor) TransactionsTabModel {
 			knownSymbols:     nil,
 			autocompleteHint: "",
 			txID:             0,
-			formStyles:       formStyles{}, //nolint:exhaustruct // zero-value placeholder; replaced by newFormStyles() on open
+			formStyles:       formStyles{}, //nolint:exhaustruct_v5 // placeholder replaced by newFormStyles() on open
 		},
 		pendingDelID: 0,
 	}

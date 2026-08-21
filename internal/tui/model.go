@@ -528,8 +528,8 @@ func (m Model) refreshCmd() tea.Cmd {
 	if m.store == nil {
 		return func() tea.Msg {
 			return holdingsMsg{
-				err:               nil,
-				holdings:          nil,
+				err:      nil,
+				holdings: nil,
 				summary: portfolio.Summary{
 					TotalNAV: 0, CoreNAV: 0, SatelliteNAV: 0, CorePercent: 0,
 					SatellitePercent: 0, TotalHoldingsRows: 0,
@@ -690,8 +690,8 @@ func (m *Model) syncRows() {
 		}
 
 		rows = append(rows, table.Row{
-			"[WL]",   // Sleeve — no active position
-			"[TAA]",  // always TAA-eligible (that's the point of the watchlist)
+			"[WL]",  // Sleeve — no active position
+			"[TAA]", // always TAA-eligible (that's the point of the watchlist)
 			item.Symbol,
 			ccyStr,   // ISO 4217 currency populated by the price feed on first refresh
 			"--",     // Qty
@@ -971,13 +971,13 @@ func newModelCore(store portfolio.HoldingsStore, txStore portfolio.TransactionSt
 	tbl.KeyMap.LineDown.SetKeys("down", "j")
 
 	return Model{
-		store:             store,
-		txStore:           txStore,
-		portfolioID:       portfolioID,
-		baseCurrency:      "",
-		table:             tbl,
-		holdings:          nil,
-		rows:              nil,
+		store:        store,
+		txStore:      txStore,
+		portfolioID:  portfolioID,
+		baseCurrency: "",
+		table:        tbl,
+		holdings:     nil,
+		rows:         nil,
 		summary: portfolio.Summary{
 			TotalNAV: 0, CoreNAV: 0, SatelliteNAV: 0, CorePercent: 0,
 			SatellitePercent: 0, TotalHoldingsRows: 0,
@@ -1003,7 +1003,7 @@ func newModelCore(store portfolio.HoldingsStore, txStore portfolio.TransactionSt
 			knownSymbols:     nil,
 			autocompleteHint: "",
 			txID:             0,
-			formStyles: formStyles{}, //nolint:exhaustruct // zero-value placeholder; replaced by newFormStyles() on open
+			formStyles:       formStyles{}, //nolint:exhaustruct_v5 // placeholder replaced by newFormStyles() on open
 		},
 		watchlistStore: nil,
 		watchlist:      nil,
@@ -1012,10 +1012,10 @@ func newModelCore(store portfolio.HoldingsStore, txStore portfolio.TransactionSt
 			autocompleteHint: "",
 			knownSymbols:     nil,
 			errMsg:           "",
-			styles: formStyles{}, //nolint:exhaustruct // zero-value placeholder; replaced by newFormStyles() on open
+			styles:           formStyles{}, //nolint:exhaustruct_v5 // placeholder replaced by newFormStyles() on open
 		},
-		width:             0,
-		height:            0,
+		width:  0,
+		height: 0,
 		styles: styles{
 			title: lipgloss.NewStyle().Bold(true),
 			summary: lipgloss.NewStyle().

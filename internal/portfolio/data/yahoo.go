@@ -41,12 +41,12 @@ type YahooProvider struct {
 // NewYahooProvider creates a provider using a production Yahoo endpoint.
 func NewYahooProvider(client *http.Client) *YahooProvider {
 	if client == nil {
-		client = &http.Client{ //nolint:exhaustruct // zero values for Transport, CheckRedirect, Jar are the correct defaults
+		client = &http.Client{ //nolint:exhaustruct_v5 // zero values for Transport, CheckRedirect, Jar are ok defaults
 			Timeout: defaultHTTPTimeout,
 		}
 	}
 
-	return &YahooProvider{ //nolint:exhaustruct // mu and apiKey zero values are correct defaults
+	return &YahooProvider{ //nolint:exhaustruct_v5 // mu and apiKey zero values are correct defaults
 		client:  client,
 		baseURL: defaultYahooBaseURL,
 	}
