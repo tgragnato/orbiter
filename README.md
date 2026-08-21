@@ -186,7 +186,7 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/orbiter?sslmode=disable
 
 ### Prerequisites
 
-- Go 1.26+
+- Go 1.27+
 - PostgreSQL
 
 ### Common Tasks
