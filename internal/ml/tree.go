@@ -29,6 +29,12 @@ type Tree struct {
 	minSamples int
 }
 
+// featurePair associates a feature value with its original sample index
+type featurePair struct {
+	val float64
+	idx int
+}
+
 // newTree returns an untrained Tree with the given hyper-parameters.
 func newTree(maxDepth, minSamples int) *Tree {
 	return &Tree{
@@ -40,7 +46,37 @@ func newTree(maxDepth, minSamples int) *Tree {
 
 // Fit trains the tree on samples, using only the feature indices in featureMask.
 func (t *Tree) Fit(samples []Sample, featureMask []int) {
-	t.root = buildNode(samples, featureMask, t.maxDepth, t.minSamples)
+	numSamples := len(samples)
+	if numSamples == 0 {
+		return
+	}
+
+	maxFeatIdx := 0
+	for _, f := range featureMask {
+		if f > maxFeatIdx {
+			maxFeatIdx = f
+		}
+	}
+
+	preSorted := make([][]featurePair, maxFeatIdx+1)
+	for _, featIdx := range featureMask {
+		pairs := make([]featurePair, numSamples)
+		for i := range samples {
+			pairs[i] = featurePair{
+				val: samples[i].Features[featIdx],
+				idx: i,
+			}
+		}
+		slices.SortFunc(pairs, compareFeaturePairs)
+		preSorted[featIdx] = pairs
+	}
+
+	activeMask := make([]bool, numSamples)
+	for i := range activeMask {
+		activeMask[i] = true
+	}
+
+	t.root = buildNode(samples, featureMask, t.maxDepth, t.minSamples, preSorted, activeMask, numSamples)
 }
 
 // Predict returns the regression prediction for a single feature vector.
@@ -48,7 +84,13 @@ func (t *Tree) Predict(features [featureCount]float64) float64 {
 	return traverse(t.root, features)
 }
 
+// traverse recursively navigates the decision tree from currentNode based on
+// feature values until it reaches a leaf, returning the predicted value.
 func traverse(currentNode *node, features [featureCount]float64) float64 {
+	if currentNode == nil {
+		return 0.0
+	}
+
 	if currentNode.isLeaf {
 		return currentNode.prediction
 	}
@@ -60,111 +102,164 @@ func traverse(currentNode *node, features [featureCount]float64) float64 {
 	return traverse(currentNode.right, features)
 }
 
-func buildNode(samples []Sample, mask []int, depth, minSamples int) *node {
-	pred := meanLabel(samples)
+// buildNode recursively constructs a tree node by finding the feature split point
+// that yields the maximum variance reduction for the currently active samples.
+func buildNode(
+	samples []Sample,
+	mask []int,
+	depth, minSamples int,
+	preSorted [][]featurePair,
+	activeMask []bool,
+	activeCount int,
+) *node {
+	pred, parentVar, totalSum, totalSqSum := calcStatsActive(samples, activeMask, activeCount)
 
-	if depth == 0 || len(samples) < minSamples {
+	if depth == 0 || activeCount < minSamples {
 		return &node{
-			featureIdx: 0,
-			threshold:  0,
-			left:       nil,
-			right:      nil,
 			isLeaf:     true,
 			prediction: pred,
 		}
 	}
 
 	bestFeat, bestThresh, bestGain := -1, 0.0, -math.MaxFloat64
-	parentVar := variance(samples)
+	nTotal := float64(activeCount)
 
 	for _, featIdx := range mask {
-		thresholds := uniqueThresholds(samples, featIdx)
+		sortedPairs := preSorted[featIdx]
 
-		for _, thresh := range thresholds {
-			left, right := split(samples, featIdx, thresh)
-			if len(left) == 0 || len(right) == 0 {
+		var leftSum, leftSqSum float64
+		var countLeft int
+		var prevVal float64
+		var hasPrev bool
+
+		step := 1
+		if activeCount > maxThresholdCandidates {
+			step = activeCount / maxThresholdCandidates
+		}
+
+		for _, pair := range sortedPairs {
+			if !activeMask[pair.idx] {
 				continue
 			}
 
-			gain := parentVar - weightedVariance(left, right)
-			if gain > bestGain {
-				bestGain = gain
-				bestFeat = featIdx
-				bestThresh = thresh
+			currVal := pair.val
+
+			if hasPrev && currVal != prevVal && countLeft%step == 0 {
+				nLeft := float64(countLeft)
+				nRight := nTotal - nLeft
+
+				rightSum := totalSum - leftSum
+				rightSqSum := totalSqSum - leftSqSum
+
+				leftVar := (leftSqSum / nLeft) - (leftSum/nLeft)*(leftSum/nLeft)
+				rightVar := (rightSqSum / nRight) - (rightSum/nRight)*(rightSum/nRight)
+
+				weightedVar := (nLeft/nTotal)*leftVar + (nRight/nTotal)*rightVar
+				gain := parentVar - weightedVar
+
+				if gain > bestGain {
+					bestGain = gain
+					bestFeat = featIdx
+					bestThresh = (prevVal + currVal) / thresholdMidpointDivisor
+				}
 			}
+
+			v := samples[pair.idx].Label
+			leftSum += v
+			leftSqSum += v * v
+			countLeft++
+
+			prevVal = currVal
+			hasPrev = true
 		}
 	}
 
 	if bestFeat == -1 || bestGain <= 0 {
 		return &node{
-			featureIdx: 0,
-			threshold:  0,
-			left:       nil,
-			right:      nil,
 			isLeaf:     true,
 			prediction: pred,
 		}
 	}
 
-	left, right := split(samples, bestFeat, bestThresh)
+	leftMask := make([]bool, len(samples))
+	rightMask := make([]bool, len(samples))
+	var leftCount, rightCount int
+
+	for i, active := range activeMask {
+		if !active {
+			continue
+		}
+		if samples[i].Features[bestFeat] <= bestThresh {
+			leftMask[i] = true
+			leftCount++
+		} else {
+			rightMask[i] = true
+			rightCount++
+		}
+	}
 
 	return &node{
 		featureIdx: bestFeat,
 		threshold:  bestThresh,
-		left:       buildNode(left, mask, depth-1, minSamples),
-		right:      buildNode(right, mask, depth-1, minSamples),
-		prediction: 0,
+		left:       buildNode(samples, mask, depth-1, minSamples, preSorted, leftMask, leftCount),
+		right:      buildNode(samples, mask, depth-1, minSamples, preSorted, rightMask, rightCount),
 		isLeaf:     false,
 	}
 }
 
-func meanLabel(samples []Sample) float64 {
-	if len(samples) == 0 {
-		return 0
+// calcStatsActive computes the mean, variance, sum, and squared sum of labels
+// for samples marked as true in activeMask.
+func calcStatsActive(samples []Sample, activeMask []bool, activeCount int) (mean, variance, sum, sqSum float64) {
+	if activeCount == 0 {
+		return 0, 0, 0, 0
 	}
 
-	sum := 0.0
-	for idx := range samples {
-		sum += samples[idx].Label
+	for i, active := range activeMask {
+		if !active {
+			continue
+		}
+		v := samples[i].Label
+		sum += v
+		sqSum += v * v
 	}
 
-	return sum / float64(len(samples))
+	n := float64(activeCount)
+	mean = sum / n
+	variance = (sqSum / n) - (mean * mean)
+	if variance < 0 {
+		variance = 0
+	}
+
+	return mean, variance, sum, sqSum
 }
 
-func variance(samples []Sample) float64 {
-	if len(samples) == 0 {
-		return 0
+// compareFeaturePairs provides an ascending order comparison between two featurePair
+// structs based on their feature values, compatible with slices.SortFunc.
+func compareFeaturePairs(a, b featurePair) int {
+	if a.val < b.val {
+		return -1
 	}
-
-	mean := meanLabel(samples)
-	varSum := 0.0
-
-	for idx := range samples {
-		diff := samples[idx].Label - mean
-		varSum += diff * diff
+	if a.val > b.val {
+		return 1
 	}
-
-	return varSum / float64(len(samples))
+	return 0
 }
 
-func weightedVariance(left, right []Sample) float64 {
-	total := float64(len(left) + len(right))
-
-	return float64(len(left))/total*variance(left) + float64(len(right))/total*variance(right)
-}
-
+// split reorders the Samples via swap in O(N) without allocating new memory
 func split(samples []Sample, fi int, threshold float64) ([]Sample, []Sample) {
-	var left, right []Sample
+	left := 0
+	right := len(samples) - 1
 
-	for idx := range samples {
-		if samples[idx].Features[fi] <= threshold {
-			left = append(left, samples[idx])
+	for left <= right {
+		if samples[left].Features[fi] <= threshold {
+			left++
 		} else {
-			right = append(right, samples[idx])
+			samples[left], samples[right] = samples[right], samples[left]
+			right--
 		}
 	}
 
-	return left, right
+	return samples[:left], samples[left:]
 }
 
 // uniqueThresholds returns candidate split points for feature fi: midpoints
@@ -177,24 +272,21 @@ func uniqueThresholds(samples []Sample, fi int) []float64 {
 
 	slices.Sort(vals)
 
-	seen := make(map[float64]bool)
-
-	var unique []float64
-
-	for _, val := range vals {
-		if !seen[val] {
-			seen[val] = true
-			unique = append(unique, val)
+	uniqueLen := 0
+	for i := 0; i < len(vals); i++ {
+		if i == 0 || vals[i] != vals[i-1] {
+			vals[uniqueLen] = vals[i]
+			uniqueLen++
 		}
 	}
+	unique := vals[:uniqueLen]
 
 	step := 1
 	if len(unique)-1 > maxThresholdCandidates {
 		step = (len(unique) - 1) / maxThresholdCandidates
 	}
 
-	var thresholds []float64
-
+	thresholds := make([]float64, 0, maxThresholdCandidates)
 	for i := 0; i < len(unique)-1; i += step {
 		thresholds = append(thresholds, (unique[i]+unique[i+1])/thresholdMidpointDivisor)
 	}

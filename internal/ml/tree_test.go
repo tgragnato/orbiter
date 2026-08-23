@@ -61,7 +61,7 @@ func TestTreeEmptySamples(t *testing.T) {
 	}
 }
 
-func TestMeanLabel(t *testing.T) {
+func TestCalcStatsActiveMean(t *testing.T) {
 	t.Parallel()
 
 	samples := []Sample{
@@ -69,17 +69,20 @@ func TestMeanLabel(t *testing.T) {
 		{Features: [featureCount]float64{}, Label: 2},
 		{Features: [featureCount]float64{}, Label: 3},
 	}
+	mask := []bool{true, true, true}
 
-	if got := meanLabel(samples); math.Abs(got-2.0) > 1e-9 {
-		t.Errorf("meanLabel = %f, want 2.0", got)
+	mean, _, _, _ := calcStatsActive(samples, mask, len(samples))
+	if math.Abs(mean-2.0) > 1e-9 {
+		t.Errorf("mean = %f, want 2.0", mean)
 	}
 
-	if got := meanLabel(nil); got != 0 {
-		t.Errorf("meanLabel(nil) = %f, want 0", got)
+	nilMean, _, _, _ := calcStatsActive(nil, nil, 0)
+	if nilMean != 0 {
+		t.Errorf("mean(nil) = %f, want 0", nilMean)
 	}
 }
 
-func TestVariance(t *testing.T) {
+func TestCalcStatsActiveVariance(t *testing.T) {
 	t.Parallel()
 
 	samples := []Sample{
@@ -87,14 +90,16 @@ func TestVariance(t *testing.T) {
 		{Features: [featureCount]float64{}, Label: 2},
 		{Features: [featureCount]float64{}, Label: 3},
 	}
-	varResult := variance(samples)
+	mask := []bool{true, true, true}
 
+	_, varResult, _, _ := calcStatsActive(samples, mask, len(samples))
 	if varResult <= 0 {
 		t.Errorf("variance = %f, want > 0", varResult)
 	}
 
-	if got := variance(nil); got != 0 {
-		t.Errorf("variance(nil) = %f, want 0", got)
+	_, nilVar, _, _ := calcStatsActive(nil, nil, 0)
+	if nilVar != 0 {
+		t.Errorf("variance(nil) = %f, want 0", nilVar)
 	}
 }
 
