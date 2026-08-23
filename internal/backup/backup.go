@@ -79,7 +79,7 @@ func RunBackup(ctx context.Context, args []string, lookupEnv func(string) string
 		return fmt.Errorf("list transactions: %w", err)
 	}
 
-	records := make([]Record, len(txs))
+	records := make([]Record, 0, len(txs))
 
 	for idx := range txs {
 		records[idx] = Record{

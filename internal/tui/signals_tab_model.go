@@ -1,9 +1,10 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -161,8 +162,8 @@ func (m SignalsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case signalsMsg:
 		m.messages = msg.messages
 		// Sort by absolute conviction descending so highest-conviction signals appear first.
-		sort.SliceStable(m.messages, func(i, j int) bool {
-			return math.Abs(m.messages[i].Conviction) > math.Abs(m.messages[j].Conviction)
+		slices.SortStableFunc(m.messages, func(a, b innersignal.Message) int {
+			return cmp.Compare(math.Abs(b.Conviction), math.Abs(a.Conviction))
 		})
 		// Clamp scroll offset after a refresh so it never exceeds the new range.
 		maxOff := max(0, len(m.messages)-m.visibleLines())
@@ -179,7 +180,7 @@ func (m SignalsTabModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // NavHint returns the context-sensitive hint string that the root model merges
 // into its global help line when the Signals tab is active.
 func (m SignalsTabModel) NavHint() string {
-	parts := []string{}
+	var parts []string
 
 	if m.mlEngine != nil {
 		label := mlStatusLabel(m.mlEngine.Status())

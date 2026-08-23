@@ -176,13 +176,13 @@ func toForestData(forest *Forest) *forestData {
 		return nil
 	}
 
-	trees := make([]*treeData, len(forest.Trees))
-	for i, treeItem := range forest.Trees {
-		trees[i] = &treeData{
+	trees := make([]*treeData, 0, len(forest.Trees))
+	for _, treeItem := range forest.Trees {
+		trees = append(trees, &treeData{
 			Root:       toNodeData(treeItem.root),
 			MaxDepth:   treeItem.maxDepth,
 			MinSamples: treeItem.minSamples,
-		}
+		})
 	}
 
 	return &forestData{

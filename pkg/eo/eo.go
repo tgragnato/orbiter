@@ -2,7 +2,7 @@
 package eo
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/tgragnato/orbiter/pkg/helper"
 	"github.com/tgragnato/orbiter/pkg/ohlc"
@@ -87,7 +87,6 @@ func (eo *EnvironmentOverlay) AddCandle(candle *ohlc.OHLC) {
 }
 
 // RSI returns the upper and lower RSI thresholds based on the current risk level.
-//
 func (eo *EnvironmentOverlay) RSI() (float64, float64) {
 	var riskLevel = eo.riskLevel()
 
@@ -116,7 +115,7 @@ func (eo *EnvironmentOverlay) riskLevel() RiskLevel {
 	var lastPriceChange = priceChangesPercent[len(prices)-1]
 
 	var sortedPriceChanges = priceChangesPercent
-	sort.Float64s(sortedPriceChanges)
+	slices.Sort(sortedPriceChanges)
 
 	var (
 		priceChangeQ1 = helper.GetPercentile(sortedPriceChanges, percentileQ1)

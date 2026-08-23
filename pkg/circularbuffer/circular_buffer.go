@@ -12,7 +12,7 @@ package circularbuffer
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 )
 
 // ErrNotEnoughData is returned when fewer than minSize elements have been inserted.
@@ -78,11 +78,7 @@ func (cb *CircularBuffer) GetAll() ([]float64, error) {
 
 	// Re-order the ring buffer into chronological (oldest → newest) order.
 	// records[index] is the oldest entry (next to be overwritten).
-	ordered := make([]float64, len(cb.records))
-	n := copy(ordered, cb.records[cb.index:])
-	copy(ordered[n:], cb.records[:cb.index])
-
-	return ordered, nil
+	return slices.Concat(cb.records[cb.index:], cb.records[:cb.index]), nil
 }
 
 // Insert adds a value to the buffer in O(1) time complexity.
@@ -159,6 +155,6 @@ func (cb *CircularBuffer) ensureSorted() {
 
 	// Truncate to 0 while keeping the underlying capacity (0 memory allocations)
 	cb.sortedRecords = append(cb.sortedRecords[:0], cb.records...)
-	sort.Float64s(cb.sortedRecords)
+	slices.Sort(cb.sortedRecords)
 	cb.isDirty = false
 }

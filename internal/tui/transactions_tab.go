@@ -484,7 +484,7 @@ func (m *TransactionsTabModel) buildEntries() {
 		})
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
+	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].date.After(entries[j].date)
 	})
 

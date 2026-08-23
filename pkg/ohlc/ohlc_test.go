@@ -635,7 +635,9 @@ func TestOHLC__Sort(t *testing.T) {
 
 	var ohlcList = []OHLC{*ohlc2, *ohlc1}
 
-	sort.Slice(ohlcList, func(i, j int) bool { return ohlcList[i].End.Before(ohlcList[j].End) })
+	sort.SliceStable(ohlcList, func(i, j int) bool {
+		return ohlcList[i].End.Before(ohlcList[j].End)
+	})
 
 	if !ohlcList[0].End.Equal(ohlc1.End) {
 		t.Fatalf("expected %s, got %s", ohlcList[0].End, ohlc1.End)

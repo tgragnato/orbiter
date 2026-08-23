@@ -1,7 +1,7 @@
 package sma10_test
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 

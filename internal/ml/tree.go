@@ -2,7 +2,7 @@ package ml
 
 import (
 	"math"
-	"sort"
+	"slices"
 )
 
 const (
@@ -175,7 +175,7 @@ func uniqueThresholds(samples []Sample, fi int) []float64 {
 		vals[idx] = samples[idx].Features[fi]
 	}
 
-	sort.Float64s(vals)
+	slices.Sort(vals)
 
 	seen := make(map[float64]bool)
 

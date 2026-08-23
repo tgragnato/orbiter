@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -211,8 +211,8 @@ func (p *YahooProvider) GetEOD(ticker string, from, until time.Time) ([]Candle, 
 		})
 	}
 
-	sort.Slice(candles, func(i, j int) bool {
-		return candles[i].Time.Before(candles[j].Time)
+	slices.SortFunc(candles, func(a, b Candle) int {
+		return a.Time.Compare(b.Time)
 	})
 
 	return candles, nil

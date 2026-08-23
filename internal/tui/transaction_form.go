@@ -257,7 +257,11 @@ func (form transactionFormModel) View() string {
 		form.renderInput("Symbol:      ", form.symbolInput, form.focused == formFieldSymbol),
 	}
 	if form.focused == formFieldSymbol && form.autocompleteHint != "" {
-		lines = append(lines, styles.hint.Render("  → "+form.autocompleteHint+" (↓/tab: accept)"))
+		var hint strings.Builder
+		hint.WriteString("  → ")
+		hint.WriteString(form.autocompleteHint)
+		hint.WriteString(" (↓/tab: accept)")
+		lines = append(lines, styles.hint.Render(hint.String()))
 	}
 
 	lines = append(lines,

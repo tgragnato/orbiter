@@ -2,7 +2,7 @@ package portfolio
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"time"
 )
 
@@ -175,8 +175,7 @@ type DailyNAV struct {
 // The function replays transactions incrementally so the run time is
 // O(trading-days x symbols), not O(trading-days x transactions).
 //
-//nolint:cyclop,gocognit,funlen // NAV reconstruction algorithm is inherently complex;
-// refactoring would obscure correctness.
+//nolint:cyclop,gocognit,funlen // NAV reconstruction algorithm is inherently complex
 func ComputeDailyNAVs(
 	txs []Transaction,
 	priceMap map[string]map[time.Time]float64,
@@ -204,7 +203,9 @@ func ComputeDailyNAVs(
 		days = append(days, dayKey)
 	}
 
-	sort.Slice(days, func(i, j int) bool { return days[i].Before(days[j]) })
+	slices.SortStableFunc(days, func(a, b time.Time) int {
+		return a.Compare(b)
+	})
 
 	// Replay transactions incrementally, advancing a pointer through the
 	// sorted slice so each tx is processed exactly once.
