@@ -71,12 +71,12 @@ func TestCalcStatsActiveMean(t *testing.T) {
 	}
 	mask := []bool{true, true, true}
 
-	mean, _, _, _ := calcStatsActive(samples, mask, len(samples))
+	mean, _, _, _ := calcStatsActive(samples, mask, len(samples)) //nolint:dogsled // ignore variance sum and sqSum
 	if math.Abs(mean-2.0) > 1e-9 {
 		t.Errorf("mean = %f, want 2.0", mean)
 	}
 
-	nilMean, _, _, _ := calcStatsActive(nil, nil, 0)
+	nilMean, _, _, _ := calcStatsActive(nil, nil, 0) //nolint:dogsled // ignore variance sum and sqSum
 	if nilMean != 0 {
 		t.Errorf("mean(nil) = %f, want 0", nilMean)
 	}
@@ -92,12 +92,12 @@ func TestCalcStatsActiveVariance(t *testing.T) {
 	}
 	mask := []bool{true, true, true}
 
-	_, varResult, _, _ := calcStatsActive(samples, mask, len(samples))
+	_, varResult, _, _ := calcStatsActive(samples, mask, len(samples)) //nolint:dogsled // ignore mean sum and sqSum
 	if varResult <= 0 {
 		t.Errorf("variance = %f, want > 0", varResult)
 	}
 
-	_, nilVar, _, _ := calcStatsActive(nil, nil, 0)
+	_, nilVar, _, _ := calcStatsActive(nil, nil, 0) //nolint:dogsled // ignore mean sum and sqSum
 	if nilVar != 0 {
 		t.Errorf("variance(nil) = %f, want 0", nilVar)
 	}

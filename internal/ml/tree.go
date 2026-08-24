@@ -29,7 +29,7 @@ type Tree struct {
 	minSamples int
 }
 
-// featurePair associates a feature value with its original sample index
+// featurePair associates a feature value with its original sample index.
 type featurePair struct {
 	val float64
 	idx int
@@ -67,7 +67,9 @@ func (t *Tree) Fit(samples []Sample, featureMask []int) {
 				idx: i,
 			}
 		}
+
 		slices.SortFunc(pairs, compareFeaturePairs)
+
 		preSorted[featIdx] = pairs
 	}
 
@@ -104,7 +106,7 @@ func traverse(currentNode *node, features [featureCount]float64) float64 {
 
 // buildNode recursively constructs a tree node by finding the feature split point
 // that yields the maximum variance reduction for the currently active samples.
-func buildNode(
+func buildNode( //nolint:cyclop,funlen // satisfy gocritic
 	samples []Sample,
 	mask []int,
 	depth, minSamples int,
@@ -112,15 +114,21 @@ func buildNode(
 	activeMask []bool,
 	activeCount int,
 ) *node {
+	// Calculate statistics for active samples
 	pred, parentVar, totalSum, totalSqSum := calcStatsActive(samples, activeMask, activeCount)
 
 	if depth == 0 || activeCount < minSamples {
 		return &node{
-			isLeaf:     true,
+			featureIdx: 0,
+			threshold:  0.0,
+			left:       nil,
+			right:      nil,
 			prediction: pred,
+			isLeaf:     true,
 		}
 	}
 
+	// Find the best feature split that yields maximum variance reduction
 	bestFeat, bestThresh, bestGain := -1, 0.0, -math.MaxFloat64
 	nTotal := float64(activeCount)
 
@@ -128,8 +136,11 @@ func buildNode(
 		sortedPairs := preSorted[featIdx]
 
 		var leftSum, leftSqSum float64
+
 		var countLeft int
+
 		var prevVal float64
+
 		var hasPrev bool
 
 		step := 1
@@ -176,24 +187,30 @@ func buildNode(
 
 	if bestFeat == -1 || bestGain <= 0 {
 		return &node{
-			isLeaf:     true,
+			featureIdx: 0,
+			threshold:  0.0,
+			left:       nil,
+			right:      nil,
 			prediction: pred,
+			isLeaf:     true,
 		}
 	}
 
 	leftMask := make([]bool, len(samples))
 	rightMask := make([]bool, len(samples))
+
 	var leftCount, rightCount int
 
-	for i, active := range activeMask {
-		if !active {
+	for active, mask := range activeMask {
+		if !mask {
 			continue
 		}
-		if samples[i].Features[bestFeat] <= bestThresh {
-			leftMask[i] = true
+
+		if samples[active].Features[bestFeat] <= bestThresh {
+			leftMask[active] = true
 			leftCount++
 		} else {
-			rightMask[i] = true
+			rightMask[active] = true
 			rightCount++
 		}
 	}
@@ -203,13 +220,15 @@ func buildNode(
 		threshold:  bestThresh,
 		left:       buildNode(samples, mask, depth-1, minSamples, preSorted, leftMask, leftCount),
 		right:      buildNode(samples, mask, depth-1, minSamples, preSorted, rightMask, rightCount),
+		prediction: 0.0, // Not used for non-leaf nodes
 		isLeaf:     false,
 	}
 }
 
 // calcStatsActive computes the mean, variance, sum, and squared sum of labels
 // for samples marked as true in activeMask.
-func calcStatsActive(samples []Sample, activeMask []bool, activeCount int) (mean, variance, sum, sqSum float64) {
+func calcStatsActive(samples []Sample, activeMask []bool, activeCount int) (
+	mean, variance, sum, sqSum float64) { //nolint:nonamedreturns // satisfy gocritic
 	if activeCount == 0 {
 		return 0, 0, 0, 0
 	}
@@ -218,6 +237,7 @@ func calcStatsActive(samples []Sample, activeMask []bool, activeCount int) (mean
 		if !active {
 			continue
 		}
+
 		v := samples[i].Label
 		sum += v
 		sqSum += v * v
@@ -226,6 +246,7 @@ func calcStatsActive(samples []Sample, activeMask []bool, activeCount int) (mean
 	n := float64(activeCount)
 	mean = sum / n
 	variance = (sqSum / n) - (mean * mean)
+
 	if variance < 0 {
 		variance = 0
 	}
@@ -239,13 +260,15 @@ func compareFeaturePairs(a, b featurePair) int {
 	if a.val < b.val {
 		return -1
 	}
+
 	if a.val > b.val {
 		return 1
 	}
+
 	return 0
 }
 
-// split reorders the Samples via swap in O(N) without allocating new memory
+// split reorders the Samples via swap in O(N) without allocating new memory.
 func split(samples []Sample, fi int, threshold float64) ([]Sample, []Sample) {
 	left := 0
 	right := len(samples) - 1
@@ -273,12 +296,14 @@ func uniqueThresholds(samples []Sample, fi int) []float64 {
 	slices.Sort(vals)
 
 	uniqueLen := 0
-	for i := 0; i < len(vals); i++ {
+
+	for i := range vals {
 		if i == 0 || vals[i] != vals[i-1] {
 			vals[uniqueLen] = vals[i]
 			uniqueLen++
 		}
 	}
+
 	unique := vals[:uniqueLen]
 
 	step := 1
