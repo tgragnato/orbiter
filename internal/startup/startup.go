@@ -119,7 +119,7 @@ func Run(ctx context.Context, args []string) error {
 	return runTUI(ctx, args)
 }
 
-//nolint:gocognit,gocyclo,cyclop,nestif,funlen,maintidx // startup wiring; inherent complexity
+//nolint:gocognit,cyclop,nestif,funlen,maintidx // startup wiring; inherent complexity
 func runTUI(ctx context.Context, args []string) error {
 	conf, err := parseConfig(args, os.Getenv)
 	if err != nil {
@@ -242,36 +242,6 @@ func runTUI(ctx context.Context, args []string) error {
 	})
 
 	go runner.run(ctx)
-
-	// Bridge ML engine raw log lines into the shared TUI log channel so they
-	// appear in the Logs tab. This runs independently of any TUI component and
-	// owns the drain loop for the lifetime of the process.
-	go func() {
-		logsCh := runner.LogsChan()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case line, ok := <-logsCh:
-				if !ok {
-					return
-				}
-
-				entry := signals.LogEntry{
-					Time:    time.Now(),
-					Level:   slog.LevelInfo,
-					Message: line,
-					Attrs:   []slog.Attr{slog.String("source", "ml-engine")},
-				}
-
-				select {
-				case logCh <- entry:
-				default:
-				}
-			}
-		}
-	}()
 
 	// TAA engine: friction parameters are read from the DB at startup and can be
 	// updated at runtime from the Settings tab via taaEngine.SetConfig.
