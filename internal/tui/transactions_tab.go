@@ -3,7 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -484,8 +484,8 @@ func (m *TransactionsTabModel) buildEntries() {
 		})
 	}
 
-	sort.SliceStable(entries, func(i, j int) bool {
-		return entries[i].date.After(entries[j].date)
+	slices.SortStableFunc(entries, func(a, b txDisplayEntry) int {
+		return b.date.Compare(a.date)
 	})
 
 	m.entries = entries

@@ -29,7 +29,7 @@ type WalkForwardConfig struct {
 	NTrees int
 	// FeaturesPerSplit is the number of randomly sampled candidate features
 	// evaluated at each tree split (m_try). A value of 0 uses the default of
-	// 12 (~45 % of 26 features). Values are clamped to [1, featureCount].
+	// 12 (~40 % of 30 features). Values are clamped to [1, featureCount].
 	FeaturesPerSplit int
 	// MaxDepth limits tree depth.
 	MaxDepth int

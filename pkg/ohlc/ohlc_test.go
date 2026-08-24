@@ -2,7 +2,7 @@
 package ohlc
 
 import (
-	"sort"
+	"slices"
 	"testing"
 	"time"
 )
@@ -635,8 +635,8 @@ func TestOHLC__Sort(t *testing.T) {
 
 	var ohlcList = []OHLC{*ohlc2, *ohlc1}
 
-	sort.SliceStable(ohlcList, func(i, j int) bool {
-		return ohlcList[i].End.Before(ohlcList[j].End)
+	slices.SortStableFunc(ohlcList, func(a, b OHLC) int {
+		return a.End.Compare(b.End)
 	})
 
 	if !ohlcList[0].End.Equal(ohlc1.End) {

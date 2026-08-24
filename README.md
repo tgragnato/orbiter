@@ -101,8 +101,8 @@ Settings seeded and validated include:
 
 ### ML Engine
 
-- Random forest regressor trained on 26-feature EOD sample vectors
-- Features in three groups: batch go-talib indicators (0–12), streaming `ScoredStrategy` conviction scores (13–22), and incremental `pkg/indicator` outputs (23–25)
+- Random forest regressor trained on 30-feature EOD sample vectors
+- Features in four groups: batch go-talib indicators (0–12), streaming `ScoredStrategy` conviction scores (13–22), incremental `pkg/indicator` outputs (23–25), and relative strength vs the portfolio benchmark plus medium-term momentum (26–29)
 - Walk-forward cross-validation with configurable train/test/embargo windows; all folds merged into a single ensemble via `MergeForests`
 - 24-hour auto-scheduling; best forest persisted to PostgreSQL and conviction scores seeded on restart
 

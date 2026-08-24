@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	talib "github.com/markcheno/go-talib"
@@ -32,7 +33,7 @@ import (
 
 const (
 	historyYears    = 8     // years of EOD history requested per symbol (~2016 bars)
-	warmupBars      = 40    // leading bars consumed for indicator convergence and discarded
+	warmupBars      = 120   // leading bars consumed for indicator convergence and the 120-day momentum look-back
 	forwardDays     = 5     // label horizon: 5-trading-day forward log-return (improves SNR over 1-day)
 	eodHours        = 24    // hours in one EOD bar duration
 	indicatorPeriod = 14    // shared RSI / ADX / StochRSI look-back period
@@ -41,14 +42,177 @@ const (
 	scalerLookback  = 99    // maximum candle look-back window passed to strategy Score()
 	indicatorScale  = 100.0 // indicator values are in 0-100; divide to normalise to 0-1
 	return20Days    = 20    // 20-bar log-return and z-score look-back period
+	return60Days    = 60    // 60-bar (~3 months) log-return look-back period
+	return120Days   = 120   // 120-bar (~6 months) log-return look-back period
 	haOHLCDivisor   = 4.0   // Heikin-Ashi close = (O+H+L+C) / 4
 	haMidDivisor    = 2.0   // Heikin-Ashi open = (prevHaO + prevHaC) / 2
+
+	// benchmarkFallbackSymbol is used for FeatRelReturn20/60 when no active
+	// holding can supply a benchmark return series (e.g. an empty portfolio).
+	benchmarkFallbackSymbol = "EXUS.MI"
+
+	// minBenchmarkCandles is the minimum candle count for a series to
+	// contribute daily returns to the portfolio benchmark.
+	minBenchmarkCandles = 2
 )
 
 // watchlistLister is satisfied by any store that exposes watchlist symbol access.
 // It is defined here (rather than importing portfolio) to avoid an import cycle.
 type watchlistLister interface {
 	ListWatchlistSymbols(ctx context.Context) ([]string, error)
+}
+
+// benchmark is a cumulative log-return index of the current portfolio, keyed
+// by EOD date. It backs the FeatRelReturn20/60 relative-strength features: the
+// benchmark log-return over a window is the difference of the cumulative index
+// at the window's endpoints.
+//
+// The index is built from the equal-weighted mean of the daily log-returns of
+// all active holdings (Quantity > 0). Equal weighting avoids mixing quotation
+// currencies, which NAV weighting would require converting through FX rates
+// unavailable at this layer. When the portfolio has no usable history the
+// index falls back to benchmarkFallbackSymbol.
+type benchmark struct {
+	dates  []time.Time // sorted EOD dates (UTC, day precision)
+	cumLog []float64   // cumulative log-return index parallel to dates
+}
+
+// logRetBetween returns the benchmark log-return between two dates, or false
+// when either date precedes the benchmark history.
+func (b *benchmark) logRetBetween(from, to time.Time) (float64, bool) {
+	valueAt0, ok0 := b.valueAt(from)
+
+	valueAt1, ok1 := b.valueAt(to)
+	if !ok0 || !ok1 {
+		return 0, false
+	}
+
+	return valueAt1 - valueAt0, true
+}
+
+// valueAt returns the cumulative index at the latest benchmark date <= date.
+func (b *benchmark) valueAt(date time.Time) (float64, bool) {
+	idx, found := slices.BinarySearchFunc(b.dates, date, func(a, b time.Time) int {
+		return a.Compare(b)
+	})
+
+	if found {
+		return b.cumLog[idx], true
+	}
+
+	if idx == 0 {
+		return 0, false
+	}
+
+	return b.cumLog[idx-1], true
+}
+
+// buildBenchmark constructs the portfolio benchmark index from active
+// holdings. Symbols whose fetch fails or whose history is too short are
+// skipped; when no holding contributes, benchmarkFallbackSymbol is used.
+// Returns nil when no series at all is available — callers must treat a nil
+// benchmark as "relative-strength features unavailable" (feature value 0).
+func buildBenchmark( //nolint:cyclop,funlen // inherently long due to the complexity
+	holdings []portfolio.Holding,
+	provider data.DataProvider,
+	from, now time.Time,
+) *benchmark {
+	type agg struct {
+		sum float64
+		n   int
+	}
+
+	daily := make(map[time.Time]*agg)
+
+	addSeries := func(candles []data.Candle) bool {
+		added := false
+
+		for candleIdx := 1; candleIdx < len(candles); candleIdx++ {
+			prev := adjClose(candles[candleIdx-1])
+
+			curr := adjClose(candles[candleIdx])
+			if prev <= 0 || curr <= 0 {
+				continue
+			}
+
+			date := eodDate(candles[candleIdx].Time)
+
+			entry, ok := daily[date]
+			if !ok {
+				entry = &agg{sum: 0, n: 0}
+				daily[date] = entry
+			}
+
+			entry.sum += math.Log(curr / prev)
+			entry.n++
+			added = true
+		}
+
+		return added
+	}
+
+	seen := make(map[string]bool)
+	contributed := false
+
+	for _, holding := range holdings {
+		if holding.Quantity <= 0 || seen[holding.Symbol] {
+			continue
+		}
+
+		seen[holding.Symbol] = true
+
+		candles, err := provider.GetEOD(holding.Symbol, from, now)
+		if err != nil || len(candles) < minBenchmarkCandles {
+			continue
+		}
+
+		if addSeries(candles) {
+			contributed = true
+		}
+	}
+
+	if !contributed {
+		candles, err := provider.GetEOD(benchmarkFallbackSymbol, from, now)
+		if err != nil || len(candles) < minBenchmarkCandles || !addSeries(candles) {
+			return nil
+		}
+	}
+
+	dates := make([]time.Time, 0, len(daily))
+	for date := range daily {
+		dates = append(dates, date)
+	}
+
+	slices.SortFunc(dates, func(a, b time.Time) int {
+		return a.Compare(b)
+	})
+
+	cumLog := make([]float64, len(dates))
+	total := 0.0
+
+	for dateIdx, date := range dates {
+		entry := daily[date]
+		total += entry.sum / float64(entry.n)
+		cumLog[dateIdx] = total
+	}
+
+	return &benchmark{dates: dates, cumLog: cumLog}
+}
+
+// adjClose returns the adjusted close, falling back to the raw close when the
+// provider did not supply an adjusted value.
+func adjClose(candle data.Candle) float64 {
+	if candle.AdjustedClose > 0 {
+		return candle.AdjustedClose
+	}
+
+	return candle.Close
+}
+
+// eodDate truncates a candle timestamp to UTC day precision so series from
+// exchanges in different timezones align on the same benchmark date.
+func eodDate(t time.Time) time.Time {
+	return t.UTC().Truncate(eodHours * time.Hour)
 }
 
 // CurrentSamples returns the most recent feature vector for each TAA-eligible
@@ -60,7 +224,6 @@ type watchlistLister interface {
 //
 // If the store also implements watchlistLister, watchlist symbols are included
 // so the TAA engine can emit TypeBuy signals for assets not yet held.
-//
 func CurrentSamples(
 	ctx context.Context,
 	store portfolio.HoldingsStore,
@@ -73,6 +236,8 @@ func CurrentSamples(
 
 	now := time.Now().UTC()
 	from := now.AddDate(-historyYears, 0, 0)
+
+	bench := buildBenchmark(holdings, provider, from, now)
 
 	result := make(map[string]ml.Sample)
 
@@ -90,7 +255,7 @@ func CurrentSamples(
 			continue
 		}
 
-		samples := samplesFromCandles(holding.Symbol, candles)
+		samples := samplesFromCandles(holding.Symbol, candles, bench)
 		if len(samples) == 0 {
 			continue
 		}
@@ -101,7 +266,7 @@ func CurrentSamples(
 	// Also score watchlist symbols so the TAA entry path can emit TypeBuy
 	// signals for assets not yet in the portfolio.
 	if lister, ok := store.(watchlistLister); ok {
-		addCurrentWatchlistSamples(ctx, lister, provider, from, now, seen, result)
+		addCurrentWatchlistSamples(ctx, lister, provider, from, now, seen, bench, result)
 	}
 
 	return result, nil
@@ -115,6 +280,7 @@ func addCurrentWatchlistSamples(
 	provider data.DataProvider,
 	from, now time.Time,
 	seen map[string]bool,
+	bench *benchmark,
 	result map[string]ml.Sample,
 ) {
 	syms, err := lister.ListWatchlistSymbols(ctx)
@@ -134,7 +300,7 @@ func addCurrentWatchlistSamples(
 			continue
 		}
 
-		samples := samplesFromCandles(sym, candles)
+		samples := samplesFromCandles(sym, candles, bench)
 		if len(samples) == 0 {
 			continue
 		}
@@ -150,7 +316,6 @@ func addCurrentWatchlistSamples(
 //
 // If the store also implements watchlistLister, watchlist symbols are included
 // in the training set so the model learns their patterns before entry.
-//
 func ExtractMLSamples(
 	ctx context.Context,
 	store portfolio.HoldingsStore,
@@ -163,6 +328,8 @@ func ExtractMLSamples(
 
 	now := time.Now().UTC()
 	from := now.AddDate(-historyYears, 0, 0)
+
+	bench := buildBenchmark(holdings, provider, from, now)
 
 	seen := make(map[string]bool)
 
@@ -180,13 +347,13 @@ func ExtractMLSamples(
 			continue
 		}
 
-		all = append(all, samplesFromCandles(holding.Symbol, candles)...)
+		all = append(all, samplesFromCandles(holding.Symbol, candles, bench)...)
 	}
 
 	// Include watchlist symbols in the training corpus so the model learns
 	// their feature distributions before the user opens a position.
 	if lister, ok := store.(watchlistLister); ok {
-		all = appendWatchlistSamples(ctx, lister, provider, from, now, seen, all)
+		all = appendWatchlistSamples(ctx, lister, provider, from, now, seen, bench, all)
 	}
 
 	return all, nil
@@ -200,6 +367,7 @@ func appendWatchlistSamples(
 	provider data.DataProvider,
 	from, now time.Time,
 	seen map[string]bool,
+	bench *benchmark,
 	all []ml.Sample,
 ) []ml.Sample {
 	syms, err := lister.ListWatchlistSymbols(ctx)
@@ -219,7 +387,7 @@ func appendWatchlistSamples(
 			continue
 		}
 
-		all = append(all, samplesFromCandles(sym, candles)...)
+		all = append(all, samplesFromCandles(sym, candles, bench)...)
 	}
 
 	return all
@@ -271,8 +439,10 @@ func newScoredStrategies(symbol string) []strategy.Strategy {
 // indicators and discarded; the final bar is reserved as the label for the
 // preceding row, so it is not itself turned into a sample.
 //
+// bench may be nil, in which case FeatRelReturn20/60 are left at 0.
+//
 //nolint:cyclop,funlen // inherent algorithmic complexity; extraction would obscure the feature-vector construction
-func samplesFromCandles(symbol string, candles []data.Candle) []ml.Sample {
+func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) []ml.Sample {
 	numCandles := len(candles)
 
 	opens := make([]float64, numCandles)
@@ -358,6 +528,10 @@ func samplesFromCandles(symbol string, candles []data.Candle) []ml.Sample {
 		sample.Features[ml.FeatReturn5] = logRet(closes, barIdx, forwardDays)
 		sample.Features[ml.FeatReturn20] = logRet(closes, barIdx, return20Days)
 		sample.Features[ml.FeatZScore20] = returnZScore(closes, barIdx, return20Days)
+		sample.Features[ml.FeatReturn60] = logRet(closes, barIdx, return60Days)
+		sample.Features[ml.FeatReturn120] = logRet(closes, barIdx, return120Days)
+		sample.Features[ml.FeatRelReturn20] = relLogRet(closes, candles, barIdx, return20Days, bench)
+		sample.Features[ml.FeatRelReturn60] = relLogRet(closes, candles, barIdx, return60Days, bench)
 		// Strategy conviction scores (indices 13–22): each Score() reads the
 		// indicator state already updated by OnWarmUpCandle above, so there
 		// is no lookahead — all scores are based strictly on bars 0..barIdx.
@@ -413,6 +587,28 @@ func logRet(closes []float64, barIdx, k int) float64 {
 	}
 
 	return math.Log(closes[barIdx] / closes[barIdx-k])
+}
+
+// relLogRet returns the asset's k-bar log-return minus the portfolio
+// benchmark log-return over the same calendar window. Returns 0 when the
+// asset return is unavailable or the benchmark does not cover the window,
+// consistent with the other features' degrade-to-zero convention.
+func relLogRet(closes []float64, candles []data.Candle, barIdx, kBar int, bench *benchmark) float64 {
+	if bench == nil || barIdx < kBar {
+		return 0
+	}
+
+	assetRet := logRet(closes, barIdx, kBar)
+	if assetRet == 0 && closes[barIdx-kBar] <= 0 {
+		return 0
+	}
+
+	benchRet, ok := bench.logRetBetween(eodDate(candles[barIdx-kBar].Time), eodDate(candles[barIdx].Time))
+	if !ok {
+		return 0
+	}
+
+	return assetRet - benchRet
 }
 
 // returnZScore computes the z-score of the current 1-day log-return against

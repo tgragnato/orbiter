@@ -29,7 +29,7 @@ type Forest struct {
 }
 
 // NewForest creates an untrained Forest. featuresPerSplit is the number of
-// candidate features sampled at each split (m_try); 0 defaults to 12 (~45% of
+// candidate features sampled at each split (m_try); 0 defaults to 12 (~40% of
 // featureCount). The value is clamped to [1, featureCount].
 func NewForest(nTrees, maxDepth, minSamples, featuresPerSplit int) *Forest {
 	if featuresPerSplit <= 0 {

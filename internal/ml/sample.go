@@ -6,21 +6,21 @@ package ml
 // Indices 0–12: batch indicators (go-talib over EOD arrays).
 // Indices 13–22: conviction scores from ScoredStrategy implementations.
 // Indices 23–25: incremental indicators from pkg/indicator/stoch and pkg/indicator/round.
-//
+// Indices 26–29: relative strength vs the portfolio benchmark and medium-term momentum.
 const (
-	FeatRSI        = 0
-	FeatStochRSI   = 1
-	FeatRSIADX     = 2
-	FeatSMA10      = 3
-	FeatLowCandle  = 4
-	FeatEngulfing  = 5
-	FeatHarami     = 6
-	FeatHA         = 7
-	FeatScalper    = 8
-	FeatReturn1    = 9
-	FeatReturn5    = 10
-	FeatReturn20   = 11
-	FeatZScore20   = 12
+	FeatRSI           = 0
+	FeatStochRSI      = 1
+	FeatRSIADX        = 2
+	FeatSMA10         = 3
+	FeatLowCandle     = 4
+	FeatEngulfing     = 5
+	FeatHarami        = 6
+	FeatHA            = 7
+	FeatScalper       = 8
+	FeatReturn1       = 9
+	FeatReturn5       = 10
+	FeatReturn20      = 11
+	FeatZScore20      = 12
 	FeatScoreDoji     = 13
 	FeatScoreEngulf   = 14
 	FeatScoreHarami   = 15
@@ -31,10 +31,14 @@ const (
 	FeatScoreScalper  = 20
 	FeatScoreSMA10    = 21
 	FeatScoreStochRSI = 22
-	FeatStochK    = 23 // Fast Stochastic %K / 100 → [0,1]
-	FeatStochD    = 24 // Fast Stochastic %D / 100 → [0,1]
-	FeatRoundWeak = 25 // (close − lowerWeak) / (upperWeak − lowerWeak) → [0,1]
-	featureCount  = 26
+	FeatStochK        = 23 // Fast Stochastic %K / 100 → [0,1]
+	FeatStochD        = 24 // Fast Stochastic %D / 100 → [0,1]
+	FeatRoundWeak     = 25 // (close − lowerWeak) / (upperWeak − lowerWeak) → [0,1]
+	FeatRelReturn20   = 26 // 20-day asset log-return minus 20-day portfolio benchmark log-return
+	FeatRelReturn60   = 27 // 60-day asset log-return minus 60-day portfolio benchmark log-return
+	FeatReturn60      = 28 // log(close[i] / close[i−60]) — ~3-month momentum
+	FeatReturn120     = 29 // log(close[i] / close[i−120]) — ~6-month momentum
+	featureCount      = 30
 )
 
 // Sample is one training or inference data point.

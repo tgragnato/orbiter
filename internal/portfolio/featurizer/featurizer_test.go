@@ -361,7 +361,7 @@ func TestExtractMLSamplesFeatureCount(t *testing.T) {
 		t.Fatalf("expected samples, got err=%v len=%d", err, len(samples))
 	}
 
-	const wantFeatures = 26 // featureCount in internal/ml/sample.go
+	const wantFeatures = 30 // featureCount in internal/ml/sample.go
 
 	if len(samples[0].Features) != wantFeatures {
 		t.Fatalf("feature count = %d, want %d", len(samples[0].Features), wantFeatures)
@@ -472,12 +472,12 @@ func TestSamplesFromCandlesHeikinAshiNoLookahead(t *testing.T) {
 
 	candles := syntheticCandles(warmupBars+10, 100)
 
-	samplesOrig := samplesFromCandles("TEST", candles)
+	samplesOrig := samplesFromCandles("TEST", candles, nil)
 
 	// Mutating a future candle must not change earlier samples.
 	candles[len(candles)-1].Close *= 100
 
-	samplesMutated := samplesFromCandles("TEST", candles)
+	samplesMutated := samplesFromCandles("TEST", candles, nil)
 	if len(samplesOrig) == 0 || len(samplesMutated) == 0 {
 		t.Skip("no samples produced")
 	}
@@ -495,7 +495,7 @@ func TestBodyRatio(t *testing.T) {
 		open, high, low, close float64
 		want                   float64
 	}{
-		{100, 110, 90, 108, 0.4},  // body=(8), range=(20) -> 8/20=0.4
+		{100, 110, 90, 108, 0.4}, // body=(8), range=(20) -> 8/20=0.4
 		{100, 110, 90, 92, -0.4}, // body=(-8), range=(20) -> -8/20=-0.4
 		{100, 100, 100, 100, 0},  // doji: range=0
 	}
@@ -523,6 +523,204 @@ func TestLogRet(t *testing.T) {
 
 	if logRet(prices, 1, 5) != 0 {
 		t.Error("out-of-bounds k should return 0")
+	}
+}
+
+// growthCandles builds count daily candles whose adjusted close grows by a
+// constant daily log-return, so multi-horizon momentum has a closed form.
+func growthCandles(count int, basePrice, dailyLogRet float64) []data.Candle {
+	candles := make([]data.Candle, count)
+
+	for idx := range candles {
+		price := basePrice * math.Exp(dailyLogRet*float64(idx))
+		candles[idx] = data.Candle{
+			Ticker:        "TEST",
+			Time:          time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -count+idx),
+			Open:          price,
+			High:          price * 1.001,
+			Low:           price * 0.999,
+			Close:         price,
+			AdjustedClose: price,
+			Volume:        0,
+			SplitFactor:   0,
+			CashDividend:  0,
+			Currency:      "",
+		}
+	}
+
+	return candles
+}
+
+func TestSamplesFromCandlesMediumTermMomentum(t *testing.T) {
+	t.Parallel()
+
+	const dailyLogRet = 0.001
+
+	candles := growthCandles(warmupBars+forwardDays+1, 100, dailyLogRet)
+
+	samples := samplesFromCandles("TEST", candles, nil)
+	if len(samples) == 0 {
+		t.Fatal("expected samples")
+	}
+
+	first := samples[0]
+
+	want60 := dailyLogRet * 60
+	if math.Abs(first.Features[ml.FeatReturn60]-want60) > 1e-9 {
+		t.Errorf("FeatReturn60 = %f, want %f", first.Features[ml.FeatReturn60], want60)
+	}
+
+	want120 := dailyLogRet * 120
+	if math.Abs(first.Features[ml.FeatReturn120]-want120) > 1e-9 {
+		t.Errorf("FeatReturn120 = %f, want %f", first.Features[ml.FeatReturn120], want120)
+	}
+}
+
+func TestSamplesFromCandlesNilBenchmarkZeroRelReturns(t *testing.T) {
+	t.Parallel()
+
+	candles := growthCandles(warmupBars+forwardDays+1, 100, 0.001)
+
+	samples := samplesFromCandles("TEST", candles, nil)
+	if len(samples) == 0 {
+		t.Fatal("expected samples")
+	}
+
+	if samples[0].Features[ml.FeatRelReturn20] != 0 || samples[0].Features[ml.FeatRelReturn60] != 0 {
+		t.Errorf("nil benchmark must yield zero relative returns, got %f and %f",
+			samples[0].Features[ml.FeatRelReturn20], samples[0].Features[ml.FeatRelReturn60])
+	}
+}
+
+func TestSamplesFromCandlesRelativeReturnVsBenchmark(t *testing.T) {
+	t.Parallel()
+
+	const (
+		assetDaily = 0.002
+		benchDaily = 0.001
+	)
+
+	numBars := warmupBars + forwardDays + 1
+	assetCandles := growthCandles(numBars, 100, assetDaily)
+	benchCandles := growthCandles(numBars, 50, benchDaily)
+
+	holdings := []portfolio.Holding{{
+		ID:             0,
+		Symbol:         "BENCH",
+		Quantity:       1,
+		MarketPrice:    0,
+		PMC:            0,
+		AllocationType: "",
+		TAAEnabled:     false,
+		Currency:       "",
+	}}
+	provider := &fakeProvider{
+		candles: map[string][]data.Candle{"BENCH": benchCandles},
+		err:     nil,
+	}
+
+	bench := buildBenchmark(holdings, provider, time.Time{}, time.Now())
+	if bench == nil {
+		t.Fatal("expected non-nil benchmark")
+	}
+
+	samples := samplesFromCandles("TEST", assetCandles, bench)
+	if len(samples) == 0 {
+		t.Fatal("expected samples")
+	}
+
+	first := samples[0]
+
+	want20 := (assetDaily - benchDaily) * 20
+	if math.Abs(first.Features[ml.FeatRelReturn20]-want20) > 1e-6 {
+		t.Errorf("FeatRelReturn20 = %f, want %f", first.Features[ml.FeatRelReturn20], want20)
+	}
+
+	want60 := (assetDaily - benchDaily) * 60
+	if math.Abs(first.Features[ml.FeatRelReturn60]-want60) > 1e-6 {
+		t.Errorf("FeatRelReturn60 = %f, want %f", first.Features[ml.FeatRelReturn60], want60)
+	}
+}
+
+func TestBuildBenchmarkFallsBackWhenPortfolioEmpty(t *testing.T) {
+	t.Parallel()
+
+	provider := &fakeProvider{
+		candles: map[string][]data.Candle{
+			"EXUS.MI": growthCandles(200, 100, 0.001),
+		},
+		err: nil,
+	}
+
+	bench := buildBenchmark(nil, provider, time.Time{}, time.Now())
+	if bench == nil {
+		t.Fatal("expected fallback benchmark from EXUS.MI, got nil")
+	}
+}
+
+func TestBuildBenchmarkNilWhenNoDataAvailable(t *testing.T) {
+	t.Parallel()
+
+	provider := &fakeProvider{candles: map[string][]data.Candle{}, err: nil}
+
+	bench := buildBenchmark(nil, provider, time.Time{}, time.Now())
+	if bench != nil {
+		t.Fatal("expected nil benchmark when no series is available")
+	}
+}
+
+func TestBuildBenchmarkEqualWeightsTwoHoldings(t *testing.T) {
+	t.Parallel()
+
+	const numBars = 100
+
+	holdings := []portfolio.Holding{
+		{
+			ID:             0,
+			Symbol:         "A",
+			Quantity:       1,
+			MarketPrice:    0,
+			PMC:            0,
+			AllocationType: "",
+			TAAEnabled:     false,
+			Currency:       "",
+		},
+		{
+			ID:             0,
+			Symbol:         "B",
+			Quantity:       1,
+			MarketPrice:    0,
+			PMC:            0,
+			AllocationType: "",
+			TAAEnabled:     false,
+			Currency:       "",
+		},
+	}
+	provider := &fakeProvider{
+		candles: map[string][]data.Candle{
+			"A": growthCandles(numBars, 100, 0.002),
+			"B": growthCandles(numBars, 100, 0.000),
+		},
+		err: nil,
+	}
+
+	bench := buildBenchmark(holdings, provider, time.Time{}, time.Now())
+	if bench == nil {
+		t.Fatal("expected non-nil benchmark")
+	}
+
+	// Equal-weight mean of daily log-returns: (0.002 + 0.000) / 2 per day over 20 days.
+	from := bench.dates[len(bench.dates)-21]
+	to := bench.dates[len(bench.dates)-1]
+
+	got, ok := bench.logRetBetween(from, to)
+	if !ok {
+		t.Fatal("expected benchmark to cover the window")
+	}
+
+	want := 0.001 * 20
+	if math.Abs(got-want) > 1e-9 {
+		t.Errorf("benchmark 20-day log-return = %f, want %f", got, want)
 	}
 }
 
