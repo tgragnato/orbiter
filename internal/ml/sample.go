@@ -7,6 +7,7 @@ package ml
 // Indices 13–22: conviction scores from ScoredStrategy implementations.
 // Indices 23–25: incremental indicators from pkg/indicator/stoch and pkg/indicator/round.
 // Indices 26–29: relative strength vs the portfolio benchmark and medium-term momentum.
+// Indices 30–32: primary trend regime (SMA50 / SMA200 distance and SMA50 slope).
 const (
 	FeatRSI           = 0
 	FeatStochRSI      = 1
@@ -38,7 +39,10 @@ const (
 	FeatRelReturn60   = 27 // 60-day asset log-return minus 60-day portfolio benchmark log-return
 	FeatReturn60      = 28 // log(close[i] / close[i−60]) — ~3-month momentum
 	FeatReturn120     = 29 // log(close[i] / close[i−120]) — ~6-month momentum
-	featureCount      = 30
+	FeatSMA50         = 30 // (close − SMA50) / SMA50 — distance from the intermediate trend
+	FeatSMA200        = 31 // (close − SMA200) / SMA200 — distance from the primary trend
+	FeatSMA50Slope    = 32 // (SMA50[i] − SMA50[i−10]) / SMA50[i−10] — primary trend acceleration
+	featureCount      = 33
 )
 
 // Sample is one training or inference data point.

@@ -46,14 +46,13 @@ const (
 
 // Default ML walk-forward configuration values.
 const (
-	mlTrainSize        = 1250
-	mlTestSize         = 60
-	mlEmbargo          = 10
-	mlLabelHorizon     = 5
-	mlNTrees           = 50
-	mlFeaturesPerSplit = 12
-	mlMaxDepth         = 5
-	mlMinSamples       = 10
+	mlTrainSize    = 1250
+	mlTestSize     = 60
+	mlEmbargo      = 10
+	mlLabelHorizon = 5
+	mlNTrees       = 50
+	mlMaxDepth     = 5
+	mlMinSamples   = 10
 )
 
 // priceFeedInterval is the interval between price feed refresh runs.
@@ -234,7 +233,7 @@ func runTUI(ctx context.Context, args []string) error {
 		Embargo:          mlEmbargo,
 		LabelHorizon:     mlLabelHorizon,
 		NTrees:           mlNTrees,
-		FeaturesPerSplit: mlFeaturesPerSplit,
+		FeaturesPerSplit: ml.DefaultFeaturesPerSplit(),
 		MaxDepth:         mlMaxDepth,
 		MinSamples:       mlMinSamples,
 	}, ckpt, func(innerCtx context.Context) (map[string]ml.Sample, error) {

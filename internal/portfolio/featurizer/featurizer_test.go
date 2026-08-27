@@ -15,6 +15,10 @@ import (
 const (
 	symbolETF1   = "ETF1"
 	symbolVWCEMI = "VWCE.MI"
+
+	// testBars is a history length comfortably above the warm-up window so
+	// every fixture yields a non-empty sample set.
+	testBars = warmupBars + 60
 )
 
 // --- fakes ---
@@ -99,7 +103,7 @@ func TestCurrentSamplesIncludesZeroQtyTAAEnabled(t *testing.T) {
 	}
 	provider := &fakeProvider{
 		candles: map[string][]data.Candle{
-			symbolETF1: syntheticCandles(200, 100),
+			symbolETF1: syntheticCandles(testBars, 100),
 		},
 		err: nil,
 	}
@@ -134,7 +138,7 @@ func TestCurrentSamplesExcludesTAADisabled(t *testing.T) {
 	}
 	provider := &fakeProvider{
 		candles: map[string][]data.Candle{
-			symbolETF1: syntheticCandles(200, 100),
+			symbolETF1: syntheticCandles(testBars, 100),
 		},
 		err: nil,
 	}
@@ -185,7 +189,7 @@ func TestExtractMLSamplesSkipsZeroQty(t *testing.T) {
 	}
 	provider := &fakeProvider{
 		candles: map[string][]data.Candle{
-			symbolVWCEMI: syntheticCandles(200, 100),
+			symbolVWCEMI: syntheticCandles(testBars, 100),
 		},
 		err: nil,
 	}
@@ -228,7 +232,7 @@ func TestExtractMLSamplesDeduplicatesSymbols(t *testing.T) {
 		},
 		err: nil,
 	}
-	candles := syntheticCandles(200, 100)
+	candles := syntheticCandles(testBars, 100)
 	provider := &fakeProvider{candles: map[string][]data.Candle{symbolVWCEMI: candles}, err: nil}
 
 	samples, err := ExtractMLSamples(context.Background(), store, provider)
@@ -296,7 +300,7 @@ func TestExtractMLSamplesSkipsShortHistory(t *testing.T) {
 func TestExtractMLSamplesProducesSamples(t *testing.T) {
 	t.Parallel()
 
-	const nCandles = 200
+	const nCandles = testBars
 
 	store := &fakeStore{
 		holdings: []portfolio.Holding{
@@ -351,7 +355,7 @@ func TestExtractMLSamplesFeatureCount(t *testing.T) {
 	}
 	provider := &fakeProvider{
 		candles: map[string][]data.Candle{
-			symbolETF1: syntheticCandles(200, 50),
+			symbolETF1: syntheticCandles(testBars, 50),
 		},
 		err: nil,
 	}
@@ -361,7 +365,7 @@ func TestExtractMLSamplesFeatureCount(t *testing.T) {
 		t.Fatalf("expected samples, got err=%v len=%d", err, len(samples))
 	}
 
-	const wantFeatures = 30 // featureCount in internal/ml/sample.go
+	const wantFeatures = 33 // featureCount in internal/ml/sample.go
 
 	if len(samples[0].Features) != wantFeatures {
 		t.Fatalf("feature count = %d, want %d", len(samples[0].Features), wantFeatures)
@@ -450,8 +454,8 @@ func TestExtractMLSamplesMultipleSymbols(t *testing.T) {
 	}
 	provider := &fakeProvider{
 		candles: map[string][]data.Candle{
-			"A": syntheticCandles(150, 100),
-			"B": syntheticCandles(150, 200),
+			"A": syntheticCandles(testBars, 100),
+			"B": syntheticCandles(testBars, 200),
 		},
 		err: nil,
 	}
@@ -461,7 +465,7 @@ func TestExtractMLSamplesMultipleSymbols(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := 2 * (150 - warmupBars - forwardDays)
+	want := 2 * (testBars - warmupBars - forwardDays)
 	if len(samples) != want {
 		t.Fatalf("got %d samples, want %d", len(samples), want)
 	}
@@ -573,6 +577,77 @@ func TestSamplesFromCandlesMediumTermMomentum(t *testing.T) {
 	want120 := dailyLogRet * 120
 	if math.Abs(first.Features[ml.FeatReturn120]-want120) > 1e-9 {
 		t.Errorf("FeatReturn120 = %f, want %f", first.Features[ml.FeatReturn120], want120)
+	}
+}
+
+// smaScale returns SMA_period[i] / close[i] for a series growing at a constant
+// daily log-return, where the ratio is independent of i.
+func smaScale(dailyLogRet float64, period int) float64 {
+	sum := 0.0
+	for lag := range period {
+		sum += math.Exp(-dailyLogRet * float64(lag))
+	}
+
+	return sum / float64(period)
+}
+
+func TestSamplesFromCandlesPrimaryTrendRegime(t *testing.T) {
+	t.Parallel()
+
+	const dailyLogRet = 0.001
+
+	candles := growthCandles(warmupBars+forwardDays+1, 100, dailyLogRet)
+
+	samples := samplesFromCandles("TEST", candles, nil)
+	if len(samples) == 0 {
+		t.Fatal("expected samples")
+	}
+
+	first := samples[0]
+
+	want50 := 1/smaScale(dailyLogRet, sma50Period) - 1
+	if math.Abs(first.Features[ml.FeatSMA50]-want50) > 1e-9 {
+		t.Errorf("FeatSMA50 = %f, want %f", first.Features[ml.FeatSMA50], want50)
+	}
+
+	want200 := 1/smaScale(dailyLogRet, sma200Period) - 1
+	if math.Abs(first.Features[ml.FeatSMA200]-want200) > 1e-9 {
+		t.Errorf("FeatSMA200 = %f, want %f", first.Features[ml.FeatSMA200], want200)
+	}
+
+	// The SMA inherits the geometric growth of the series, so the k-bar slope
+	// collapses to exp(k · dailyLogRet) − 1 regardless of the averaging window.
+	wantSlope := math.Exp(dailyLogRet*sma50SlopeLag) - 1
+	if math.Abs(first.Features[ml.FeatSMA50Slope]-wantSlope) > 1e-9 {
+		t.Errorf("FeatSMA50Slope = %f, want %f", first.Features[ml.FeatSMA50Slope], wantSlope)
+	}
+}
+
+func TestSMASlope(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		sma    []float64
+		barIdx int
+		kBar   int
+		want   float64
+	}{
+		{"rising", []float64{100, 110}, 1, 1, 0.1},
+		{"falling", []float64{100, 90}, 1, 1, -0.1},
+		{"lag before series start", []float64{100, 110}, 1, 5, 0},
+		{"unconverged talib warm-up zero", []float64{0, 110}, 1, 1, 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := smaSlope(tc.sma, tc.barIdx, tc.kBar)
+			if math.Abs(got-tc.want) > 1e-9 {
+				t.Errorf("smaSlope = %f, want %f", got, tc.want)
+			}
+		})
 	}
 }
 

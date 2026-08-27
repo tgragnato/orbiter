@@ -28,12 +28,19 @@ type Forest struct {
 	minSamples int
 }
 
+// DefaultFeaturesPerSplit returns Breiman's sqrt(p) heuristic for m_try,
+// derived from featureCount so that adding features rescales the split
+// candidate pool without touching any caller.
+func DefaultFeaturesPerSplit() int {
+	return int(math.Round(math.Sqrt(featureCount)))
+}
+
 // NewForest creates an untrained Forest. featuresPerSplit is the number of
-// candidate features sampled at each split (m_try); 0 defaults to 12 (~40% of
-// featureCount). The value is clamped to [1, featureCount].
+// candidate features sampled at each split (m_try); 0 defaults to
+// DefaultFeaturesPerSplit. The value is clamped to [1, featureCount].
 func NewForest(nTrees, maxDepth, minSamples, featuresPerSplit int) *Forest {
 	if featuresPerSplit <= 0 {
-		featuresPerSplit = 12
+		featuresPerSplit = DefaultFeaturesPerSplit()
 	}
 
 	if featuresPerSplit > featureCount {

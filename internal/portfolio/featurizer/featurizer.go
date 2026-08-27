@@ -33,11 +33,14 @@ import (
 
 const (
 	historyYears    = 8     // years of EOD history requested per symbol (~2016 bars)
-	warmupBars      = 120   // leading bars consumed for indicator convergence and the 120-day momentum look-back
+	warmupBars      = 200   // leading bars consumed for indicator convergence, the 120-day momentum look-back and SMA200
 	forwardDays     = 5     // label horizon: 5-trading-day forward log-return (improves SNR over 1-day)
 	eodHours        = 24    // hours in one EOD bar duration
 	indicatorPeriod = 14    // shared RSI / ADX / StochRSI look-back period
 	smaPeriod       = 10    // SMA look-back period
+	sma50Period     = 50    // intermediate-trend SMA look-back period
+	sma200Period    = 200   // primary-trend SMA look-back period
+	sma50SlopeLag   = 10    // bars between the two SMA50 readings compared by the slope feature
 	stochSmooth     = 3     // StochRSI smoothing period
 	scalerLookback  = 99    // maximum candle look-back window passed to strategy Score()
 	indicatorScale  = 100.0 // indicator values are in 0-100; divide to normalise to 0-1
@@ -464,6 +467,8 @@ func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) 
 	rsiSeries := talib.Rsi(closes, indicatorPeriod)
 	adxSeries := talib.Adx(highs, lows, closes, indicatorPeriod)
 	sma10Series := talib.Sma(closes, smaPeriod)
+	sma50Series := talib.Sma(closes, sma50Period)
+	sma200Series := talib.Sma(closes, sma200Period)
 	stochK, _ := talib.StochRsi(closes, indicatorPeriod, indicatorPeriod, stochSmooth, talib.SMA)
 	engulf := engulfingSignals(opens, closes)
 	harami := haramiSignals(opens, closes)
@@ -532,6 +537,9 @@ func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) 
 		sample.Features[ml.FeatReturn120] = logRet(closes, barIdx, return120Days)
 		sample.Features[ml.FeatRelReturn20] = relLogRet(closes, candles, barIdx, return20Days, bench)
 		sample.Features[ml.FeatRelReturn60] = relLogRet(closes, candles, barIdx, return60Days, bench)
+		sample.Features[ml.FeatSMA50] = relToSMA(closeVal, sma50Series[barIdx])
+		sample.Features[ml.FeatSMA200] = relToSMA(closeVal, sma200Series[barIdx])
+		sample.Features[ml.FeatSMA50Slope] = smaSlope(sma50Series, barIdx, sma50SlopeLag)
 		// Strategy conviction scores (indices 13–22): each Score() reads the
 		// indicator state already updated by OnWarmUpCandle above, so there
 		// is no lookahead — all scores are based strictly on bars 0..barIdx.
@@ -571,13 +579,23 @@ func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) 
 	return samples
 }
 
-// relToSMA returns (price - sma) / sma, the price deviation from its 10-day moving average.
+// relToSMA returns (price - sma) / sma, the price deviation from a moving average.
 func relToSMA(price, sma float64) float64 {
 	if sma == 0 {
 		return 0
 	}
 
 	return (price - sma) / sma
+}
+
+// smaSlope returns the k-bar percentage change of an SMA series, a proxy for
+// the acceleration of the trend the average tracks.
+func smaSlope(sma []float64, barIdx, kBar int) float64 {
+	if barIdx < kBar || sma[barIdx-kBar] <= 0 {
+		return 0
+	}
+
+	return (sma[barIdx] - sma[barIdx-kBar]) / sma[barIdx-kBar]
 }
 
 // logRet returns the log-return of closes[barIdx] relative to closes[barIdx-k].

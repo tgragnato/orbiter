@@ -21,7 +21,8 @@ mlRunner (1h, or on Trigger())
        ├─ streaming strategy scores via ScoredStrategy  (features 13–22)
        ├─ incremental pkg/indicator/stoch + round (features 23–25)
        ├─ relative strength vs portfolio benchmark + medium-term momentum (features 26–29)
-       └─ 30-feature Sample vectors + 5-day log-return label
+       ├─ primary trend regime: SMA50 / SMA200 distance + SMA50 slope (features 30–32)
+       └─ 33-feature Sample vectors + 5-day log-return label
   └─ ml.Engine.Start  (background goroutine)
        └─ WalkForwardCV
             ├─ fold 1: train Forest → test → Metrics (MSE, MAE, Sortino)
@@ -33,11 +34,11 @@ mlRunner (1h, or on Trigger())
 
 ---
 
-## Feature vector (30 dimensions)
+## Feature vector (33 dimensions)
 
-Each `ml.Sample` carries a fixed 30-element `[featureCount]float64` array. All features are scale-invariant — raw prices are never fed to the model.
+Each `ml.Sample` carries a fixed 33-element `[featureCount]float64` array. All features are scale-invariant — raw prices are never fed to the model.
 
-The vector is split into four groups produced by different mechanisms inside `featurizer.samplesFromCandles`.
+The vector is split into five groups produced by different mechanisms inside `featurizer.samplesFromCandles`.
 
 ### Group A — batch indicators (indices 0–12)
 
@@ -99,14 +100,26 @@ Designed for satellite-asset selection in the TAA sleeve, where alpha derives pr
 
 **Benchmark construction**: the benchmark is the current portfolio itself — a cumulative log-return index built from the equal-weighted mean of the daily log-returns of all active holdings (`Quantity > 0`). Equal weighting avoids mixing quotation currencies (NAV weighting would require FX conversion unavailable at the featurizer layer). When no active holding can supply a return series (e.g. an empty portfolio), the benchmark falls back to `EXUS.MI`. When no series at all is available, `FeatRelReturn20/60` degrade to `0`, consistent with the other features' degrade-to-zero convention. Benchmark returns are aligned to asset bars by UTC calendar date, so `FeatRelReturn` compares the same calendar window on both series.
 
-**Label**: `log(close[i+1] / close[i])` — next-day log-return (regression target).
+### Group E — primary trend regime (indices 30–32)
+
+Swing and TAA horizons need the trend to be contextualised beyond the 10-day average carried by `FeatSMA10`, which is too reactive on its own: Group E answers "is the asset in a solid trend, and is that trend accelerating?".
+
+| Index | Constant | Source | Description |
+|-------|----------|--------|-------------|
+| 30 | `FeatSMA50` | go-talib `Sma(closes, 50)` | `(close − SMA50) / SMA50` — distance from the intermediate trend |
+| 31 | `FeatSMA200` | go-talib `Sma(closes, 200)` | `(close − SMA200) / SMA200` — distance from the primary trend |
+| 32 | `FeatSMA50Slope` | featurizer `smaSlope` | `(SMA50[i] − SMA50[i−10]) / SMA50[i−10]` — 10-bar rate of change of the intermediate trend, a proxy for its acceleration |
+
+`smaSlope` degrades to `0` when the lag reaches before the series start or when the reference SMA value is still inside the go-talib warm-up region (leading zeros), consistent with the other features' degrade-to-zero convention. `warmupBars` is 200, so `SMA200` is already converged on the very first sample and no `FeatSMA200 = 0` placeholder — indistinguishable from "price exactly on the average" — ever enters the training set.
+
+**Label**: `log(close[i+5] / close[i])` — 5-day forward log-return (regression target), per `forwardDays` in the featurizer.
 
 ### Warm-up and lookahead guarantee
 
 ```
-bar 0 … 119  → OnWarmUpCandle (all strategies)   — state accumulates, no score read
+bar 0 … 199  → OnWarmUpCandle (all strategies)   — state accumulates, no score read
                stochInd.Insert / roundInd.Insert  — indicator state accumulates
-bar 120 … n-2 → OnWarmUpCandle (updates state with bar i)
+bar 200 … n-2 → OnWarmUpCandle (updates state with bar i)
                stochInd.Insert / roundInd.Insert
                Score(window[0..i])                — reads state, no future data
                stochInd.Value() / roundInd.Value()
@@ -114,11 +127,13 @@ bar 120 … n-2 → OnWarmUpCandle (updates state with bar i)
                Label = log(close[i+5] / close[i])   # 5-day forward log-return
 ```
 
-The first 120 bars are consumed for indicator convergence and the 120-day momentum look-back (`warmupBars = 120`), so `FeatReturn120` is populated from the very first sample. The trailing `forwardDays` bars are reserved for labelling, so they do not themselves become samples.
+The first 200 bars are consumed for indicator convergence, the 120-day momentum look-back and the `SMA200` window (`warmupBars = 200`), so `FeatReturn120` and `FeatSMA200` are both populated from the very first sample. The trailing `forwardDays` bars are reserved for labelling, so they do not themselves become samples.
+
+Cost of the 200-bar warm-up: ~1811 samples per symbol from the 8-year fetch window (~2016 bars) instead of ~1891, i.e. ~9 walk-forward folds per symbol instead of ~11 in the single-holding limit case. `ExtractMLSamples` concatenates the samples of every active holding and every watchlist symbol, so the real training set is a multiple of that figure.
 
 ### Feature subsampling
 
-With `featureCount = 30` and `FeaturesPerSplit = 12`, each tree evaluates 12 randomly selected candidate features at each split (~40% of total). This is set in `WalkForwardConfig.FeaturesPerSplit`; a value of 0 falls back to the default of 12. The value is clamped to `[1, featureCount]` at construction time.
+`m_try` is derived from the feature count rather than hard-coded: `ml.DefaultFeaturesPerSplit()` returns `round(sqrt(featureCount))` — Breiman's heuristic — so adding features rescales the candidate pool automatically. With `featureCount = 33` that is **6** candidate features per split. `WalkForwardConfig.FeaturesPerSplit` overrides it; a value of 0 falls back to the same default, and the value is clamped to `[1, featureCount]` at construction time.
 
 ### go-talib and pkg/indicator: complementary roles
 
@@ -146,7 +161,7 @@ Each tree is a standard CART regression tree:
 ### Forest (`internal/ml/forest.go`)
 
 - **Bootstrap aggregation (bagging)**: each tree is trained on a bootstrap resample of the full training set (sampling with replacement, same size).
-- **Feature subsampling**: each tree evaluates 12 randomly selected candidate features at each split (~40% of 30), chosen via a partial Fisher-Yates shuffle. Configurable via `WalkForwardConfig.FeaturesPerSplit`.
+- **Feature subsampling**: each tree evaluates `round(sqrt(featureCount))` randomly selected candidate features at each split (6 of 33), chosen via a partial Fisher-Yates shuffle. Configurable via `WalkForwardConfig.FeaturesPerSplit`.
 - **Reproducibility**: tree `i` uses LCG seed `i+1` (linear congruential generator), so the same sample set always produces the same forest.
 - **Inference**: prediction is the average across all trees.
 
@@ -170,18 +185,18 @@ To avoid lookahead bias, the model is validated with **purged walk-forward CV**:
 samples:  [0 ................... TrainSize | Embargo | TestSize | TestSize | ...]
 fold 0:    train[0:1250]          gap[10]   test[1260:1320]
 fold 1:    train[60:1310]         gap[10]   test[1320:1380]
-...  (~11 folds from the 8-year EOD history window, ~2016 bars per symbol)
+...  (~9 folds from the 8-year EOD history window, ~2016 bars per symbol)
 ```
 
 Default parameters (set in `startup.go`):
 
 | Parameter | Value | Meaning |
 |-----------|-------|---------|
-| `TrainSize` | 1250 | Samples per training window (~5 years of EOD data); the 8-year fetch window (~2016 bars) supports ~11 rolling folds |
+| `TrainSize` | 1250 | Samples per training window (~5 years of EOD data); the 8-year fetch window (~2016 bars, minus the 200-bar warm-up) supports ~9 rolling folds per symbol |
 | `TestSize` | 60 | Samples in each test window |
 | `Embargo` | 10 | Samples dropped between train end and test start |
 | `LabelHorizon` | 5 | Forward bars used for the label; purge removes trailing samples whose labels bleed into the test window |
-| `FeaturesPerSplit` | 12 | Candidate features evaluated at each split (~40% of 30) |
+| `FeaturesPerSplit` | `ml.DefaultFeaturesPerSplit()` = 6 | Candidate features evaluated at each split — `round(sqrt(33))` |
 | `NTrees` | 50 | Trees per forest per fold |
 | `MaxDepth` | 5 | Maximum tree depth |
 | `MinSamples` | 10 | Minimum samples per leaf |
