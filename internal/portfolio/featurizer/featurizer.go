@@ -399,19 +399,38 @@ func appendWatchlistSamples(
 	return all
 }
 
+// adjustedBar returns a bar's dividend/split-adjusted close together with the
+// factor that rescales its raw open/high/low onto the same price scale.
+//
+// Anything that relates the current bar's extremes to a previous close — true
+// range, directional movement, cross-bar candle patterns — reads the whole
+// adjustment gap as market range when the two sides live on different scales,
+// and that gap shrinks towards the most recent bar, so it also injects a
+// spurious trend into otherwise stationary features.
+func adjustedBar(candle data.Candle) (float64, float64) {
+	closePrice := candle.AdjustedClose
+	if closePrice <= 0 {
+		closePrice = candle.Close
+	}
+
+	factor := 1.0
+	if candle.Close > 0 {
+		factor = closePrice / candle.Close
+	}
+
+	return closePrice, factor
+}
+
 // candleToOHLC converts a data.Candle (float64 fields) to *ohlc.OHLC
 // (float64 fields) so strategy indicators can consume it.
 // The resulting candle is treated as a closed EOD bar.
 func candleToOHLC(candle data.Candle, symbol string) *ohlc.OHLC {
-	price := candle.AdjustedClose
-	if price <= 0 {
-		price = candle.Close
-	}
+	price, factor := adjustedBar(candle)
 
 	ohlcBar := ohlc.New(symbol, candle.Time, eodHours*time.Hour, false)
-	ohlcBar.Open = candle.Open
-	ohlcBar.High = candle.High
-	ohlcBar.Low = candle.Low
+	ohlcBar.Open = candle.Open * factor
+	ohlcBar.High = candle.High * factor
+	ohlcBar.Low = candle.Low * factor
 	ohlcBar.Close = price
 	// EOD bars are always closed; ForceClose is required so pkg/indicator
 	// implementations (rsi, adx, sma, stoch, stochrsi) don't silently drop
@@ -455,29 +474,14 @@ func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) 
 	highs := make([]float64, numCandles)
 	lows := make([]float64, numCandles)
 	closes := make([]float64, numCandles)
-	adjHighs := make([]float64, numCandles)
-	adjLows := make([]float64, numCandles)
 
 	for barIdx, candle := range candles {
-		opens[barIdx] = candle.Open
-		highs[barIdx] = candle.High
-		lows[barIdx] = candle.Low
-		closes[barIdx] = candle.AdjustedClose
+		closePrice, factor := adjustedBar(candle)
 
-		if closes[barIdx] <= 0 {
-			closes[barIdx] = candle.Close
-		}
-
-		// True range mixes the current bar's extremes with the previous close.
-		// closes carries dividend/split-adjusted prices, so raw extremes would
-		// inject the whole adjustment gap into every true range.
-		factor := 1.0
-		if candle.Close > 0 {
-			factor = closes[barIdx] / candle.Close
-		}
-
-		adjHighs[barIdx] = highs[barIdx] * factor
-		adjLows[barIdx] = lows[barIdx] * factor
+		opens[barIdx] = candle.Open * factor
+		highs[barIdx] = candle.High * factor
+		lows[barIdx] = candle.Low * factor
+		closes[barIdx] = closePrice
 	}
 
 	rsiSeries := talib.Rsi(closes, indicatorPeriod)
@@ -485,8 +489,8 @@ func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) 
 	sma10Series := talib.Sma(closes, smaPeriod)
 	sma50Series := talib.Sma(closes, sma50Period)
 	sma200Series := talib.Sma(closes, sma200Period)
-	atr14Series := talib.Atr(adjHighs, adjLows, closes, indicatorPeriod)
-	atr50Series := talib.Atr(adjHighs, adjLows, closes, atr50Period)
+	atr14Series := talib.Atr(highs, lows, closes, indicatorPeriod)
+	atr50Series := talib.Atr(highs, lows, closes, atr50Period)
 	stochK, _ := talib.StochRsi(closes, indicatorPeriod, indicatorPeriod, stochSmooth, talib.SMA)
 	engulf := engulfingSignals(opens, closes)
 	harami := haramiSignals(opens, closes)

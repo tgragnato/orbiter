@@ -623,6 +623,46 @@ func TestSamplesFromCandlesPrimaryTrendRegime(t *testing.T) {
 	}
 }
 
+func TestSamplesFromCandlesRescalesRawExtremes(t *testing.T) {
+	t.Parallel()
+
+	// A dividend-adjusted series (raw OHLC, adjusted close 10 % below it) must
+	// produce the same feature vectors as the same bars already expressed on
+	// the adjusted scale. Without the rescaling, true range and directional
+	// movement would read the 10 % gap as market range.
+	const adjFactor = 0.9
+
+	raw := growthCandles(warmupBars+forwardDays+1, 100, 0.001)
+
+	gapped := make([]data.Candle, len(raw))
+	scaled := make([]data.Candle, len(raw))
+
+	for idx, candle := range raw {
+		gapped[idx] = candle
+		gapped[idx].AdjustedClose = candle.Close * adjFactor
+
+		scaled[idx] = candle
+		scaled[idx].Open = candle.Open * adjFactor
+		scaled[idx].High = candle.High * adjFactor
+		scaled[idx].Low = candle.Low * adjFactor
+		scaled[idx].Close = candle.Close * adjFactor
+		scaled[idx].AdjustedClose = candle.AdjustedClose * adjFactor
+	}
+
+	gotSamples := samplesFromCandles("TEST", gapped, nil)
+
+	wantSamples := samplesFromCandles("TEST", scaled, nil)
+	if len(gotSamples) == 0 || len(gotSamples) != len(wantSamples) {
+		t.Fatalf("sample counts = %d and %d", len(gotSamples), len(wantSamples))
+	}
+
+	for featIdx, want := range wantSamples[0].Features {
+		if got := gotSamples[0].Features[featIdx]; math.Abs(got-want) > 1e-9 {
+			t.Errorf("feature %d = %f, want %f", featIdx, got, want)
+		}
+	}
+}
+
 func TestSamplesFromCandlesNormalisedATR(t *testing.T) {
 	t.Parallel()
 

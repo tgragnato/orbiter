@@ -119,13 +119,11 @@ In swing trading the widest moves originate in volatility contraction phases, so
 
 | Index | Constant | Source | Description |
 |-------|----------|--------|-------------|
-| 33 | `FeatNormATR14` | go-talib `Atr(adjHighs, adjLows, closes, 14)` | `ATR(14) / close` — short-horizon volatility, comparable across assets and epochs |
-| 34 | `FeatNormATR50` | go-talib `Atr(adjHighs, adjLows, closes, 50)` | `ATR(50) / close` — medium-horizon volatility baseline; the model reads compression from the 14/50 contrast |
+| 33 | `FeatNormATR14` | go-talib `Atr(highs, lows, closes, 14)` | `ATR(14) / close` — short-horizon volatility, comparable across assets and epochs |
+| 34 | `FeatNormATR50` | go-talib `Atr(highs, lows, closes, 50)` | `ATR(50) / close` — medium-horizon volatility baseline; the model reads compression from the 14/50 contrast |
 | 35 | `FeatVolRatio` | featurizer `volRatio` | `σ20 / σ60` over daily log-returns — values `< 1` mark a contraction, the regime that typically precedes an expansion move |
 
 `volRatio` uses the population standard deviation (`features.StdDev`) of the trailing 20 and 60 one-day log-returns, and degrades to `0` when either window reaches before the series start or when `σ60` is zero (a perfectly flat series). `warmupBars` is 200, so both windows and the `ATR(50)` Wilder average are fully converged on the very first sample.
-
-**Adjusted extremes**: `talib.Atr` mixes the current bar's high/low with the *previous close*, and `closes` carries dividend/split-adjusted prices. Feeding raw highs and lows would therefore inject the whole adjustment gap into every true range. The featurizer scales each bar's high and low by that bar's `AdjustedClose / Close` factor and passes the resulting `adjHighs` / `adjLows` to `Atr`, so numerator and denominator live on the same price scale.
 
 **Label**: `log(close[i+5] / close[i])` — 5-day forward log-return (regression target), per `forwardDays` in the featurizer.
 
@@ -149,6 +147,14 @@ Cost of the 200-bar warm-up: ~1811 samples per symbol from the 8-year fetch wind
 ### Feature subsampling
 
 `m_try` is derived from the feature count rather than hard-coded: `ml.DefaultFeaturesPerSplit()` returns `round(sqrt(featureCount))` — Breiman's heuristic — so adding features rescales the candidate pool automatically. With `featureCount = 36` that is **6** candidate features per split. `WalkForwardConfig.FeaturesPerSplit` overrides it; a value of 0 falls back to the same default, and the value is clamped to `[1, featureCount]` at construction time.
+
+### Single price scale
+
+Yahoo supplies both a raw `Close` and a dividend/split-adjusted `AdjustedClose`, and the featurizer uses the adjusted one as its close series. On an eight-year distributing-ETF history the two can diverge by 10–15 % on the oldest bars, with the gap narrowing to zero on the most recent one.
+
+Any calculation that relates a bar's open/high/low to a *previous close* therefore has to see both sides on the same scale — otherwise it reads the adjustment gap as market range, and because the gap shrinks over time it also injects a spurious downward trend into features that are supposed to be stationary. This affects the true range behind `Atr` and `Adx`, the directional-movement ratio inside `Adx`, and the cross-bar candle patterns (`engulfingSignals`, `haramiSignals`).
+
+`adjustedBar` returns each bar's adjusted close together with its `AdjustedClose / Close` factor; the featurizer multiplies the raw open/high/low by that factor before populating the `opens` / `highs` / `lows` arrays, and `candleToOHLC` applies the same factor so the `pkg/indicator` and `strategy` layers consume the identical scale. Bars whose raw close is missing or non-positive fall back to a factor of `1`.
 
 ### go-talib and pkg/indicator: complementary roles
 
