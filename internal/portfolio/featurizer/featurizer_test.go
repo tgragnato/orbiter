@@ -365,7 +365,7 @@ func TestExtractMLSamplesFeatureCount(t *testing.T) {
 		t.Fatalf("expected samples, got err=%v len=%d", err, len(samples))
 	}
 
-	const wantFeatures = 33 // featureCount in internal/ml/sample.go
+	const wantFeatures = 36 // featureCount in internal/ml/sample.go
 
 	if len(samples[0].Features) != wantFeatures {
 		t.Fatalf("feature count = %d, want %d", len(samples[0].Features), wantFeatures)
@@ -620,6 +620,134 @@ func TestSamplesFromCandlesPrimaryTrendRegime(t *testing.T) {
 	wantSlope := math.Exp(dailyLogRet*sma50SlopeLag) - 1
 	if math.Abs(first.Features[ml.FeatSMA50Slope]-wantSlope) > 1e-9 {
 		t.Errorf("FeatSMA50Slope = %f, want %f", first.Features[ml.FeatSMA50Slope], wantSlope)
+	}
+}
+
+func TestSamplesFromCandlesNormalisedATR(t *testing.T) {
+	t.Parallel()
+
+	// Flat closes with a fixed 2-point range: the true range is 2 on every bar
+	// (high−low dominates both gap terms), so ATR converges to exactly 2 and
+	// the normalised feature to 2/100 for both look-back periods.
+	const (
+		price   = 100.0
+		wantATR = 0.02
+	)
+
+	numBars := warmupBars + forwardDays + 1
+	candles := make([]data.Candle, numBars)
+
+	for idx := range candles {
+		candles[idx] = data.Candle{
+			Ticker:        "TEST",
+			Time:          time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -numBars+idx),
+			Open:          price,
+			High:          price + 1,
+			Low:           price - 1,
+			Close:         price,
+			AdjustedClose: price,
+			Volume:        0,
+			SplitFactor:   0,
+			CashDividend:  0,
+			Currency:      "",
+		}
+	}
+
+	samples := samplesFromCandles("TEST", candles, nil)
+	if len(samples) == 0 {
+		t.Fatal("expected samples")
+	}
+
+	first := samples[0]
+
+	if math.Abs(first.Features[ml.FeatNormATR14]-wantATR) > 1e-9 {
+		t.Errorf("FeatNormATR14 = %f, want %f", first.Features[ml.FeatNormATR14], wantATR)
+	}
+
+	if math.Abs(first.Features[ml.FeatNormATR50]-wantATR) > 1e-9 {
+		t.Errorf("FeatNormATR50 = %f, want %f", first.Features[ml.FeatNormATR50], wantATR)
+	}
+}
+
+func TestSamplesFromCandlesVolatilityRatio(t *testing.T) {
+	t.Parallel()
+
+	// Alternating returns of ±2d over the 40 bars preceding the short window
+	// and ±d inside it: both windows have mean 0, so σ20 = d and
+	// σ60 = sqrt((40·4d² + 20·d²)/60) = d·sqrt(3).
+	const magnitude = 0.01
+
+	numBars := warmupBars + forwardDays + 1
+	candles := make([]data.Candle, numBars)
+	price := 100.0
+
+	for idx := range candles {
+		if idx > 0 {
+			ret := 2 * magnitude
+			if idx > warmupBars-volShortWindow {
+				ret = magnitude
+			}
+
+			if idx%2 != 0 {
+				ret = -ret
+			}
+
+			price *= math.Exp(ret)
+		}
+
+		candles[idx] = data.Candle{
+			Ticker:        "TEST",
+			Time:          time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -numBars+idx),
+			Open:          price,
+			High:          price * 1.001,
+			Low:           price * 0.999,
+			Close:         price,
+			AdjustedClose: price,
+			Volume:        0,
+			SplitFactor:   0,
+			CashDividend:  0,
+			Currency:      "",
+		}
+	}
+
+	samples := samplesFromCandles("TEST", candles, nil)
+	if len(samples) == 0 {
+		t.Fatal("expected samples")
+	}
+
+	want := 1 / math.Sqrt(3)
+	if got := samples[0].Features[ml.FeatVolRatio]; math.Abs(got-want) > 1e-9 {
+		t.Errorf("FeatVolRatio = %f, want %f", got, want)
+	}
+}
+
+func TestVolRatio(t *testing.T) {
+	t.Parallel()
+
+	flat := make([]float64, 100)
+	for idx := range flat {
+		flat[idx] = 100
+	}
+
+	tests := []struct {
+		name   string
+		closes []float64
+		barIdx int
+		want   float64
+	}{
+		{"long window before series start", flat, 10, 0},
+		{"zero long-window volatility", flat, 90, 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := volRatio(tc.closes, tc.barIdx, volShortWindow, volLongWindow)
+			if math.Abs(got-tc.want) > 1e-9 {
+				t.Errorf("volRatio = %f, want %f", got, tc.want)
+			}
+		})
 	}
 }
 

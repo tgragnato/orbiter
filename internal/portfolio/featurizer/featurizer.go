@@ -41,6 +41,9 @@ const (
 	sma50Period     = 50    // intermediate-trend SMA look-back period
 	sma200Period    = 200   // primary-trend SMA look-back period
 	sma50SlopeLag   = 10    // bars between the two SMA50 readings compared by the slope feature
+	atr50Period     = 50    // medium-horizon ATR look-back period (the short one is indicatorPeriod)
+	volShortWindow  = 20    // daily log-return window of the volatility ratio numerator
+	volLongWindow   = 60    // daily log-return window of the volatility ratio denominator
 	stochSmooth     = 3     // StochRSI smoothing period
 	scalerLookback  = 99    // maximum candle look-back window passed to strategy Score()
 	indicatorScale  = 100.0 // indicator values are in 0-100; divide to normalise to 0-1
@@ -452,6 +455,8 @@ func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) 
 	highs := make([]float64, numCandles)
 	lows := make([]float64, numCandles)
 	closes := make([]float64, numCandles)
+	adjHighs := make([]float64, numCandles)
+	adjLows := make([]float64, numCandles)
 
 	for barIdx, candle := range candles {
 		opens[barIdx] = candle.Open
@@ -462,6 +467,17 @@ func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) 
 		if closes[barIdx] <= 0 {
 			closes[barIdx] = candle.Close
 		}
+
+		// True range mixes the current bar's extremes with the previous close.
+		// closes carries dividend/split-adjusted prices, so raw extremes would
+		// inject the whole adjustment gap into every true range.
+		factor := 1.0
+		if candle.Close > 0 {
+			factor = closes[barIdx] / candle.Close
+		}
+
+		adjHighs[barIdx] = highs[barIdx] * factor
+		adjLows[barIdx] = lows[barIdx] * factor
 	}
 
 	rsiSeries := talib.Rsi(closes, indicatorPeriod)
@@ -469,6 +485,8 @@ func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) 
 	sma10Series := talib.Sma(closes, smaPeriod)
 	sma50Series := talib.Sma(closes, sma50Period)
 	sma200Series := talib.Sma(closes, sma200Period)
+	atr14Series := talib.Atr(adjHighs, adjLows, closes, indicatorPeriod)
+	atr50Series := talib.Atr(adjHighs, adjLows, closes, atr50Period)
 	stochK, _ := talib.StochRsi(closes, indicatorPeriod, indicatorPeriod, stochSmooth, talib.SMA)
 	engulf := engulfingSignals(opens, closes)
 	harami := haramiSignals(opens, closes)
@@ -540,6 +558,9 @@ func samplesFromCandles(symbol string, candles []data.Candle, bench *benchmark) 
 		sample.Features[ml.FeatSMA50] = relToSMA(closeVal, sma50Series[barIdx])
 		sample.Features[ml.FeatSMA200] = relToSMA(closeVal, sma200Series[barIdx])
 		sample.Features[ml.FeatSMA50Slope] = smaSlope(sma50Series, barIdx, sma50SlopeLag)
+		sample.Features[ml.FeatNormATR14] = atr14Series[barIdx] / closeVal
+		sample.Features[ml.FeatNormATR50] = atr50Series[barIdx] / closeVal
+		sample.Features[ml.FeatVolRatio] = volRatio(closes, barIdx, volShortWindow, volLongWindow)
 		// Strategy conviction scores (indices 13–22): each Score() reads the
 		// indicator state already updated by OnWarmUpCandle above, so there
 		// is no lookahead — all scores are based strictly on bars 0..barIdx.
@@ -629,12 +650,32 @@ func relLogRet(closes []float64, candles []data.Candle, barIdx, kBar int, bench 
 	return assetRet - benchRet
 }
 
-// returnZScore computes the z-score of the current 1-day log-return against
-// the rolling window of the preceding `window` 1-day log-returns.
-// Uses only past data so there is no lookahead bias.
-func returnZScore(closes []float64, barIdx, window int) float64 {
-	if barIdx < window+1 {
+// volRatio returns the ratio between the short-window and long-window standard
+// deviation of daily log-returns. Values below 1 mark a volatility contraction,
+// the regime that typically precedes an expansion move. Returns 0 when either
+// window is unavailable, consistent with the other features' degrade-to-zero
+// convention.
+func volRatio(closes []float64, barIdx, shortWindow, longWindow int) float64 {
+	longRets := logRetWindow(closes, barIdx, longWindow)
+
+	shortRets := logRetWindow(closes, barIdx, shortWindow)
+	if longRets == nil || shortRets == nil {
 		return 0
+	}
+
+	longStd := features.StdDev(longRets, features.Mean(longRets))
+	if longStd == 0 {
+		return 0
+	}
+
+	return features.StdDev(shortRets, features.Mean(shortRets)) / longStd
+}
+
+// logRetWindow returns the `window` 1-day log-returns ending at barIdx, or nil
+// when the window reaches before the series start or spans a non-positive close.
+func logRetWindow(closes []float64, barIdx, window int) []float64 {
+	if barIdx < window {
+		return nil
 	}
 
 	rets := make([]float64, window)
@@ -642,10 +683,22 @@ func returnZScore(closes []float64, barIdx, window int) float64 {
 	for retIdx := range window {
 		idx := barIdx - window + retIdx
 		if closes[idx] <= 0 || closes[idx+1] <= 0 {
-			return 0
+			return nil
 		}
 
 		rets[retIdx] = math.Log(closes[idx+1] / closes[idx])
+	}
+
+	return rets
+}
+
+// returnZScore computes the z-score of the current 1-day log-return against
+// the rolling window of the preceding `window` 1-day log-returns.
+// Uses only past data so there is no lookahead bias.
+func returnZScore(closes []float64, barIdx, window int) float64 {
+	rets := logRetWindow(closes, barIdx, window)
+	if rets == nil {
+		return 0
 	}
 
 	mean := features.Mean(rets)

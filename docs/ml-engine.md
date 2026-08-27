@@ -22,7 +22,8 @@ mlRunner (1h, or on Trigger())
        ├─ incremental pkg/indicator/stoch + round (features 23–25)
        ├─ relative strength vs portfolio benchmark + medium-term momentum (features 26–29)
        ├─ primary trend regime: SMA50 / SMA200 distance + SMA50 slope (features 30–32)
-       └─ 33-feature Sample vectors + 5-day log-return label
+       ├─ volatility regime: normalised ATR(14/50) + σ20/σ60 ratio (features 33–35)
+       └─ 36-feature Sample vectors + 5-day log-return label
   └─ ml.Engine.Start  (background goroutine)
        └─ WalkForwardCV
             ├─ fold 1: train Forest → test → Metrics (MSE, MAE, Sortino)
@@ -34,11 +35,11 @@ mlRunner (1h, or on Trigger())
 
 ---
 
-## Feature vector (33 dimensions)
+## Feature vector (36 dimensions)
 
-Each `ml.Sample` carries a fixed 33-element `[featureCount]float64` array. All features are scale-invariant — raw prices are never fed to the model.
+Each `ml.Sample` carries a fixed 36-element `[featureCount]float64` array. All features are scale-invariant — raw prices are never fed to the model.
 
-The vector is split into five groups produced by different mechanisms inside `featurizer.samplesFromCandles`.
+The vector is split into six groups produced by different mechanisms inside `featurizer.samplesFromCandles`.
 
 ### Group A — batch indicators (indices 0–12)
 
@@ -112,6 +113,20 @@ Swing and TAA horizons need the trend to be contextualised beyond the 10-day ave
 
 `smaSlope` degrades to `0` when the lag reaches before the series start or when the reference SMA value is still inside the go-talib warm-up region (leading zeros), consistent with the other features' degrade-to-zero convention. `warmupBars` is 200, so `SMA200` is already converged on the very first sample and no `FeatSMA200 = 0` placeholder — indistinguishable from "price exactly on the average" — ever enters the training set.
 
+### Group F — volatility regime (indices 33–35)
+
+In swing trading the widest moves originate in volatility contraction phases, so the model needs to know which volatility regime the asset currently sits in — not just how strong its trend is.
+
+| Index | Constant | Source | Description |
+|-------|----------|--------|-------------|
+| 33 | `FeatNormATR14` | go-talib `Atr(adjHighs, adjLows, closes, 14)` | `ATR(14) / close` — short-horizon volatility, comparable across assets and epochs |
+| 34 | `FeatNormATR50` | go-talib `Atr(adjHighs, adjLows, closes, 50)` | `ATR(50) / close` — medium-horizon volatility baseline; the model reads compression from the 14/50 contrast |
+| 35 | `FeatVolRatio` | featurizer `volRatio` | `σ20 / σ60` over daily log-returns — values `< 1` mark a contraction, the regime that typically precedes an expansion move |
+
+`volRatio` uses the population standard deviation (`features.StdDev`) of the trailing 20 and 60 one-day log-returns, and degrades to `0` when either window reaches before the series start or when `σ60` is zero (a perfectly flat series). `warmupBars` is 200, so both windows and the `ATR(50)` Wilder average are fully converged on the very first sample.
+
+**Adjusted extremes**: `talib.Atr` mixes the current bar's high/low with the *previous close*, and `closes` carries dividend/split-adjusted prices. Feeding raw highs and lows would therefore inject the whole adjustment gap into every true range. The featurizer scales each bar's high and low by that bar's `AdjustedClose / Close` factor and passes the resulting `adjHighs` / `adjLows` to `Atr`, so numerator and denominator live on the same price scale.
+
 **Label**: `log(close[i+5] / close[i])` — 5-day forward log-return (regression target), per `forwardDays` in the featurizer.
 
 ### Warm-up and lookahead guarantee
@@ -133,7 +148,7 @@ Cost of the 200-bar warm-up: ~1811 samples per symbol from the 8-year fetch wind
 
 ### Feature subsampling
 
-`m_try` is derived from the feature count rather than hard-coded: `ml.DefaultFeaturesPerSplit()` returns `round(sqrt(featureCount))` — Breiman's heuristic — so adding features rescales the candidate pool automatically. With `featureCount = 33` that is **6** candidate features per split. `WalkForwardConfig.FeaturesPerSplit` overrides it; a value of 0 falls back to the same default, and the value is clamped to `[1, featureCount]` at construction time.
+`m_try` is derived from the feature count rather than hard-coded: `ml.DefaultFeaturesPerSplit()` returns `round(sqrt(featureCount))` — Breiman's heuristic — so adding features rescales the candidate pool automatically. With `featureCount = 36` that is **6** candidate features per split. `WalkForwardConfig.FeaturesPerSplit` overrides it; a value of 0 falls back to the same default, and the value is clamped to `[1, featureCount]` at construction time.
 
 ### go-talib and pkg/indicator: complementary roles
 
@@ -161,7 +176,7 @@ Each tree is a standard CART regression tree:
 ### Forest (`internal/ml/forest.go`)
 
 - **Bootstrap aggregation (bagging)**: each tree is trained on a bootstrap resample of the full training set (sampling with replacement, same size).
-- **Feature subsampling**: each tree evaluates `round(sqrt(featureCount))` randomly selected candidate features at each split (6 of 33), chosen via a partial Fisher-Yates shuffle. Configurable via `WalkForwardConfig.FeaturesPerSplit`.
+- **Feature subsampling**: each tree evaluates `round(sqrt(featureCount))` randomly selected candidate features at each split (6 of 36), chosen via a partial Fisher-Yates shuffle. Configurable via `WalkForwardConfig.FeaturesPerSplit`.
 - **Reproducibility**: tree `i` uses LCG seed `i+1` (linear congruential generator), so the same sample set always produces the same forest.
 - **Inference**: prediction is the average across all trees.
 
@@ -196,7 +211,7 @@ Default parameters (set in `startup.go`):
 | `TestSize` | 60 | Samples in each test window |
 | `Embargo` | 10 | Samples dropped between train end and test start |
 | `LabelHorizon` | 5 | Forward bars used for the label; purge removes trailing samples whose labels bleed into the test window |
-| `FeaturesPerSplit` | `ml.DefaultFeaturesPerSplit()` = 6 | Candidate features evaluated at each split — `round(sqrt(33))` |
+| `FeaturesPerSplit` | `ml.DefaultFeaturesPerSplit()` = 6 | Candidate features evaluated at each split — `round(sqrt(36))` |
 | `NTrees` | 50 | Trees per forest per fold |
 | `MaxDepth` | 5 | Maximum tree depth |
 | `MinSamples` | 10 | Minimum samples per leaf |

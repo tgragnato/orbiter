@@ -8,6 +8,7 @@ package ml
 // Indices 23–25: incremental indicators from pkg/indicator/stoch and pkg/indicator/round.
 // Indices 26–29: relative strength vs the portfolio benchmark and medium-term momentum.
 // Indices 30–32: primary trend regime (SMA50 / SMA200 distance and SMA50 slope).
+// Indices 33–35: volatility regime (normalised ATR and short/medium volatility ratio).
 const (
 	FeatRSI           = 0
 	FeatStochRSI      = 1
@@ -42,7 +43,10 @@ const (
 	FeatSMA50         = 30 // (close − SMA50) / SMA50 — distance from the intermediate trend
 	FeatSMA200        = 31 // (close − SMA200) / SMA200 — distance from the primary trend
 	FeatSMA50Slope    = 32 // (SMA50[i] − SMA50[i−10]) / SMA50[i−10] — primary trend acceleration
-	featureCount      = 33
+	FeatNormATR14     = 33 // ATR(14) / close — short-horizon volatility, comparable across assets
+	FeatNormATR50     = 34 // ATR(50) / close — medium-horizon volatility baseline
+	FeatVolRatio      = 35 // σ20 / σ60 of daily log-returns — < 1 marks volatility compression
+	featureCount      = 36
 )
 
 // Sample is one training or inference data point.
