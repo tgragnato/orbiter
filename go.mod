@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/guptarohit/asciigraph v0.10.0
-	github.com/jackc/pgx/v5 v5.10.0
+	github.com/jackc/pgx/v5 v5.11.0
 	github.com/markcheno/go-talib v0.0.0-20260617004048-4ff5e103edd9
 )
 
