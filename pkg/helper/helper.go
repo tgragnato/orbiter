@@ -24,7 +24,7 @@ package helper
 import (
 	"math"
 
-	"github.com/tgragnato/orbiter/pkg/broker"
+	"tgragnato.it/orbiter/pkg/broker"
 )
 
 const percentageDivisor = 100.0

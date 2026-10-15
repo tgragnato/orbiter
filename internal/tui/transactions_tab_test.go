@@ -9,7 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tgragnato/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/portfolio"
 )
 
 // fakeTransactionEditor ───────────────────────────────────────────────────────

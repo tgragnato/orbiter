@@ -24,7 +24,7 @@ package indicator
 import (
 	"errors"
 
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 // Indicator is the common interface implemented by all technical indicators.

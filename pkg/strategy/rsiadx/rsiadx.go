@@ -27,14 +27,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/broker"
-	"github.com/tgragnato/orbiter/pkg/eo"
-	"github.com/tgragnato/orbiter/pkg/helper"
-	indicatoradx "github.com/tgragnato/orbiter/pkg/indicator/adx"
-	indicatorrsi "github.com/tgragnato/orbiter/pkg/indicator/rsi"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
-	"github.com/tgragnato/orbiter/pkg/strategy"
-	"github.com/tgragnato/orbiter/pkg/tick"
+	"tgragnato.it/orbiter/pkg/broker"
+	"tgragnato.it/orbiter/pkg/eo"
+	"tgragnato.it/orbiter/pkg/helper"
+	indicatoradx "tgragnato.it/orbiter/pkg/indicator/adx"
+	indicatorrsi "tgragnato.it/orbiter/pkg/indicator/rsi"
+	"tgragnato.it/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/strategy"
+	"tgragnato.it/orbiter/pkg/tick"
 )
 
 // RSIADX is a strategy that combines the RSI and ADX indicators.

@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/tgragnato/orbiter/internal/portfolio/features"
+	"tgragnato.it/orbiter/internal/portfolio/features"
 )
 
 func TestMean(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/portfolio/fx"
+	"tgragnato.it/orbiter/internal/portfolio/fx"
 )
 
 // Sentinel errors for Yahoo Finance FX data fetching.

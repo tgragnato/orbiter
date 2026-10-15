@@ -145,8 +145,8 @@ import (
 
     "github.com/markcheno/go-talib"  // 2. third-party
 
-    "github.com/tgragnato/orbiter/internal/portfolio"  // 3. internal
-    "github.com/tgragnato/orbiter/pkg/ohlc"
+    "tgragnato.it/orbiter/internal/portfolio"  // 3. internal
+    "tgragnato.it/orbiter/pkg/ohlc"
 )
 ```
 

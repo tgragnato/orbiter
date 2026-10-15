@@ -3,7 +3,7 @@ package portfolio
 import (
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/portfolio/data"
+	"tgragnato.it/orbiter/internal/portfolio/data"
 )
 
 // DividendRecord is a realized dividend income record for one ex-date.

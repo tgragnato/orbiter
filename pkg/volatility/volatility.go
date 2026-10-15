@@ -25,8 +25,8 @@ package volatility
 import (
 	"fmt"
 
-	"github.com/tgragnato/orbiter/pkg/circularbuffer"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/circularbuffer"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 // Volatility tracks price volatility using a circular buffer of historical OHLC data.

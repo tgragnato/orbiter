@@ -23,8 +23,8 @@ package adx
 
 import (
 	"github.com/markcheno/go-talib"
-	"github.com/tgragnato/orbiter/pkg/indicator"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/indicator"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 // Value is the map key for the ADX indicator result.

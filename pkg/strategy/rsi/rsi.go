@@ -27,13 +27,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/broker"
-	"github.com/tgragnato/orbiter/pkg/helper"
-	indicatorrsi "github.com/tgragnato/orbiter/pkg/indicator/rsi"
-	"github.com/tgragnato/orbiter/pkg/indicator/sma"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
-	"github.com/tgragnato/orbiter/pkg/strategy"
-	"github.com/tgragnato/orbiter/pkg/tick"
+	"tgragnato.it/orbiter/pkg/broker"
+	"tgragnato.it/orbiter/pkg/helper"
+	indicatorrsi "tgragnato.it/orbiter/pkg/indicator/rsi"
+	"tgragnato.it/orbiter/pkg/indicator/sma"
+	"tgragnato.it/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/strategy"
+	"tgragnato.it/orbiter/pkg/tick"
 )
 
 // RSI is a strategy that trades based on the Relative Strength Index indicator.

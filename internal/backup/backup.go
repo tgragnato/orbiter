@@ -12,7 +12,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/tgragnato/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/portfolio"
 )
 
 const backupVersion = "1"

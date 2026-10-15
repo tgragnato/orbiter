@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/portfolio/data"
+	"tgragnato.it/orbiter/internal/portfolio/data"
 )
 
 // --- fakes ---

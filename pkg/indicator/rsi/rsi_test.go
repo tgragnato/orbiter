@@ -27,9 +27,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/indicator"
-	"github.com/tgragnato/orbiter/pkg/indicator/rsi"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/indicator"
+	"tgragnato.it/orbiter/pkg/indicator/rsi"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 func TestRSI_Value(t *testing.T) {

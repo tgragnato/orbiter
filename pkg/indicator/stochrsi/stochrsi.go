@@ -26,8 +26,8 @@ import (
 	"fmt"
 
 	"github.com/markcheno/go-talib"
-	"github.com/tgragnato/orbiter/pkg/circularbuffer"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/circularbuffer"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 // ValueK is the map key for the StochRSI %K line value.

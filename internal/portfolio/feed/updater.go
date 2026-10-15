@@ -10,10 +10,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/portfolio"
-	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
-	"github.com/tgragnato/orbiter/internal/portfolio/data"
-	"github.com/tgragnato/orbiter/internal/portfolio/fx"
+	"tgragnato.it/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/portfolio/analytics"
+	"tgragnato.it/orbiter/internal/portfolio/data"
+	"tgragnato.it/orbiter/internal/portfolio/fx"
 )
 
 // oneDay is the duration of one UTC calendar day, used for date truncation and

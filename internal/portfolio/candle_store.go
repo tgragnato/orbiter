@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/portfolio/data"
+	"tgragnato.it/orbiter/internal/portfolio/data"
 )
 
 // GetCachedCandles returns persisted EOD candles for symbol in [from, until].

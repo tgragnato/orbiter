@@ -26,9 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/indicator"
-	"github.com/tgragnato/orbiter/pkg/indicator/adx"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/indicator"
+	"tgragnato.it/orbiter/pkg/indicator/adx"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 func TestADX_Bearish_Trend_Above_35(t *testing.T) {

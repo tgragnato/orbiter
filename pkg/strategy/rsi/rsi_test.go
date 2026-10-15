@@ -25,10 +25,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/ohlc"
-	"github.com/tgragnato/orbiter/pkg/strategy"
-	"github.com/tgragnato/orbiter/pkg/strategy/rsi"
-	"github.com/tgragnato/orbiter/pkg/tick"
+	"tgragnato.it/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/strategy"
+	"tgragnato.it/orbiter/pkg/strategy/rsi"
+	"tgragnato.it/orbiter/pkg/tick"
 )
 
 // generateTestCandles creates valid OHLC candles and calls ForceClose() on each.

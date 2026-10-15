@@ -18,7 +18,7 @@ COPY --from=sbomgen /tmp/orbiter.spdx.json /var/lib/db/sbom/orbiter.spdx.json
 ENTRYPOINT ["/usr/bin/orbiter"]
 LABEL org.opencontainers.image.title="orbiter"
 LABEL org.opencontainers.image.description="Terminal-first Core-Satellite portfolio manager & TAA signal tracker 🛰️"
-LABEL org.opencontainers.image.url="https://github.com/tgragnato/orbiter/"
-LABEL org.opencontainers.image.source="https://github.com/tgragnato/orbiter/"
+LABEL org.opencontainers.image.url="https://tgragnato.it/orbiter/"
+LABEL org.opencontainers.image.source="https://tgragnato.it/orbiter/"
 LABEL org.opencontainers.image.licenses="AGPL-3.0"
 LABEL io.containers.autoupdate=registry

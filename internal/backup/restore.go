@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/configuration"
-	"github.com/tgragnato/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/configuration"
+	"tgragnato.it/orbiter/internal/portfolio"
 )
 
 // ErrUnsupportedVersion is returned when the backup file version is not supported.

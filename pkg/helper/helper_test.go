@@ -24,8 +24,8 @@ package helper_test
 import (
 	"testing"
 
-	"github.com/tgragnato/orbiter/pkg/broker"
-	"github.com/tgragnato/orbiter/pkg/helper"
+	"tgragnato.it/orbiter/pkg/broker"
+	"tgragnato.it/orbiter/pkg/helper"
 )
 
 func TestCalcStopLossPriceByPercentage(t *testing.T) {

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/tgragnato/orbiter/internal/portfolio"
-	"github.com/tgragnato/orbiter/internal/signal"
+	"tgragnato.it/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/signal"
 )
 
 const symbolVWCEDE = "VWCE.DE"

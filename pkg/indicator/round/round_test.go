@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/indicator/round"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/indicator/round"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 //nolint:funlen // test table is intentionally long

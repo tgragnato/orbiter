@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/indicator/stochrsi"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/indicator/stochrsi"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 func TestStochRSI_Value(t *testing.T) {

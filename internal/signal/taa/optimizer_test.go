@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/portfolio"
-	"github.com/tgragnato/orbiter/internal/signal"
+	"tgragnato.it/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/signal"
 )
 
 //nolint:gochecknoglobals // test helper used across multiple test functions

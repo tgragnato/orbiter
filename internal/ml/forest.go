@@ -3,7 +3,7 @@ package ml
 import (
 	"math"
 
-	"github.com/tgragnato/orbiter/internal/portfolio/features"
+	"tgragnato.it/orbiter/internal/portfolio/features"
 )
 
 const (

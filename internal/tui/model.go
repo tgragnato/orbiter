@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tgragnato/orbiter/internal/portfolio"
-	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
+	"tgragnato.it/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/portfolio/analytics"
 )
 
 const refreshInterval = time.Hour

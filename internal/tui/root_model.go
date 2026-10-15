@@ -7,12 +7,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tgragnato/orbiter/internal/portfolio"
-	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
-	"github.com/tgragnato/orbiter/internal/portfolio/data"
-	"github.com/tgragnato/orbiter/internal/portfolio/feed"
-	innersignal "github.com/tgragnato/orbiter/internal/signal"
-	"github.com/tgragnato/orbiter/internal/signal/taa"
+	"tgragnato.it/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/portfolio/analytics"
+	"tgragnato.it/orbiter/internal/portfolio/data"
+	"tgragnato.it/orbiter/internal/portfolio/feed"
+	innersignal "tgragnato.it/orbiter/internal/signal"
+	"tgragnato.it/orbiter/internal/signal/taa"
 )
 
 const (

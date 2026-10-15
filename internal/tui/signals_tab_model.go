@@ -11,7 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	lipglosstable "github.com/charmbracelet/lipgloss/table"
-	innersignal "github.com/tgragnato/orbiter/internal/signal"
+	innersignal "tgragnato.it/orbiter/internal/signal"
 )
 
 const (

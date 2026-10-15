@@ -6,7 +6,7 @@ import (
 	"os"
 	_ "time/tzdata"
 
-	"github.com/tgragnato/orbiter/internal/startup"
+	"tgragnato.it/orbiter/internal/startup"
 )
 
 // GitRev is injected by the compiler via -ldflags.

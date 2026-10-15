@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/tick"
+	"tgragnato.it/orbiter/pkg/tick"
 )
 
 const (

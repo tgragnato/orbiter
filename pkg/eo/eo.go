@@ -25,8 +25,8 @@ package eo
 import (
 	"slices"
 
-	"github.com/tgragnato/orbiter/pkg/helper"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/helper"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 // floatRing is a fixed-capacity FIFO queue that preserves insertion order.

@@ -27,7 +27,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 // Sentinel errors for the round-number indicator.

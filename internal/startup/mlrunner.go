@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/ml"
+	"tgragnato.it/orbiter/internal/ml"
 )
 
 // defaultConvictionScale is the default prediction scale used when seeding conviction

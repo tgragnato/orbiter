@@ -23,8 +23,8 @@ package rsi
 
 import (
 	"github.com/markcheno/go-talib"
-	"github.com/tgragnato/orbiter/pkg/indicator"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/indicator"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 // Value is the key used to store the RSI value in the result map.

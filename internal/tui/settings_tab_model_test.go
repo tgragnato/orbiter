@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tgragnato/orbiter/internal/configuration"
+	"tgragnato.it/orbiter/internal/configuration"
 )
 
 // fakeSettingsService implements SettingsService for testing.

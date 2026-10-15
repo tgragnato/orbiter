@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/signal"
+	"tgragnato.it/orbiter/internal/signal"
 )
 
 func TestReadModelWithMemoryDispatcher(t *testing.T) {

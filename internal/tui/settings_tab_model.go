@@ -10,7 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tgragnato/orbiter/internal/configuration"
+	"tgragnato.it/orbiter/internal/configuration"
 )
 
 // SettingsService is the configuration persistence contract required by the settings tab.

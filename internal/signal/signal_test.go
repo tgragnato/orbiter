@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/signal"
+	"tgragnato.it/orbiter/internal/signal"
 )
 
 //nolint:funlen // test function needs to cover the full MemoryDispatcher API surface.

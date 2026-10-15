@@ -26,13 +26,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/broker"
-	"github.com/tgragnato/orbiter/pkg/circularbuffer"
-	"github.com/tgragnato/orbiter/pkg/helper"
-	"github.com/tgragnato/orbiter/pkg/indicator/sma"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
-	"github.com/tgragnato/orbiter/pkg/strategy"
-	"github.com/tgragnato/orbiter/pkg/tick"
+	"tgragnato.it/orbiter/pkg/broker"
+	"tgragnato.it/orbiter/pkg/circularbuffer"
+	"tgragnato.it/orbiter/pkg/helper"
+	"tgragnato.it/orbiter/pkg/indicator/sma"
+	"tgragnato.it/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/strategy"
+	"tgragnato.it/orbiter/pkg/tick"
 )
 
 // Long: Buy if candle closes below the last 7 candles and is above SMA 200

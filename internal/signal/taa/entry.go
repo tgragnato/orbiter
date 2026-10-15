@@ -3,8 +3,8 @@ package taa
 import (
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/portfolio"
-	"github.com/tgragnato/orbiter/internal/signal"
+	"tgragnato.it/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/signal"
 )
 
 // SymbolProvider returns all symbols the ML engine has conviction scores for,

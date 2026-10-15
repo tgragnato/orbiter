@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 func TestAddOHLC(t *testing.T) {

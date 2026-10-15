@@ -29,13 +29,13 @@ import (
 	"math"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/broker"
-	"github.com/tgragnato/orbiter/pkg/indicator"
-	"github.com/tgragnato/orbiter/pkg/indicator/sma"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
-	"github.com/tgragnato/orbiter/pkg/strategy"
-	"github.com/tgragnato/orbiter/pkg/tick"
-	"github.com/tgragnato/orbiter/pkg/volatility"
+	"tgragnato.it/orbiter/pkg/broker"
+	"tgragnato.it/orbiter/pkg/indicator"
+	"tgragnato.it/orbiter/pkg/indicator/sma"
+	"tgragnato.it/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/strategy"
+	"tgragnato.it/orbiter/pkg/tick"
+	"tgragnato.it/orbiter/pkg/volatility"
 )
 
 const (

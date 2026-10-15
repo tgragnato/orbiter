@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/indicator/sma"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/indicator/sma"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 func TestSMA_Value(t *testing.T) {

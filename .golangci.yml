@@ -176,7 +176,7 @@ linters:
             - "github.com/guptarohit/asciigraph"
             - "github.com/jackc/pgx/v5"
             - "github.com/markcheno/go-talib"
-            - "github.com/tgragnato/orbiter"
+            - "tgragnato.it/orbiter"
           deny:
             - pkg: "$all"
               desc: "please use the allowed packages instead of importing arbitrary packages"

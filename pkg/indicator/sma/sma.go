@@ -24,8 +24,8 @@ package sma
 import (
 	"fmt"
 
-	"github.com/tgragnato/orbiter/pkg/circularbuffer"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/circularbuffer"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 // Value is the key used to store the SMA value in the result map.

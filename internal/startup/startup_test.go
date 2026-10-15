@@ -11,11 +11,11 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/tgragnato/orbiter/internal/configuration"
-	"github.com/tgragnato/orbiter/internal/portfolio"
-	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
-	"github.com/tgragnato/orbiter/internal/signal"
-	"github.com/tgragnato/orbiter/internal/tui"
+	"tgragnato.it/orbiter/internal/configuration"
+	"tgragnato.it/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/portfolio/analytics"
+	"tgragnato.it/orbiter/internal/signal"
+	"tgragnato.it/orbiter/internal/tui"
 )
 
 const (

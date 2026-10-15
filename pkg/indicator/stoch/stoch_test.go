@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/indicator/stoch"
-	"github.com/tgragnato/orbiter/pkg/ohlc"
+	"tgragnato.it/orbiter/pkg/indicator/stoch"
+	"tgragnato.it/orbiter/pkg/ohlc"
 )
 
 func TestStoch_Value(t *testing.T) {

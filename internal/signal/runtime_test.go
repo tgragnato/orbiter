@@ -3,7 +3,7 @@ package signal_test
 import (
 	"testing"
 
-	"github.com/tgragnato/orbiter/internal/signal"
+	"tgragnato.it/orbiter/internal/signal"
 )
 
 func TestNewRuntime(t *testing.T) {

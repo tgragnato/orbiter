@@ -9,8 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/guptarohit/asciigraph"
-	"github.com/tgragnato/orbiter/internal/ml"
-	"github.com/tgragnato/orbiter/internal/portfolio/analytics"
+	"tgragnato.it/orbiter/internal/ml"
+	"tgragnato.it/orbiter/internal/portfolio/analytics"
 )
 
 const (

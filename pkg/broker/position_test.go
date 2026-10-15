@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/pkg/broker"
+	"tgragnato.it/orbiter/pkg/broker"
 )
 
 func TestPerformanceInPercentage(t *testing.T) {

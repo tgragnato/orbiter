@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/tgragnato/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/portfolio"
 )
 
 const (

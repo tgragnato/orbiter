@@ -1,4 +1,4 @@
-module github.com/tgragnato/orbiter
+module tgragnato.it/orbiter
 
 go 1.27
 

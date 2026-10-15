@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/tgragnato/orbiter/internal/configuration"
+	"tgragnato.it/orbiter/internal/configuration"
 )
 
 func TestPostgresRepositoryGet(t *testing.T) {

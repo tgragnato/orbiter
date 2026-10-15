@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tgragnato/orbiter/internal/ml"
-	"github.com/tgragnato/orbiter/internal/portfolio"
-	"github.com/tgragnato/orbiter/internal/portfolio/data"
+	"tgragnato.it/orbiter/internal/ml"
+	"tgragnato.it/orbiter/internal/portfolio"
+	"tgragnato.it/orbiter/internal/portfolio/data"
 )
 
 const (
